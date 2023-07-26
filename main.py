@@ -55,7 +55,8 @@ class VideoClient:
     def download_video(self):
         while True:
             video_link = self.input_video_link()
-            self.downloader.download(video_link)
+            if video_link:
+                self.downloader.download(video_link)
 
 
 if __name__ == '__main__':

@@ -10,6 +10,7 @@ packages = [{include = "youtube_downloader"}]
 python = "^3.10"
 pytube = "^15.0.0"
 pywebio = "^1.8.2"
+instaloader = "^4.10"
 
 
 [build-system]

@@ -5,7 +5,8 @@ from urllib.parse import urlparse
 import instaloader
 from pytube import YouTube
 from pywebio.input import input
-from pywebio.output import put_text
+from pywebio.output import put_text, put_html
+from pywebio.session import set_env
 
 
 class VideoDownloader(metaclass=ABCMeta):
@@ -24,15 +25,13 @@ class VideoDownloader(metaclass=ABCMeta):
 class InstagramDownloader(VideoDownloader):
 
     def download(self, video_link):
-        put_text("Fazendo o download do vídeo do Instagram...").style("color: red; font-size: 50px")
-
+        put_text("Fazendo o download do vídeo do Instagram...").style("color: red; font-size: 20px")
         insta = instaloader.Instaloader(download_videos=True, download_video_thumbnails=False)
-        # Extrai shortcode do link do vídeo
         shortcode = video_link.split("/")[-2]
         post = instaloader.Post.from_shortcode(insta.context, shortcode)
-        # Faz o download do vídeo
         insta.download_post(post, self._path)
-        put_text("Vídeo baixado com sucesso...").style("color: blue; font-size: 50px")
+        file_name = f"{post.owner_username}_{post.date_utc}.mp4"  # exemplo de nome do arquivo
+        put_text(f"Vídeo baixado com sucesso como: {file_name}").style("color: blue; font-size: 20px")
         os.startfile(self._path)
 
 
@@ -43,11 +42,12 @@ class PytubeDownloader(VideoDownloader):
     """
 
     def download(self, video_link):
-        put_text("Fazendo o download do vídeo".title()).style("color: red; font-size: 50px")
-        url = YouTube(video_link)
-        video = url.streams.get_highest_resolution()
+        put_text("Fazendo o download do vídeo do YouTube...").style("color: red; font-size: 20px")
+        yt = YouTube(video_link)
+        video = yt.streams.get_highest_resolution()
         video.download(self._path)
-        put_text("Vídeo baixado com sucesso...".title()).style("color: blue; font-size: 50px")
+        file_name = f"{yt.title}.mp4"  # exemplo de nome do arquivo
+        put_text(f"Vídeo baixado com sucesso como: {file_name}").style("color: blue; font-size: 20px")
         os.startfile(self._path)
 
 
@@ -57,6 +57,7 @@ class VideoClient:
     """
 
     def __init__(self, path):
+        set_env(title="Video Downloader")
         self.path = path
         self.downloader = None  # Inicialize como None; será definido mais tarde
 
@@ -89,6 +90,23 @@ class VideoClient:
                 if self.downloader:  # Certifique-se de que um downloader foi selecionado
                     self.downloader.download(video_link)
 
+    def add_css_styles(self):
+        # Adicionando estilos personalizados
+        styles = """
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                padding: 20px;
+                background-color: #f7f7f7;
+            }
+        </style>
+        """
+        put_html(styles)
+        return self
+
 
 if __name__ == '__main__':
-    VideoClient(path="downloads").download_video()
+    try:
+        VideoClient(path="downloads").add_css_styles().download_video()
+    except:
+        pass

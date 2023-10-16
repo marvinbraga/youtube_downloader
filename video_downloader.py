@@ -43,10 +43,10 @@ class PytubeDownloader(VideoDownloader):
 
     def download(self, video_link):
         put_text("Fazendo o download do vídeo do YouTube...").style("color: red; font-size: 20px")
-        yt = YouTube(video_link)
+        yt = YouTube(video_link, use_oauth=True)
         video = yt.streams.get_highest_resolution()
         video.download(self._path)
-        file_name = f"{yt.title}.mp4"  # exemplo de nome do arquivo
+        file_name = f"{yt.title}.mp4"
         put_text(f"Vídeo baixado com sucesso como: {file_name}").style("color: blue; font-size: 20px")
         os.startfile(self._path)
 
@@ -87,8 +87,11 @@ class VideoClient:
             video_link = self.input_video_link()
             if video_link:
                 self.select_downloader(video_link)
-                if self.downloader:  # Certifique-se de que um downloader foi selecionado
-                    self.downloader.download(video_link)
+                if self.downloader:
+                    try:
+                        self.downloader.download(video_link)
+                    except Exception as e:
+                        put_text(f"Problema: {str(e)}").style("color: red; font-size: 20px")
 
     def add_css_styles(self):
         # Adicionando estilos personalizados
@@ -108,5 +111,5 @@ class VideoClient:
 if __name__ == '__main__':
     try:
         VideoClient(path="downloads").add_css_styles().download_video()
-    except:
-        pass
+    except Exception as e:
+        print(f"Exceção: {e}")

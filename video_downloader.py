@@ -43,7 +43,7 @@ class PytubeDownloader(VideoDownloader):
 
     def download(self, video_link):
         put_text("Fazendo o download do vídeo do YouTube...").style("color: red; font-size: 20px")
-        yt = YouTube(video_link, use_oauth=True)
+        yt = YouTube(video_link, use_oauth=True, allow_oauth_cache=True)
         video = yt.streams.get_highest_resolution()
         video.download(self._path)
         file_name = f"{yt.title}.mp4"

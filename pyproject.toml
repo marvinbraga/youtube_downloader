@@ -13,6 +13,7 @@ pywebio = "^1.8.2"
 instaloader = "^4.10"
 pyinstaller = "^5.13.2"
 yt-dlp = "^2024.11.18"
+browser-cookie3 = "^0.19.1"
 
 
 [tool.poetry.group.dev.dependencies]

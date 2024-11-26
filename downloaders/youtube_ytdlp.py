@@ -1,7 +1,7 @@
 import os
 
 import yt_dlp
-from pywebio.output import put_text, put_processbar, set_processbar, put_html, clear
+from pywebio.output import put_text, put_processbar, set_processbar, use_scope, clear
 
 from downloaders.abstracts import VideoDownloader
 
@@ -17,99 +17,76 @@ class YTDLPDownloader(VideoDownloader):
             'quiet': False,
             'no_warnings': False,
             'merge_output_format': 'mp4',
-            'ffmpeg_location': None,  # Deixe None para usar o FFmpeg do sistema
         }
         self.current_progress = 0
         self.download_completed = False
-        self.progress_div_id = 'download-progress'
-
-    def create_progress_html(self, progress, speed_mb, eta):
-        """Cria HTML para a barra de progresso com informações detalhadas"""
-        return f"""
-        <div style="margin: 10px 0;">
-            <div style="background-color: #f0f0f0; border-radius: 4px; padding: 10px; margin-bottom: 5px;">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                    <span>Progresso: {progress:.1f}%</span>
-                    <span>Velocidade: {speed_mb:.1f} MB/s</span>
-                    <span>Tempo restante: {eta} segundos</span>
-                </div>
-                <div style="background-color: #ddd; height: 20px; border-radius: 4px; overflow: hidden;">
-                    <div style="background-color: #4CAF50; width: {progress}%; height: 100%; transition: width 0.3s ease;">
-                    </div>
-                </div>
-            </div>
-        </div>
-        """
+        self.download_started = False
 
     def progress_hook(self, d):
         if d['status'] == 'downloading':
+            if not self.download_started:
+                self.download_started = True
+                with use_scope('download_progress', clear=True):
+                    put_text("Baixando...").style("color: blue; font-size: 16px")
+                    put_processbar('download')
+
             total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
             downloaded_bytes = d.get('downloaded_bytes', 0)
 
             if total_bytes:
-                progress = (downloaded_bytes / total_bytes) * 100
-                if progress > self.current_progress + 1:  # Atualiza a cada 1%
-                    self.current_progress = progress
-                    speed = d.get('speed', 0)
-                    speed_mb = speed / 1024 / 1024 if speed else 0
+                progress = (downloaded_bytes / total_bytes)
+                speed = d.get('speed', 0)
+                if speed:
+                    speed_mb = speed / 1024 / 1024
                     eta = d.get('eta', 0)
+                    with use_scope('status', clear=True):
+                        put_text(f"Velocidade: {speed_mb:.1f} MB/s - Tempo restante: {eta} segundos")
 
-                    # Limpa o progresso anterior
-                    clear(self.progress_div_id)
-
-                    # Atualiza com o novo progresso
-                    put_html(
-                        self.create_progress_html(progress, speed_mb, eta),
-                        scope=self.progress_div_id
-                    )
+                set_processbar('download', progress)
 
         elif d['status'] == 'finished':
             if not self.download_completed:
-                put_text("Download dos arquivos concluído! Iniciando processamento final...").style(
-                    "color: blue; font-size: 20px")
+                with use_scope('download_progress', clear=True):
+                    put_text("Download dos arquivos concluído! Iniciando processamento final...").style(
+                        "color: blue; font-size: 16px")
+                    put_processbar('processing')
+                    set_processbar('processing', 0.5)
                 self.download_completed = True
 
     def postprocessor_hook(self, d):
         if d['status'] == 'started':
-            put_text("Iniciando mesclagem de áudio e vídeo...").style("color: blue; font-size: 16px")
-            # Cria uma nova barra para o processo de mesclagem
-            put_processbar('merge_progress')
-            set_processbar('merge_progress', 0)
+            with use_scope('processing', clear=True):
+                put_text("Iniciando mesclagem de áudio e vídeo...").style("color: blue; font-size: 16px")
+                put_processbar('merge')
+                set_processbar('merge', 0.3)
         elif d['status'] == 'processing':
-            # Atualiza o progresso da mesclagem (se disponível)
-            set_processbar('merge_progress', 0.5)
+            set_processbar('merge', 0.6)
         elif d['status'] == 'finished':
-            set_processbar('merge_progress', 1)
-            put_text("Mesclagem concluída com sucesso!").style("color: green; font-size: 16px")
+            set_processbar('merge', 1.0)
+            with use_scope('status', clear=True):
+                put_text("Mesclagem concluída com sucesso!").style("color: green; font-size: 16px")
             self.download_completed = False
-
-    def get_video_info(self, url):
-        with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
-            try:
-                info = ydl.extract_info(url, download=False)
-                return info
-            except Exception as e:
-                put_text(f"Erro ao obter informações do vídeo: {str(e)}").style("color: red; font-size: 16px")
-                return None
+            self.download_started = False
 
     def download(self, video_link):
-        put_text("Iniciando download em alta qualidade...").style("color: blue; font-size: 20px")
-
         try:
-            video_info = self.get_video_info(video_link)
-            if not video_info:
-                return False
+            # Limpa escopos anteriores
+            clear('download_progress')
+            clear('processing')
+            clear('status')
 
-            put_text(f"Título: {video_info.get('title')}")
-            put_text(f"Canal: {video_info.get('channel')}")
-
-            # Cria um div para o progresso
-            put_html(f'<div id="{self.progress_div_id}"></div>')
+            put_text("Iniciando download em alta qualidade...").style("color: blue; font-size: 20px")
 
             with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
+                # Obtém informações do vídeo
+                info = ydl.extract_info(video_link, download=False)
+                put_text(f"Título: {info.get('title')}")
+                put_text(f"Canal: {info.get('channel')}")
+
+                # Inicia o download
                 ydl.download([video_link])
 
-            expected_path = os.path.join(self._path, f"{video_info.get('title')}.mp4")
+            expected_path = os.path.join(self._path, f"{info.get('title')}.mp4")
             if os.path.exists(expected_path):
                 put_text("Processo finalizado com sucesso!").style("color: green; font-size: 20px")
                 os.startfile(self._path)
@@ -126,3 +103,4 @@ class YTDLPDownloader(VideoDownloader):
         finally:
             self.current_progress = 0
             self.download_completed = False
+            self.download_started = False

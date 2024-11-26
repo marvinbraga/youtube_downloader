@@ -1,54 +1,13 @@
 import os
-from abc import abstractmethod, ABCMeta
+from datetime import datetime
 from urllib.parse import urlparse
 
-import instaloader
-from pytube import YouTube
 from pywebio.input import input
-from pywebio.output import put_text, put_html
+from pywebio.output import put_html, put_text
 from pywebio.session import set_env
 
-
-class VideoDownloader(metaclass=ABCMeta):
-    """
-    Classe abstrata para baixar vídeos.
-    """
-
-    def __init__(self, path):
-        self._path = os.path.normpath(path)
-
-    @abstractmethod
-    def download(self, video_link):
-        pass
-
-
-class InstagramDownloader(VideoDownloader):
-
-    def download(self, video_link):
-        put_text("Fazendo o download do vídeo do Instagram...").style("color: red; font-size: 20px")
-        insta = instaloader.Instaloader(download_videos=True, download_video_thumbnails=False)
-        shortcode = video_link.split("/")[-2]
-        post = instaloader.Post.from_shortcode(insta.context, shortcode)
-        insta.download_post(post, self._path)
-        file_name = f"{post.owner_username}_{post.date_utc}.mp4"  # exemplo de nome do arquivo
-        put_text(f"Vídeo baixado com sucesso como: {file_name}").style("color: blue; font-size: 20px")
-        os.startfile(self._path)
-
-
-class PytubeDownloader(VideoDownloader):
-    """
-    Implementação concreta da classe VideoDownloader para baixar vídeos usando a
-    biblioteca pytube.
-    """
-
-    def download(self, video_link):
-        put_text("Fazendo o download do vídeo do YouTube...").style("color: red; font-size: 20px")
-        yt = YouTube(video_link, use_oauth=True, allow_oauth_cache=True)
-        video = yt.streams.get_highest_resolution()
-        video.download(self._path)
-        file_name = f"{yt.title}.mp4"
-        put_text(f"Vídeo baixado com sucesso como: {file_name}").style("color: blue; font-size: 20px")
-        os.startfile(self._path)
+from downloaders.instagram import InstagramDownloader
+from downloaders.youtube_ytdlp import YTDLPDownloader
 
 
 class VideoClient:
@@ -58,8 +17,8 @@ class VideoClient:
 
     def __init__(self, path):
         set_env(title="Video Downloader")
-        self.path = path
-        self.downloader = None  # Inicialize como None; será definido mais tarde
+        self.path = os.path.join(path, datetime.now().strftime('%Y-%m-%d'))
+        self.downloader = None
 
     def input_video_link(self):
         video_link = input("Informe o link do vídeo: ")
@@ -75,8 +34,8 @@ class VideoClient:
         parsed_url = urlparse(video_link)
         domain = parsed_url.netloc
 
-        if "youtube.com" in domain:
-            self.downloader = PytubeDownloader(self.path)
+        if "youtube.com" in domain or "youtu.be" in domain:
+            self.downloader = YTDLPDownloader(self.path)
         elif "instagram.com" in domain:
             self.downloader = InstagramDownloader(self.path)
         else:
@@ -91,16 +50,35 @@ class VideoClient:
                     try:
                         self.downloader.download(video_link)
                     except Exception as e:
-                        put_text(f"Problema: {str(e)}").style("color: red; font-size: 20px")
+                        put_text(f"Problema: {e}").style("color: red; font-size: 20px")
 
     def add_css_styles(self):
-        # Adicionando estilos personalizados
         styles = """
         <style>
             body {
                 font-family: Arial, sans-serif;
                 padding: 20px;
                 background-color: #f7f7f7;
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                margin: 15px 0;
+            }
+            th, td {
+                padding: 8px;
+                text-align: left;
+                border: 1px solid #ddd;
+            }
+            th {
+                background-color: #4CAF50;
+                color: white;
+            }
+            tr:nth-child(even) {
+                background-color: #f2f2f2;
+            }
+            .progress-bar {
+                margin: 20px 0;
             }
         </style>
         """

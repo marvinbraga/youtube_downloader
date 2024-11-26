@@ -12,7 +12,11 @@ pytube = "^15.0.0"
 pywebio = "^1.8.2"
 instaloader = "^4.10"
 pyinstaller = "^5.13.2"
+yt-dlp = "^2024.11.18"
 
+
+[tool.poetry.group.dev.dependencies]
+jupyter = "^1.1.1"
 
 [build-system]
 requires = ["poetry-core"]

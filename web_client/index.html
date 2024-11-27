@@ -13,6 +13,13 @@
             padding: 20px;
         }
 
+        .controls {
+            margin: 20px 0;
+            padding: 10px;
+            background-color: #f8f8f8;
+            border-radius: 5px;
+        }
+
         .video-list {
             margin: 20px 0;
             padding: 10px;
@@ -28,7 +35,7 @@
             border-radius: 3px;
         }
 
-        .video-path {
+        .video-info {
             color: #666;
             font-size: 0.9em;
             margin-top: 5px;
@@ -59,6 +66,21 @@
             display: none;
         }
 
+        .sort-button {
+            padding: 8px 16px;
+            margin: 0 5px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            background-color: #fff;
+            cursor: pointer;
+        }
+
+        .sort-button.active {
+            background-color: #007bff;
+            color: white;
+            border-color: #0056b3;
+        }
+
         #videoPlayer {
             -webkit-user-select: none;
             -moz-user-select: none;
@@ -72,6 +94,13 @@
 
 <div class="error" id="errorMessage"></div>
 
+<div class="controls">
+    <h3>Ordenar por:</h3>
+    <button class="sort-button active" data-sort="none">Padrão</button>
+    <button class="sort-button" data-sort="title">Título</button>
+    <button class="sort-button" data-sort="date">Data</button>
+</div>
+
 <div class="video-list" id="videoList">
     <h2>Vídeos Disponíveis</h2>
     <div id="videos"></div>
@@ -84,20 +113,33 @@
 <script>
   $(document).ready(function () {
     const API_BASE_URL = 'http://localhost:8000';
+    let currentSort = 'none';
 
     $('#videoPlayer').on('contextmenu', function (e) {
       e.preventDefault();
       return false;
     });
 
+    function formatDate(dateString) {
+      const date = new Date(dateString);
+      return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+    }
+
+    function formatFileSize(bytes) {
+      const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+      if (bytes === 0) return '0 Byte';
+      const i = parseInt(Math.floor(Math.log(bytes) / Math.log(1024)));
+      return Math.round(bytes / Math.pow(1024, i), 2) + ' ' + sizes[i];
+    }
+
     function showError(message) {
       $('#errorMessage').text(message).show();
       setTimeout(() => $('#errorMessage').hide(), 5000);
     }
 
-    function loadVideoList() {
+    function loadVideoList(sortBy = 'none') {
       $.ajax({
-        url: `${API_BASE_URL}/videos`,
+        url: `${API_BASE_URL}/videos?sort_by=${sortBy}`,
         method: 'GET',
         success: function (response) {
           const videosDiv = $('#videos');
@@ -110,8 +152,12 @@
                 .append(
                   $('<div>').text(video.name),
                   $('<div>')
-                    .addClass('video-path')
-                    .text(video.path)
+                    .addClass('video-info')
+                    .append(
+                      $('<div>').text(`Caminho: ${video.path}`),
+                      $('<div>').text(`Modificado em: ${formatDate(video.modified_date)}`),
+                      $('<div>').text(`Tamanho: ${formatFileSize(video.size)}`)
+                    )
                 )
                 .click(() => playVideo(video.id));
               videosDiv.append(videoElement);
@@ -135,6 +181,15 @@
       });
     }
 
+    // Manipuladores dos botões de ordenação
+    $('.sort-button').click(function () {
+      const sortBy = $(this).data('sort');
+      $('.sort-button').removeClass('active');
+      $(this).addClass('active');
+      loadVideoList(sortBy);
+    });
+
+    // Carrega a lista inicial
     loadVideoList();
   });
 </script>

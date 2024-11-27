@@ -183,16 +183,50 @@
 
 <script>
   $(document).ready(function () {
+    // Configurações básicas da aplicação
     const API_BASE_URL = 'http://localhost:8000';
     let currentVideos = [];
     let currentSort = 'none';
     let currentVideoId = null;
 
-    $('#videoPlayer').on('contextmenu', function (e) {
-      e.preventDefault();
-      return false;
-    });
+    // Novo: Gerenciamento de autenticação
+    let authToken = null;
+    const CLIENT_ID = 'your_client_id';
+    const CLIENT_SECRET = 'your_client_secret';
 
+    // Sistema de autenticação
+    async function authenticate() {
+      try {
+        const response = await $.ajax({
+          url: `${API_BASE_URL}/auth/token`,
+          method: 'POST',
+          contentType: 'application/json',
+          data: JSON.stringify({
+            client_id: CLIENT_ID,
+            client_secret: CLIENT_SECRET
+          })
+        });
+
+        authToken = response.access_token;
+
+        // Agenda renovação do token 5 minutos antes de expirar
+        setTimeout(authenticate, 25 * 60 * 1000);
+
+        // Carrega a lista inicial após autenticação bem-sucedida
+        loadVideoList();
+      } catch (error) {
+        showError('Erro de autenticação. Por favor, recarregue a página.');
+      }
+    }
+
+    // Função auxiliar para obter cabeçalhos de autenticação
+    function getAuthHeaders() {
+      return {
+        'Authorization': `Bearer ${authToken}`
+      };
+    }
+
+    // Funções de formatação existentes
     function formatDate(dateString) {
       const date = new Date(dateString);
       return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
@@ -216,6 +250,7 @@
       setTimeout(() => $('#errorMessage').hide(), 5000);
     }
 
+    // Funções de renderização atualizadas com autenticação
     function renderVideoList(videos, searchTerm = '') {
       const videosDiv = $('#videos');
       videosDiv.empty();
@@ -246,6 +281,7 @@
       });
     }
 
+    // Função de filtragem atualizada
     function filterVideos(searchTerm) {
       if (!searchTerm) {
         renderVideoList(currentVideos);
@@ -261,33 +297,83 @@
       renderVideoList(filteredVideos, searchTerm);
     }
 
+    // Função de carregamento atualizada com autenticação
     function loadVideoList(sortBy = 'none') {
+      if (!authToken) {
+        authenticate();
+        return;
+      }
+
       $.ajax({
         url: `${API_BASE_URL}/videos?sort_by=${sortBy}`,
         method: 'GET',
+        headers: getAuthHeaders(),
         success: function (response) {
           currentVideos = response.videos || [];
           const searchTerm = $('#searchInput').val();
           filterVideos(searchTerm);
         },
         error: function (xhr, status, error) {
-          showError(`Erro ao carregar vídeos: ${error}`);
+          if (xhr.status === 401) {
+            authenticate(); // Reautenticar se o token expirou
+          } else {
+            showError(`Erro ao carregar vídeos: ${error}`);
+          }
         }
       });
     }
 
+    // Função de reprodução atualizada com autenticação
     function playVideo(video) {
+      if (!authToken) {
+        showError('Erro de autenticação. Tentando reconectar...');
+        authenticate();
+        return;
+      }
+
       const videoPlayer = $('#videoPlayer')[0];
-      videoPlayer.src = `${API_BASE_URL}/video/${video.id}`;
-      videoPlayer.load();
-      videoPlayer.play().catch(error => {
-        showError(`Erro ao reproduzir vídeo: ${error.message}`);
-      });
+
+      // Cria uma URL segura com o token
+      const videoUrl = `${API_BASE_URL}/video/${video.id}`;
+
+      // Usa fetch API para streaming seguro
+      fetch(videoUrl, {
+        headers: getAuthHeaders()
+      })
+        .then(response => {
+          if (!response.ok) {
+            throw new Error('Erro ao carregar vídeo');
+          }
+          return response.blob();
+        })
+        .then(blob => {
+          const url = URL.createObjectURL(blob);
+          videoPlayer.src = url;
+
+          // Limpa a URL do objeto quando o vídeo terminar
+          videoPlayer.onended = () => URL.revokeObjectURL(url);
+
+          videoPlayer.play().catch(error => {
+            showError(`Erro ao reproduzir vídeo: ${error.message}`);
+          });
+        })
+        .catch(error => {
+          showError(`Erro ao carregar vídeo: ${error.message}`);
+          if (error.message.includes('401')) {
+            authenticate();
+          }
+        });
 
       currentVideoId = video.id;
       $('#currentVideoTitle').text(video.name);
       renderVideoList(currentVideos, $('#searchInput').val());
     }
+
+    // Event listeners existentes
+    $('#videoPlayer').on('contextmenu', function (e) {
+      e.preventDefault();
+      return false;
+    });
 
     let searchTimeout;
     $('#searchInput').on('input', function () {
@@ -306,7 +392,8 @@
       loadVideoList(sortBy);
     });
 
-    loadVideoList();
+    // Inicia o processo de autenticação ao carregar a página
+    authenticate();
   });
 </script>
 </body>

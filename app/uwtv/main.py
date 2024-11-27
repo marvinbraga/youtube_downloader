@@ -1,9 +1,9 @@
+# main.py
 import hashlib
 import json
 from datetime import datetime, timedelta
-from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Union
 
 # Importante: Use PyJWT, não o módulo jwt
 import jwt as PyJWT
@@ -12,51 +12,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from loguru import logger
-from pydantic import BaseModel, HttpUrl
 
-from uwtv.managers import VideoStreamManager
-
-
-# Modelos para autenticação
-class TokenData(BaseModel):
-    access_token: str
-    token_type: str
-
-
-class ClientAuth(BaseModel):
-    client_id: str
-    client_secret: str
-
-
-# Modelo para representar um vídeo
-class VideoSource(str, Enum):
-    LOCAL = "local"
-    YOUTUBE = "youtube"
-
-
-class VideoInfo(BaseModel):
-    id: str
-    name: str
-    path: str
-    type: str
-    created_date: str
-    modified_date: str
-    size: int
-    source: VideoSource
-    youtube_url: Optional[HttpUrl] = None
-
+from app.models.video import TokenData, ClientAuth, VideoSource, SortOption
+from app.uwtv.managers import VideoStreamManager
 
 # Configurações de segurança
 # Em produção, mova estas configurações para um arquivo .env
 SECRET_KEY = "seu_secret_key_muito_secreto"  # Altere para uma chave segura em produção
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
-
-
-class SortOption(str, Enum):
-    TITLE = "title"
-    DATE = "date"
-    NONE = "none"
 
 
 app = FastAPI(title="Video Streaming API")
@@ -69,9 +33,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-VIDEO_DIR = Path(__file__).parent.parent / "downloads"
+VIDEO_DIR = Path(__file__).parent.parent.parent / "downloads"
 VIDEO_DIR.mkdir(exist_ok=True)
-JSON_CONFIG_PATH = Path(__file__).parent.parent / "data" / "videos.json"
+JSON_CONFIG_PATH = Path(__file__).parent.parent.parent / "data" / "videos.json"
 
 # Sistema simplificado de autenticação (use um banco de dados em produção)
 AUTHORIZED_CLIENTS = {

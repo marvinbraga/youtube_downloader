@@ -15,9 +15,22 @@
 
         .controls {
             margin: 20px 0;
-            padding: 10px;
+            padding: 15px;
             background-color: #f8f8f8;
             border-radius: 5px;
+        }
+
+        .search-container {
+            margin: 15px 0;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+            box-sizing: border-box;
         }
 
         .video-list {
@@ -33,6 +46,7 @@
             margin: 5px 0;
             background-color: #f5f5f5;
             border-radius: 3px;
+            transition: background-color 0.2s;
         }
 
         .video-info {
@@ -43,6 +57,12 @@
 
         .video-item:hover {
             background-color: #e0e0e0;
+        }
+
+        .highlight {
+            background-color: #fff3cd;
+            padding: 2px;
+            border-radius: 2px;
         }
 
         #videoPlayer {
@@ -73,12 +93,20 @@
             border-radius: 4px;
             background-color: #fff;
             cursor: pointer;
+            transition: all 0.2s;
         }
 
         .sort-button.active {
             background-color: #007bff;
             color: white;
             border-color: #0056b3;
+        }
+
+        .no-results {
+            padding: 20px;
+            text-align: center;
+            color: #666;
+            font-style: italic;
         }
 
         #videoPlayer {
@@ -95,6 +123,14 @@
 <div class="error" id="errorMessage"></div>
 
 <div class="controls">
+    <div class="search-container">
+        <input type="text"
+               class="search-input"
+               id="searchInput"
+               placeholder="Digite para buscar vídeos..."
+               autocomplete="off">
+    </div>
+
     <h3>Ordenar por:</h3>
     <button class="sort-button active" data-sort="none">Padrão</button>
     <button class="sort-button" data-sort="title">Título</button>
@@ -113,6 +149,7 @@
 <script>
   $(document).ready(function () {
     const API_BASE_URL = 'http://localhost:8000';
+    let currentVideos = []; // Armazena a lista completa de vídeos
     let currentSort = 'none';
 
     $('#videoPlayer').on('contextmenu', function (e) {
@@ -132,9 +169,59 @@
       return Math.round(bytes / Math.pow(1024, i), 2) + ' ' + sizes[i];
     }
 
+    function highlightText(text, searchTerm) {
+      if (!searchTerm) return text;
+      const regex = new RegExp(`(${searchTerm})`, 'gi');
+      return text.replace(regex, '<span class="highlight">$1</span>');
+    }
+
     function showError(message) {
       $('#errorMessage').text(message).show();
       setTimeout(() => $('#errorMessage').hide(), 5000);
+    }
+
+    function renderVideoList(videos, searchTerm = '') {
+      const videosDiv = $('#videos');
+      videosDiv.empty();
+
+      if (videos.length === 0) {
+        videosDiv.append(
+          '<div class="no-results">Nenhum vídeo encontrado com esse termo de busca</div>'
+        );
+        return;
+      }
+
+      videos.forEach(video => {
+        const videoElement = $('<div>')
+          .addClass('video-item')
+          .append(
+            $('<div>').html(highlightText(video.name, searchTerm)),
+            $('<div>')
+              .addClass('video-info')
+              .append(
+                $('<div>').text(`Caminho: ${video.path}`),
+                $('<div>').text(`Modificado em: ${formatDate(video.modified_date)}`),
+                $('<div>').text(`Tamanho: ${formatFileSize(video.size)}`)
+              )
+          )
+          .click(() => playVideo(video.id));
+        videosDiv.append(videoElement);
+      });
+    }
+
+    function filterVideos(searchTerm) {
+      if (!searchTerm) {
+        renderVideoList(currentVideos);
+        return;
+      }
+
+      const searchTermLower = searchTerm.toLowerCase();
+      const filteredVideos = currentVideos.filter(video =>
+        video.name.toLowerCase().includes(searchTermLower) ||
+        video.path.toLowerCase().includes(searchTermLower)
+      );
+
+      renderVideoList(filteredVideos, searchTerm);
     }
 
     function loadVideoList(sortBy = 'none') {
@@ -142,29 +229,9 @@
         url: `${API_BASE_URL}/videos?sort_by=${sortBy}`,
         method: 'GET',
         success: function (response) {
-          const videosDiv = $('#videos');
-          videosDiv.empty();
-
-          if (response.videos && response.videos.length > 0) {
-            response.videos.forEach(video => {
-              const videoElement = $('<div>')
-                .addClass('video-item')
-                .append(
-                  $('<div>').text(video.name),
-                  $('<div>')
-                    .addClass('video-info')
-                    .append(
-                      $('<div>').text(`Caminho: ${video.path}`),
-                      $('<div>').text(`Modificado em: ${formatDate(video.modified_date)}`),
-                      $('<div>').text(`Tamanho: ${formatFileSize(video.size)}`)
-                    )
-                )
-                .click(() => playVideo(video.id));
-              videosDiv.append(videoElement);
-            });
-          } else {
-            videosDiv.append('<p>Nenhum vídeo encontrado</p>');
-          }
+          currentVideos = response.videos || [];
+          const searchTerm = $('#searchInput').val();
+          filterVideos(searchTerm);
         },
         error: function (xhr, status, error) {
           showError(`Erro ao carregar vídeos: ${error}`);
@@ -180,6 +247,17 @@
         showError(`Erro ao reproduzir vídeo: ${error.message}`);
       });
     }
+
+    // Manipulador do campo de busca com debounce
+    let searchTimeout;
+    $('#searchInput').on('input', function () {
+      clearTimeout(searchTimeout);
+      const searchTerm = $(this).val();
+
+      searchTimeout = setTimeout(() => {
+        filterVideos(searchTerm);
+      }, 300); // Aguarda 300ms após o último caractere digitado
+    });
 
     // Manipuladores dos botões de ordenação
     $('.sort-button').click(function () {

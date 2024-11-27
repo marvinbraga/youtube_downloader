@@ -13,12 +13,71 @@
             padding: 20px;
         }
 
+        :root {
+            --primary-color: #3498db;
+            --secondary-color: #007bff;
+            --error-color: #dc3545;
+            --border-color: #ddd;
+            --background-light: #f8f8f8;
+            --text-dark: #666;
+        }
+
+        /* Adicionar media query para responsividade */
+        @media (max-width: 768px) {
+            .video-container {
+                margin: -10px -10px 10px -10px;
+            }
+
+            .sort-button {
+                margin: 5px 2px;
+                padding: 6px 12px;
+            }
+        }
+
         /* Estilo para o container do vídeo */
         .video-container {
             background-color: #000;
             padding: 20px 0;
             margin: -20px -20px 20px -20px;
             text-align: center;
+            position: relative;
+        }
+
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        .loading-text {
+            color: white;
+            margin-top: 10px;
+            font-size: 16px;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+            100% {
+                transform: rotate(360deg);
+            }
         }
 
         #videoPlayer {
@@ -154,6 +213,12 @@
 <div class="error" id="errorMessage"></div>
 
 <div class="video-container">
+    <div class="loading-overlay" id="loadingOverlay">
+        <div style="text-align: center;">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Carregando vídeo...</div>
+        </div>
+    </div>
     <video id="videoPlayer" controls controlsList="nodownload">
         <source src="" type="video/mp4">
         Seu navegador não suporta a tag de vídeo.
@@ -193,10 +258,44 @@
     let authToken = null;
     const CLIENT_ID = 'your_client_id';
     const CLIENT_SECRET = 'your_client_secret';
+    const VIDEO_CACHE_KEY = 'video_list_cache';
+    const CACHE_DURATION = 5 * 60 * 1000; // 5 minutos
+
+    function saveToCache(videos, sortBy) {
+      const cache = {
+        timestamp: Date.now(),
+        data: videos,
+        sortBy: sortBy  // Salvamos também o tipo de ordenação
+      };
+      localStorage.setItem(VIDEO_CACHE_KEY, JSON.stringify(cache));
+    }
+
+    function getFromCache(requestedSortBy) {
+      const cache = localStorage.getItem(VIDEO_CACHE_KEY);
+      if (!cache) return null;
+
+      const {timestamp, data, sortBy} = JSON.parse(cache);
+
+      if (Date.now() - timestamp > CACHE_DURATION || sortBy !== requestedSortBy) {
+        localStorage.removeItem(VIDEO_CACHE_KEY);
+        return null;
+      }
+
+      return data;  // Este return deveria estar aqui dentro
+    }
+
+    function toggleLoading(show) {
+      if (show) {
+        $('#loadingOverlay').css('display', 'flex');
+      } else {
+        $('#loadingOverlay').hide();
+      }
+    }
 
     // Sistema de autenticação
     async function authenticate() {
       try {
+        console.log('Tentando autenticar...');
         const response = await $.ajax({
           url: `${API_BASE_URL}/auth/token`,
           method: 'POST',
@@ -206,11 +305,13 @@
             client_secret: CLIENT_SECRET
           })
         });
+        console.log('Autenticação bem-sucedida:', response);
 
         authToken = response.access_token;
-        setTimeout(authenticate, 25 * 60 * 1000); // Renova o token a cada 25 minutos
+        setTimeout(authenticate, 25 * 60 * 1000);
         loadVideoList();
       } catch (error) {
+        console.error('Erro de autenticação:', error);
         showError('Erro de autenticação. Por favor, recarregue a página.');
       }
     }
@@ -299,14 +400,22 @@
         return;
       }
 
+      // Tentamos obter do cache com a ordenação específica
+      const cachedVideos = getFromCache(sortBy);
+      if (cachedVideos) {
+        currentVideos = cachedVideos;
+        filterVideos($('#searchInput').val());
+        return;
+      }
+
       $.ajax({
         url: `${API_BASE_URL}/videos?sort_by=${sortBy}`,
         method: 'GET',
         headers: getAuthHeaders(),
         success: function (response) {
           currentVideos = response.videos || [];
-          const searchTerm = $('#searchInput').val();
-          filterVideos(searchTerm);
+          saveToCache(currentVideos, sortBy);  // Salvamos com a ordenação atual
+          filterVideos($('#searchInput').val());
         },
         error: function (xhr, status, error) {
           if (xhr.status === 401) {
@@ -325,20 +434,43 @@
       }
 
       try {
+        toggleLoading(true); // Mostra o loading
+
         const response = await fetch(`${API_BASE_URL}/video/${video.id}`, {
           headers: getAuthHeaders()
         });
 
-        if (!response.ok) {
-          throw new Error(`Erro na requisição: ${response.status}`);
+        const reader = response.body.getReader();
+        let receivedLength = 0;
+        const chunks = [];
+
+        while (true) {
+          const {done, value} = await reader.read();
+
+          if (done) break;
+
+          chunks.push(value);
+          receivedLength += value.length;
+          $('.loading-text').text(`Carregando vídeo...`);
         }
 
-        const videoPlayer = $('#videoPlayer')[0];
-        const videoBlob = await response.blob();
+        const videoBlob = new Blob(chunks);
         const url = URL.createObjectURL(videoBlob);
+        const videoPlayer = $('#videoPlayer')[0];
 
         videoPlayer.src = url;
         videoPlayer.onended = () => URL.revokeObjectURL(url);
+
+        // Eventos para controlar o loading
+        videoPlayer.onloadeddata = () => {
+          toggleLoading(false);
+        };
+
+        videoPlayer.onerror = () => {
+          toggleLoading(false);
+          showError('Erro ao carregar o vídeo');
+        };
+
         await videoPlayer.play();
 
         currentVideoId = video.id;
@@ -347,6 +479,7 @@
 
       } catch (error) {
         console.error('Erro:', error);
+        toggleLoading(false);
         showError(`Erro ao reproduzir vídeo: ${error.message}`);
         if (error.message.includes('401')) authenticate();
       }

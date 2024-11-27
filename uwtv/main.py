@@ -1,9 +1,9 @@
-# main.py
 import hashlib
+import json
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional, Union
 
 # Importante: Use PyJWT, não o módulo jwt
 import jwt as PyJWT
@@ -11,8 +11,10 @@ from fastapi import FastAPI, HTTPException, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel
 from loguru import logger
+from pydantic import BaseModel, HttpUrl
+
+from uwtv.managers import VideoStreamManager
 
 
 # Modelos para autenticação
@@ -24,6 +26,24 @@ class TokenData(BaseModel):
 class ClientAuth(BaseModel):
     client_id: str
     client_secret: str
+
+
+# Modelo para representar um vídeo
+class VideoSource(str, Enum):
+    LOCAL = "local"
+    YOUTUBE = "youtube"
+
+
+class VideoInfo(BaseModel):
+    id: str
+    name: str
+    path: str
+    type: str
+    created_date: str
+    modified_date: str
+    size: int
+    source: VideoSource
+    youtube_url: Optional[HttpUrl] = None
 
 
 # Configurações de segurança
@@ -51,6 +71,7 @@ app.add_middleware(
 
 VIDEO_DIR = Path(__file__).parent.parent / "downloads"
 VIDEO_DIR.mkdir(exist_ok=True)
+JSON_CONFIG_PATH = Path(__file__).parent.parent / "data" / "videos.json"
 
 # Sistema simplificado de autenticação (use um banco de dados em produção)
 AUTHORIZED_CLIENTS = {
@@ -60,8 +81,10 @@ AUTHORIZED_CLIENTS = {
     }
 }
 
-video_mapping: Dict[str, Path] = {}
+video_mapping: Dict[str, Union[Path, str]] = {}
 security = HTTPBearer()
+# Instância global do gerenciador de streaming
+stream_manager = VideoStreamManager()
 
 
 def create_access_token(data: dict, expires_delta: timedelta = None) -> str:
@@ -73,7 +96,6 @@ def create_access_token(data: dict, expires_delta: timedelta = None) -> str:
         expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
 
     to_encode.update({"exp": expire})
-    # PyJWT.encode retorna bytes em algumas versões, então convertemos para str
     encoded_jwt = PyJWT.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
     logger.debug("encoded_jwt: {}".format(encoded_jwt))
@@ -121,14 +143,14 @@ def get_clean_filename(file_path: Path) -> str:
     return name
 
 
-def generate_video_id(file_path: Path) -> str:
-    """Gera um ID único para um vídeo"""
-    path_str = str(file_path.absolute())
-    return hashlib.md5(path_str.encode()).hexdigest()[:8]
+def generate_video_id(identifier: Union[Path, str]) -> str:
+    """Gera um ID único para um vídeo baseado no caminho ou URL"""
+    identifier_str = str(identifier)
+    return hashlib.md5(identifier_str.encode()).hexdigest()[:8]
 
 
 def get_video_info(video_path: Path) -> dict:
-    """Coleta informações sobre um arquivo de vídeo"""
+    """Coleta informações sobre um arquivo de vídeo local"""
     stats = video_path.stat()
     return {
         'id': generate_video_id(video_path),
@@ -137,23 +159,49 @@ def get_video_info(video_path: Path) -> dict:
         'type': video_path.suffix.lower()[1:],
         'created_date': datetime.fromtimestamp(stats.st_ctime).isoformat(),
         'modified_date': datetime.fromtimestamp(stats.st_mtime).isoformat(),
-        'size': stats.st_size
+        'size': stats.st_size,
+        'source': VideoSource.LOCAL,
+        'youtube_url': None
     }
 
 
+def load_json_videos() -> List[Dict]:
+    """Carrega a configuração de vídeos do arquivo JSON"""
+    try:
+        if JSON_CONFIG_PATH.exists():
+            with open(JSON_CONFIG_PATH, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            # Validação básica dos dados
+            for video in data["videos"]:
+                if 'youtube_url' in video:
+                    video['source'] = VideoSource.YOUTUBE
+                    video['id'] = generate_video_id(video['youtube_url'])
+                    video_mapping[video['id']] = video['youtube_url']
+            return data["videos"]
+        return []
+    except Exception as e:
+        logger.error(f"Erro ao carregar arquivo JSON: {str(e)}")
+        return []
+
+
 def scan_video_directory(sort_by: SortOption = SortOption.NONE) -> List[Dict]:
-    """Escaneia o diretório de vídeos recursivamente"""
+    """Escaneia o diretório de vídeos e combina com os vídeos do JSON"""
     video_mapping.clear()
     video_list = []
 
+    # Carrega vídeos locais
     video_extensions = {'.mp4', '.webm'}
-
     for video_path in VIDEO_DIR.rglob('*'):
         if video_path.is_file() and video_path.suffix.lower() in video_extensions:
             video_info = get_video_info(video_path)
             video_mapping[video_info['id']] = video_path
             video_list.append(video_info)
 
+    # Carrega vídeos do JSON
+    json_videos = load_json_videos()
+    video_list.extend(json_videos)
+
+    # Aplica ordenação
     if sort_by == SortOption.TITLE:
         video_list.sort(key=lambda x: x['name'].lower())
     elif sort_by == SortOption.DATE:
@@ -206,7 +254,7 @@ async def list_videos(
         videos = scan_video_directory(sort_by)
         return {"videos": videos}
     except Exception as e:
-        logger.error(f"Erro ao ler o arquivo: {str(e)}")
+        logger.error(f"Erro ao listar vídeos: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erro ao listar vídeos: {str(e)}")
 
 
@@ -220,7 +268,18 @@ async def stream_video(
         logger.error("Vídeo não encontrado.")
         raise HTTPException(status_code=404, detail="Vídeo não encontrado")
 
-    video_path = video_mapping[video_id]
+    video_source = video_mapping[video_id]
+
+    # Se for uma URL do YouTube
+    if isinstance(video_source, str) and video_source.startswith('http'):
+        logger.debug(f"Iniciando streaming do YouTube: {video_source}")
+        return StreamingResponse(
+            stream_manager.stream_youtube_video(video_source),
+            media_type='video/mp4'  # YouTube geralmente fornece MP4
+        )
+
+    # Para vídeos locais, mantém o código original
+    video_path = video_source
     content_types = {
         '.mp4': 'video/mp4',
         '.webm': 'video/webm'
@@ -231,7 +290,6 @@ async def stream_video(
         logger.error("Formato de vídeo não suportado.")
         raise HTTPException(status_code=400, detail="Formato de vídeo não suportado")
 
-    logger.debug(f"Recuperando conteúdo do vídeo. Token: {token_data}")
     return StreamingResponse(
         generate_video_stream(video_path),
         media_type=content_type

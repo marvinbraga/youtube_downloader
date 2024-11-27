@@ -20,6 +20,7 @@ python-multipart = "^0.0.17"
 pyjwt = "^2.10.0"
 python-jose = {extras = ["cryptography"], version = "^3.3.0"}
 loguru = "^0.7.2"
+aiohttp = "^3.11.8"
 
 
 [tool.poetry.group.dev.dependencies]

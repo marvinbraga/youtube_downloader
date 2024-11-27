@@ -21,6 +21,7 @@ pyjwt = "^2.10.0"
 python-jose = {extras = ["cryptography"], version = "^3.3.0"}
 loguru = "^0.7.2"
 aiohttp = "^3.11.8"
+python-dotenv = "^1.0.1"
 
 
 [tool.poetry.group.dev.dependencies]

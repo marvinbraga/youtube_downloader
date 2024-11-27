@@ -28,6 +28,12 @@
             border-radius: 3px;
         }
 
+        .video-path {
+            color: #666;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+
         .video-item:hover {
             background-color: #e0e0e0;
         }
@@ -37,7 +43,6 @@
             margin-top: 20px;
         }
 
-        /* Desabilita o menu de contexto no player de vídeo */
         #videoPlayer::-webkit-media-controls-enclosure {
             overflow: hidden;
         }
@@ -54,7 +59,6 @@
             display: none;
         }
 
-        /* Impede a seleção do vídeo */
         #videoPlayer {
             -webkit-user-select: none;
             -moz-user-select: none;
@@ -81,7 +85,6 @@
   $(document).ready(function () {
     const API_BASE_URL = 'http://localhost:8000';
 
-    // Previne o menu de contexto no vídeo
     $('#videoPlayer').on('contextmenu', function (e) {
       e.preventDefault();
       return false;
@@ -104,8 +107,13 @@
             response.videos.forEach(video => {
               const videoElement = $('<div>')
                 .addClass('video-item')
-                .text(video)
-                .click(() => playVideo(video));
+                .append(
+                  $('<div>').text(video.name),
+                  $('<div>')
+                    .addClass('video-path')
+                    .text(video.path)
+                )
+                .click(() => playVideo(video.id));
               videosDiv.append(videoElement);
             });
           } else {
@@ -118,9 +126,9 @@
       });
     }
 
-    function playVideo(videoName) {
+    function playVideo(videoId) {
       const videoPlayer = $('#videoPlayer')[0];
-      videoPlayer.src = `${API_BASE_URL}/video/${videoName}`;
+      videoPlayer.src = `${API_BASE_URL}/video/${videoId}`;
       videoPlayer.load();
       videoPlayer.play().catch(error => {
         showError(`Erro ao reproduzir vídeo: ${error.message}`);

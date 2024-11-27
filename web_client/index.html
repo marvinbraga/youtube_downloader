@@ -37,12 +37,29 @@
             margin-top: 20px;
         }
 
+        /* Desabilita o menu de contexto no player de vídeo */
+        #videoPlayer::-webkit-media-controls-enclosure {
+            overflow: hidden;
+        }
+
+        #videoPlayer::-webkit-media-controls-panel {
+            width: calc(100% + 30px);
+        }
+
         .error {
             color: red;
             padding: 10px;
             background-color: #ffe6e6;
             border-radius: 3px;
             display: none;
+        }
+
+        /* Impede a seleção do vídeo */
+        #videoPlayer {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
         }
     </style>
 </head>
@@ -56,22 +73,25 @@
     <div id="videos"></div>
 </div>
 
-<video id="videoPlayer" controls>
+<video id="videoPlayer" controls controlsList="nodownload">
     Seu navegador não suporta a tag de vídeo.
 </video>
 
 <script>
   $(document).ready(function () {
-    // Configuração da URL base da API
     const API_BASE_URL = 'http://localhost:8000';
 
-    // Função para mostrar mensagens de erro
+    // Previne o menu de contexto no vídeo
+    $('#videoPlayer').on('contextmenu', function (e) {
+      e.preventDefault();
+      return false;
+    });
+
     function showError(message) {
       $('#errorMessage').text(message).show();
       setTimeout(() => $('#errorMessage').hide(), 5000);
     }
 
-    // Função para carregar a lista de vídeos
     function loadVideoList() {
       $.ajax({
         url: `${API_BASE_URL}/videos`,
@@ -98,7 +118,6 @@
       });
     }
 
-    // Função para reproduzir um vídeo
     function playVideo(videoName) {
       const videoPlayer = $('#videoPlayer')[0];
       videoPlayer.src = `${API_BASE_URL}/video/${videoName}`;
@@ -108,7 +127,6 @@
       });
     }
 
-    // Carrega a lista de vídeos quando a página é aberta
     loadVideoList();
   });
 </script>

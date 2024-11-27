@@ -13,11 +13,36 @@
             padding: 20px;
         }
 
+        /* Estilo para o container do vídeo */
+        .video-container {
+            background-color: #000;
+            padding: 20px 0;
+            margin: -20px -20px 20px -20px;
+            text-align: center;
+        }
+
+        #videoPlayer {
+            max-width: 800px;
+            width: 100%;
+            aspect-ratio: 16/9;
+            background-color: #000;
+            margin: 0 auto;
+        }
+
+        .video-title {
+            color: #fff;
+            padding: 10px;
+            margin: 0;
+            font-size: 1.2em;
+        }
+
+        /* Estilos para os controles e busca */
         .controls {
             margin: 20px 0;
             padding: 15px;
             background-color: #f8f8f8;
             border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
 
         .search-container {
@@ -38,6 +63,8 @@
             padding: 10px;
             border: 1px solid #ccc;
             border-radius: 5px;
+            max-height: 500px;
+            overflow-y: auto;
         }
 
         .video-item {
@@ -46,7 +73,17 @@
             margin: 5px 0;
             background-color: #f5f5f5;
             border-radius: 3px;
-            transition: background-color 0.2s;
+            transition: all 0.2s ease;
+        }
+
+        .video-item:hover {
+            background-color: #e0e0e0;
+            transform: translateX(5px);
+        }
+
+        .video-item.active {
+            background-color: #e3f2fd;
+            border-left: 4px solid #1976d2;
         }
 
         .video-info {
@@ -55,35 +92,10 @@
             margin-top: 5px;
         }
 
-        .video-item:hover {
-            background-color: #e0e0e0;
-        }
-
         .highlight {
             background-color: #fff3cd;
             padding: 2px;
             border-radius: 2px;
-        }
-
-        #videoPlayer {
-            width: 100%;
-            margin-top: 20px;
-        }
-
-        #videoPlayer::-webkit-media-controls-enclosure {
-            overflow: hidden;
-        }
-
-        #videoPlayer::-webkit-media-controls-panel {
-            width: calc(100% + 30px);
-        }
-
-        .error {
-            color: red;
-            padding: 10px;
-            background-color: #ffe6e6;
-            border-radius: 3px;
-            display: none;
         }
 
         .sort-button {
@@ -102,11 +114,32 @@
             border-color: #0056b3;
         }
 
+        .error {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            color: white;
+            padding: 10px 20px;
+            background-color: #dc3545;
+            border-radius: 4px;
+            display: none;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+        }
+
         .no-results {
             padding: 20px;
             text-align: center;
             color: #666;
             font-style: italic;
+        }
+
+        #videoPlayer::-webkit-media-controls-enclosure {
+            overflow: hidden;
+        }
+
+        #videoPlayer::-webkit-media-controls-panel {
+            width: calc(100% + 30px);
         }
 
         #videoPlayer {
@@ -118,9 +151,15 @@
     </style>
 </head>
 <body>
-<h1>Cliente de Streaming de Vídeos</h1>
-
 <div class="error" id="errorMessage"></div>
+
+<div class="video-container">
+    <video id="videoPlayer" controls controlsList="nodownload">
+        <source src="" type="video/mp4">
+        Seu navegador não suporta a tag de vídeo.
+    </video>
+    <h2 class="video-title" id="currentVideoTitle">Selecione um vídeo para reproduzir</h2>
+</div>
 
 <div class="controls">
     <div class="search-container">
@@ -142,15 +181,12 @@
     <div id="videos"></div>
 </div>
 
-<video id="videoPlayer" controls controlsList="nodownload">
-    Seu navegador não suporta a tag de vídeo.
-</video>
-
 <script>
   $(document).ready(function () {
     const API_BASE_URL = 'http://localhost:8000';
-    let currentVideos = []; // Armazena a lista completa de vídeos
+    let currentVideos = [];
     let currentSort = 'none';
+    let currentVideoId = null;
 
     $('#videoPlayer').on('contextmenu', function (e) {
       e.preventDefault();
@@ -194,6 +230,7 @@
       videos.forEach(video => {
         const videoElement = $('<div>')
           .addClass('video-item')
+          .toggleClass('active', video.id === currentVideoId)
           .append(
             $('<div>').html(highlightText(video.name, searchTerm)),
             $('<div>')
@@ -204,7 +241,7 @@
                 $('<div>').text(`Tamanho: ${formatFileSize(video.size)}`)
               )
           )
-          .click(() => playVideo(video.id));
+          .click(() => playVideo(video));
         videosDiv.append(videoElement);
       });
     }
@@ -239,16 +276,19 @@
       });
     }
 
-    function playVideo(videoId) {
+    function playVideo(video) {
       const videoPlayer = $('#videoPlayer')[0];
-      videoPlayer.src = `${API_BASE_URL}/video/${videoId}`;
+      videoPlayer.src = `${API_BASE_URL}/video/${video.id}`;
       videoPlayer.load();
       videoPlayer.play().catch(error => {
         showError(`Erro ao reproduzir vídeo: ${error.message}`);
       });
+
+      currentVideoId = video.id;
+      $('#currentVideoTitle').text(video.name);
+      renderVideoList(currentVideos, $('#searchInput').val());
     }
 
-    // Manipulador do campo de busca com debounce
     let searchTimeout;
     $('#searchInput').on('input', function () {
       clearTimeout(searchTimeout);
@@ -256,10 +296,9 @@
 
       searchTimeout = setTimeout(() => {
         filterVideos(searchTerm);
-      }, 300); // Aguarda 300ms após o último caractere digitado
+      }, 300);
     });
 
-    // Manipuladores dos botões de ordenação
     $('.sort-button').click(function () {
       const sortBy = $(this).data('sort');
       $('.sort-button').removeClass('active');
@@ -267,7 +306,6 @@
       loadVideoList(sortBy);
     });
 
-    // Carrega a lista inicial
     loadVideoList();
   });
 </script>

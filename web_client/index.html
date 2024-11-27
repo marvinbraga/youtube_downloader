@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cliente de Streaming de Vídeos</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .video-list {
+            margin: 20px 0;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+
+        .video-item {
+            cursor: pointer;
+            padding: 10px;
+            margin: 5px 0;
+            background-color: #f5f5f5;
+            border-radius: 3px;
+        }
+
+        .video-item:hover {
+            background-color: #e0e0e0;
+        }
+
+        #videoPlayer {
+            width: 100%;
+            margin-top: 20px;
+        }
+
+        .error {
+            color: red;
+            padding: 10px;
+            background-color: #ffe6e6;
+            border-radius: 3px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+<h1>Cliente de Streaming de Vídeos</h1>
+
+<div class="error" id="errorMessage"></div>
+
+<div class="video-list" id="videoList">
+    <h2>Vídeos Disponíveis</h2>
+    <div id="videos"></div>
+</div>
+
+<video id="videoPlayer" controls>
+    Seu navegador não suporta a tag de vídeo.
+</video>
+
+<script>
+  $(document).ready(function () {
+    // Configuração da URL base da API
+    const API_BASE_URL = 'http://localhost:8000';
+
+    // Função para mostrar mensagens de erro
+    function showError(message) {
+      $('#errorMessage').text(message).show();
+      setTimeout(() => $('#errorMessage').hide(), 5000);
+    }
+
+    // Função para carregar a lista de vídeos
+    function loadVideoList() {
+      $.ajax({
+        url: `${API_BASE_URL}/videos`,
+        method: 'GET',
+        success: function (response) {
+          const videosDiv = $('#videos');
+          videosDiv.empty();
+
+          if (response.videos && response.videos.length > 0) {
+            response.videos.forEach(video => {
+              const videoElement = $('<div>')
+                .addClass('video-item')
+                .text(video)
+                .click(() => playVideo(video));
+              videosDiv.append(videoElement);
+            });
+          } else {
+            videosDiv.append('<p>Nenhum vídeo encontrado</p>');
+          }
+        },
+        error: function (xhr, status, error) {
+          showError(`Erro ao carregar vídeos: ${error}`);
+        }
+      });
+    }
+
+    // Função para reproduzir um vídeo
+    function playVideo(videoName) {
+      const videoPlayer = $('#videoPlayer')[0];
+      videoPlayer.src = `${API_BASE_URL}/video/${videoName}`;
+      videoPlayer.load();
+      videoPlayer.play().catch(error => {
+        showError(`Erro ao reproduzir vídeo: ${error.message}`);
+      });
+    }
+
+    // Carrega a lista de vídeos quando a página é aberta
+    loadVideoList();
+  });
+</script>
+</body>
+</html>

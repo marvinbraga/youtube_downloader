@@ -14,14 +14,14 @@ class VideoStreamManager:
             'no_warnings': True
         }
 
-    async def get_direct_url(self, youtube_url: str) -> str:
+    async def get_direct_url(self, url: str) -> str:
         """Obtém a URL direta do stream do YouTube"""
         try:
             with YoutubeDL(self.ydl_opts) as ydl:
                 # Executa a extração de forma assíncrona para não bloquear
                 info = await asyncio.get_event_loop().run_in_executor(
                     None,
-                    lambda: ydl.extract_info(youtube_url, download=False)
+                    lambda: ydl.extract_info(url, download=False)
                 )
 
                 # Pega a URL do formato selecionado

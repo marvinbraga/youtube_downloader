@@ -40,7 +40,7 @@ def get_video_info(video_path: Path) -> dict:
         'modified_date': datetime.fromtimestamp(stats.st_mtime).isoformat(),
         'size': stats.st_size,
         'source': VideoSource.LOCAL,
-        'youtube_url': None
+        'url': None
     }
 
 
@@ -52,10 +52,10 @@ def load_json_videos() -> List[Dict]:
                 data = json.load(f)
             # Validação básica dos dados
             for video in data["videos"]:
-                if 'youtube_url' in video:
+                if 'url' in video:
                     video['source'] = VideoSource.YOUTUBE
-                    video['id'] = generate_video_id(video['youtube_url'])
-                    video_mapping[video['id']] = video['youtube_url']
+                    video['id'] = generate_video_id(video['url'])
+                    video_mapping[video['id']] = video['url']
             return data["videos"]
         return []
     except Exception as e:

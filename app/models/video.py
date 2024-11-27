@@ -29,7 +29,7 @@ class VideoInfo(BaseModel):
     modified_date: str
     size: int
     source: VideoSource
-    youtube_url: Optional[HttpUrl] = None
+    url: Optional[HttpUrl] = None
 
 
 class SortOption(str, Enum):

@@ -5,21 +5,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cliente de Streaming de Vídeos</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         body {
             font-family: Arial, sans-serif;
-            max-width: 800px;
+            max-width: 1000px;
             margin: 0 auto;
             padding: 20px;
+            color: #333;
         }
 
         :root {
             --primary-color: #3498db;
             --secondary-color: #007bff;
+            --tertiary-color: #28a745;
             --error-color: #dc3545;
             --border-color: #ddd;
             --background-light: #f8f8f8;
             --text-dark: #666;
+            --tab-active-bg: #e3f2fd;
+            --tab-hover-bg: #f0f8ff;
         }
 
         /* Adicionar media query para responsividade */
@@ -31,6 +36,10 @@
             .sort-button {
                 margin: 5px 2px;
                 padding: 6px 12px;
+            }
+            
+            .tabs {
+                flex-direction: column;
             }
         }
 
@@ -99,7 +108,7 @@
         .controls {
             margin: 20px 0;
             padding: 15px;
-            background-color: #f8f8f8;
+            background-color: var(--background-light);
             border-radius: 5px;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
@@ -111,13 +120,13 @@
         .search-input {
             width: 100%;
             padding: 8px;
-            border: 1px solid #ddd;
+            border: 1px solid var(--border-color);
             border-radius: 4px;
             font-size: 16px;
             box-sizing: border-box;
         }
 
-        .video-list {
+        .video-list, .audio-list {
             margin: 20px 0;
             padding: 10px;
             border: 1px solid #ccc;
@@ -126,7 +135,7 @@
             overflow-y: auto;
         }
 
-        .video-item {
+        .video-item, .audio-item {
             cursor: pointer;
             padding: 10px;
             margin: 5px 0;
@@ -135,18 +144,18 @@
             transition: all 0.2s ease;
         }
 
-        .video-item:hover {
+        .video-item:hover, .audio-item:hover {
             background-color: #e0e0e0;
             transform: translateX(5px);
         }
 
-        .video-item.active {
-            background-color: #e3f2fd;
+        .video-item.active, .audio-item.active {
+            background-color: var(--tab-active-bg);
             border-left: 4px solid #1976d2;
         }
 
-        .video-info {
-            color: #666;
+        .video-info, .audio-info {
+            color: var(--text-dark);
             font-size: 0.9em;
             margin-top: 5px;
         }
@@ -168,7 +177,7 @@
         }
 
         .sort-button.active {
-            background-color: #007bff;
+            background-color: var(--secondary-color);
             color: white;
             border-color: #0056b3;
         }
@@ -179,7 +188,20 @@
             right: 20px;
             color: white;
             padding: 10px 20px;
-            background-color: #dc3545;
+            background-color: var(--error-color);
+            border-radius: 4px;
+            display: none;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+        }
+
+        .success {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            color: white;
+            padding: 10px 20px;
+            background-color: var(--tertiary-color);
             border-radius: 4px;
             display: none;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
@@ -189,7 +211,7 @@
         .no-results {
             padding: 20px;
             text-align: center;
-            color: #666;
+            color: var(--text-dark);
             font-style: italic;
         }
 
@@ -207,10 +229,240 @@
             -ms-user-select: none;
             user-select: none;
         }
+        
+        /* Estilos para as abas */
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 20px;
+        }
+        
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border: 1px solid transparent;
+            border-bottom: none;
+            border-radius: 4px 4px 0 0;
+            margin-right: 5px;
+            background-color: #f8f8f8;
+        }
+        
+        .tab:hover {
+            background-color: var(--tab-hover-bg);
+        }
+        
+        .tab.active {
+            background-color: var(--tab-active-bg);
+            border-color: var(--border-color);
+            border-bottom-color: white;
+            color: var(--secondary-color);
+            font-weight: bold;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        /* Estilos para os botões de ação */
+        .action-buttons {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+        }
+        
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.2s;
+        }
+        
+        .btn-primary {
+            background-color: var(--secondary-color);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background-color: #0056b3;
+        }
+        
+        .btn-success {
+            background-color: var(--tertiary-color);
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background-color: #218838;
+        }
+        
+        .btn-danger {
+            background-color: var(--error-color);
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background-color: #c82333;
+        }
+        
+        .btn-warning {
+            background-color: #ffc107;
+            color: #212529;
+        }
+        
+        .btn-warning:hover {
+            background-color: #e0a800;
+        }
+        
+        /* Estilos para o formulário de download de áudio */
+        .download-form {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: var(--background-light);
+            border-radius: 5px;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        
+        .form-group .checkbox-group {
+            margin-top: 10px;
+        }
+        
+        .form-group .checkbox-label {
+            display: inline-flex;
+            align-items: center;
+            cursor: pointer;
+        }
+        
+        .form-group .checkbox-label input {
+            width: auto;
+            margin-right: 8px;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 3px 7px;
+            border-radius: 10px;
+            font-size: 12px;
+            font-weight: bold;
+            text-align: center;
+            white-space: nowrap;
+            margin-left: 5px;
+        }
+        
+        .badge-success {
+            background-color: var(--tertiary-color);
+            color: white;
+        }
+        
+        .badge-warning {
+            background-color: #ffc107;
+            color: #212529;
+        }
+        
+        .badge-info {
+            background-color: var(--primary-color);
+            color: white;
+        }
+        
+        /* Ícones */
+        .icon {
+            margin-right: 5px;
+        }
+        
+        /* Modal de Transcrição */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1100;
+            padding-top: 50px;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.7);
+        }
+        
+        .modal-content {
+            background-color: #fefefe;
+            margin: auto;
+            padding: 20px;
+            border-radius: 5px;
+            width: 80%;
+            max-width: 1000px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .modal-header h2 {
+            margin: 0;
+            font-size: 1.5em;
+        }
+        
+        .modal-body {
+            margin: 20px 0;
+            line-height: 1.6;
+            font-size: 16px;
+            white-space: pre-line;
+        }
+        
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        
+        .close:hover,
+        .close:focus {
+            color: #000;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            padding-top: 10px;
+            border-top: 1px solid #ddd;
+        }
     </style>
 </head>
 <body>
 <div class="error" id="errorMessage"></div>
+<div class="success" id="successMessage"></div>
 
 <div class="video-container">
     <div class="loading-overlay" id="loadingOverlay">
@@ -223,27 +475,98 @@
         <source src="" type="video/mp4">
         Seu navegador não suporta a tag de vídeo.
     </video>
-    <h2 class="video-title" id="currentVideoTitle">Selecione um vídeo para reproduzir</h2>
+    <h2 class="video-title" id="currentVideoTitle">Selecione um conteúdo para reproduzir</h2>
 </div>
 
-<div class="controls">
-    <div class="search-container">
-        <input type="text"
-               class="search-input"
-               id="searchInput"
-               placeholder="Digite para buscar vídeos..."
-               autocomplete="off">
+<div class="tabs">
+    <div class="tab active" data-tab="videos"><i class="fas fa-video icon"></i>Vídeos</div>
+    <div class="tab" data-tab="audio"><i class="fas fa-headphones icon"></i>Áudio</div>
+    <div class="tab" data-tab="download"><i class="fas fa-download icon"></i>Download</div>
+</div>
+
+<div class="tab-content active" id="videos-tab">
+    <div class="controls">
+        <div class="search-container">
+            <input type="text"
+                   class="search-input"
+                   id="searchVideoInput"
+                   placeholder="Digite para buscar vídeos..."
+                   autocomplete="off">
+        </div>
+
+        <h3>Ordenar por:</h3>
+        <button class="sort-button active" data-sort="none">Padrão</button>
+        <button class="sort-button" data-sort="title">Título</button>
+        <button class="sort-button" data-sort="date">Data</button>
     </div>
 
-    <h3>Ordenar por:</h3>
-    <button class="sort-button active" data-sort="none">Padrão</button>
-    <button class="sort-button" data-sort="title">Título</button>
-    <button class="sort-button" data-sort="date">Data</button>
+    <div class="video-list" id="videoList">
+        <h2>Vídeos Disponíveis</h2>
+        <div id="videos"></div>
+    </div>
 </div>
 
-<div class="video-list" id="videoList">
-    <h2>Vídeos Disponíveis</h2>
-    <div id="videos"></div>
+<div class="tab-content" id="audio-tab">
+    <div class="controls">
+        <div class="search-container">
+            <input type="text"
+                   class="search-input"
+                   id="searchAudioInput"
+                   placeholder="Digite para buscar áudios..."
+                   autocomplete="off">
+        </div>
+    </div>
+
+    <div class="audio-list" id="audioList">
+        <h2>Áudios Disponíveis</h2>
+        <div id="audios"></div>
+    </div>
+</div>
+
+<div class="tab-content" id="download-tab">
+    <div class="download-form">
+        <h2>Download de Áudio do YouTube</h2>
+        <div class="form-group">
+            <label for="youtubeUrl">URL do YouTube:</label>
+            <input type="url" id="youtubeUrl" placeholder="https://www.youtube.com/watch?v=..." required>
+        </div>
+        
+        <div class="form-group">
+            <div class="checkbox-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="highQuality" checked>
+                    Alta qualidade de áudio
+                </label>
+            </div>
+        </div>
+        
+        <button class="btn btn-primary" id="downloadAudioBtn">
+            <i class="fas fa-download icon"></i>Baixar Áudio
+        </button>
+    </div>
+    
+    <div class="download-form">
+        <h2>Transcrição de Áudio</h2>
+        <p>Selecione um arquivo de áudio na aba "Áudio" e use o botão de transcrição para converter áudio em texto.</p>
+    </div>
+</div>
+
+<!-- Modal de Transcrição -->
+<div id="transcriptionModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 id="transcriptionTitle">Transcrição</h2>
+            <span class="close">&times;</span>
+        </div>
+        <div class="modal-body" id="transcriptionContent">
+            <!-- O conteúdo da transcrição será carregado aqui -->
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-primary" id="downloadTranscriptionBtn">
+                <i class="fas fa-download icon"></i>Baixar Transcrição
+            </button>
+        </div>
+    </div>
 </div>
 
 <script>
@@ -251,40 +574,61 @@
     // Configurações básicas da aplicação
     const API_BASE_URL = 'http://localhost:8000';
     let currentVideos = [];
+    let currentAudios = [];
     let currentVideoId = null;
+    let currentAudioId = null;
+    let currentTranscriptionId = null;
 
     // Configurações de autenticação
     let authToken = null;
     const CLIENT_ID = 'your_client_id';
     const CLIENT_SECRET = 'your_client_secret';
     const VIDEO_CACHE_KEY = 'video_list_cache';
+    const AUDIO_CACHE_KEY = 'audio_list_cache';
     const CACHE_DURATION = 5 * 60 * 1000; // 5 minutos
 
-    function saveToCache(videos, sortBy) {
-      const cache = {
-        timestamp: Date.now(),
-        data: videos,
-        sortBy: sortBy  // Salvamos também o tipo de ordenação
-      };
-      localStorage.setItem(VIDEO_CACHE_KEY, JSON.stringify(cache));
+    // Configurações do modal
+    const modal = document.getElementById("transcriptionModal");
+    const span = document.getElementsByClassName("close")[0];
+    
+    // Fechar o modal quando o usuário clica no X
+    span.onclick = function() {
+      modal.style.display = "none";
+    }
+    
+    // Fechar o modal quando o usuário clica fora dele
+    window.onclick = function(event) {
+      if (event.target == modal) {
+        modal.style.display = "none";
+      }
     }
 
-    function getFromCache(requestedSortBy) {
-      const cache = localStorage.getItem(VIDEO_CACHE_KEY);
+    function saveToCache(items, sortBy, cacheKey) {
+      const cache = {
+        timestamp: Date.now(),
+        data: items,
+        sortBy: sortBy  // Salvamos também o tipo de ordenação
+      };
+      localStorage.setItem(cacheKey, JSON.stringify(cache));
+    }
+
+    function getFromCache(requestedSortBy, cacheKey) {
+      const cache = localStorage.getItem(cacheKey);
       if (!cache) return null;
 
       const {timestamp, data, sortBy} = JSON.parse(cache);
 
-      if (Date.now() - timestamp > CACHE_DURATION || sortBy !== requestedSortBy) {
-        localStorage.removeItem(VIDEO_CACHE_KEY);
+      if (Date.now() - timestamp > CACHE_DURATION || (sortBy !== undefined && sortBy !== requestedSortBy)) {
+        localStorage.removeItem(cacheKey);
         return null;
       }
 
-      return data;  // Este return deveria estar aqui dentro
+      return data;
     }
 
-    function toggleLoading(show) {
+    function toggleLoading(show, message = "Carregando...") {
       if (show) {
+        $('.loading-text').text(message);
         $('#loadingOverlay').css('display', 'flex');
       } else {
         $('#loadingOverlay').hide();
@@ -309,6 +653,7 @@
         authToken = response.access_token;
         setTimeout(authenticate, 25 * 60 * 1000);
         loadVideoList();
+        loadAudioList();
       } catch (error) {
         console.error('Erro de autenticação:', error);
         showError('Erro de autenticação. Por favor, recarregue a página.');
@@ -344,6 +689,11 @@
       $('#errorMessage').text(message).show();
       setTimeout(() => $('#errorMessage').hide(), 5000);
     }
+    
+    function showSuccess(message) {
+      $('#successMessage').text(message).show();
+      setTimeout(() => $('#successMessage').hide(), 5000);
+    }
 
     // Renderização e gerenciamento de vídeos
     function renderVideoList(videos, searchTerm = '') {
@@ -376,6 +726,92 @@
         videosDiv.append(videoElement);
       });
     }
+    
+    // Renderização e gerenciamento de áudios
+    function renderAudioList(audios, searchTerm = '') {
+      const audiosDiv = $('#audios').empty();
+
+      if (audios.length === 0) {
+        audiosDiv.append('<div class="no-results">Nenhum áudio encontrado</div>');
+        return;
+      }
+
+      const highlight = text => searchTerm ?
+        text.replace(new RegExp(`(${searchTerm})`, 'gi'), '<span class="highlight">$1</span>') :
+        text;
+
+      audios.forEach(audio => {
+        // Botões de ação para cada áudio
+        const actionButtons = $('<div>')
+          .addClass('action-buttons')
+          .append(
+            $('<button>')
+              .addClass('btn btn-primary')
+              .html('<i class="fas fa-play icon"></i>Reproduzir')
+              .click((e) => {
+                e.stopPropagation();
+                playAudio(audio);
+              })
+          );
+          
+        // Adiciona o botão de transcrição
+        if (audio.has_transcription) {
+          // Se já tem transcrição, adiciona botão para visualizá-la
+          actionButtons.append(
+            $('<button>')
+              .addClass('btn btn-warning')
+              .html('<i class="fas fa-file-alt icon"></i>Ver Transcrição')
+              .click((e) => {
+                e.stopPropagation();
+                viewTranscription(audio);
+              })
+          );
+        } else {
+          // Se não tem transcrição, adiciona botão para criar
+          actionButtons.append(
+            $('<button>')
+              .addClass('btn btn-success')
+              .html('<i class="fas fa-microphone icon"></i>Transcrever')
+              .click((e) => {
+                e.stopPropagation();
+                transcribeAudio(audio);
+              })
+          );
+        }
+        
+        // Indicador visual de transcrição
+        let transcriptionBadge = '';
+        if (audio.has_transcription) {
+          transcriptionBadge = $('<span>')
+            .addClass('badge badge-success')
+            .html('<i class="fas fa-check"></i> Transcrito')
+            .css('margin-left', '10px');
+        }
+        
+        // Criando o elemento de áudio
+        const audioElement = $('<div>')
+          .addClass('audio-item')
+          .toggleClass('active', audio.id === currentAudioId)
+          .append(
+            $('<div>').html(highlight(audio.name)).append(transcriptionBadge),
+            $('<div>')
+              .addClass('audio-info')
+              .append(
+                $('<div>').text(`Caminho: ${audio.path}`),
+                $('<div>').text(`Modificado em: ${formatDate(audio.modified_date)}`),
+                $('<div>').text(`Tamanho: ${formatFileSize(audio.size)}`)
+              ),
+            actionButtons
+          )
+          .click(() => {
+            $('.audio-item').removeClass('active');
+            audioElement.addClass('active');
+            currentAudioId = audio.id;
+          });
+          
+        audiosDiv.append(audioElement);
+      });
+    }
 
     // Funções de gerenciamento de vídeos
     function filterVideos(searchTerm) {
@@ -392,6 +828,22 @@
 
       renderVideoList(filteredVideos, searchTerm);
     }
+    
+    // Funções de gerenciamento de áudios
+    function filterAudios(searchTerm) {
+      if (!searchTerm) {
+        renderAudioList(currentAudios);
+        return;
+      }
+
+      const searchTermLower = searchTerm.toLowerCase();
+      const filteredAudios = currentAudios.filter(audio =>
+        audio.name.toLowerCase().includes(searchTermLower) ||
+        audio.path.toLowerCase().includes(searchTermLower)
+      );
+
+      renderAudioList(filteredAudios, searchTerm);
+    }
 
     function loadVideoList(sortBy = 'none') {
       if (!authToken) {
@@ -400,10 +852,10 @@
       }
 
       // Tentamos obter do cache com a ordenação específica
-      const cachedVideos = getFromCache(sortBy);
+      const cachedVideos = getFromCache(sortBy, VIDEO_CACHE_KEY);
       if (cachedVideos) {
         currentVideos = cachedVideos;
-        filterVideos($('#searchInput').val());
+        filterVideos($('#searchVideoInput').val());
         return;
       }
 
@@ -413,14 +865,47 @@
         headers: getAuthHeaders(),
         success: function (response) {
           currentVideos = response.videos || [];
-          saveToCache(currentVideos, sortBy);  // Salvamos com a ordenação atual
-          filterVideos($('#searchInput').val());
+          saveToCache(currentVideos, sortBy, VIDEO_CACHE_KEY);  // Salvamos com a ordenação atual
+          filterVideos($('#searchVideoInput').val());
         },
         error: function (xhr, status, error) {
           if (xhr.status === 401) {
             authenticate();
           } else {
             showError(`Erro ao carregar vídeos: ${error}`);
+          }
+        }
+      });
+    }
+    
+    function loadAudioList() {
+      if (!authToken) {
+        authenticate();
+        return;
+      }
+
+      // Tentamos obter do cache
+      const cachedAudios = getFromCache(null, AUDIO_CACHE_KEY);
+      if (cachedAudios) {
+        currentAudios = cachedAudios;
+        filterAudios($('#searchAudioInput').val());
+        return;
+      }
+
+      $.ajax({
+        url: `${API_BASE_URL}/audio/list`,
+        method: 'GET',
+        headers: getAuthHeaders(),
+        success: function (response) {
+          currentAudios = response.audio_files || [];
+          saveToCache(currentAudios, null, AUDIO_CACHE_KEY);
+          filterAudios($('#searchAudioInput').val());
+        },
+        error: function (xhr, status, error) {
+          if (xhr.status === 401) {
+            authenticate();
+          } else {
+            showError(`Erro ao carregar áudios: ${error}`);
           }
         }
       });
@@ -433,7 +918,7 @@
       }
 
       try {
-        toggleLoading(true); // Mostra o loading
+        toggleLoading(true, "Carregando vídeo..."); // Mostra o loading
 
         const response = await fetch(`${API_BASE_URL}/video/${video.id}`, {
           headers: getAuthHeaders()
@@ -474,13 +959,237 @@
 
         currentVideoId = video.id;
         $('#currentVideoTitle').text(video.name);
-        renderVideoList(currentVideos, $('#searchInput').val());
+        renderVideoList(currentVideos, $('#searchVideoInput').val());
 
       } catch (error) {
         console.error('Erro:', error);
         toggleLoading(false);
         showError(`Erro ao reproduzir vídeo: ${error.message}`);
         if (error.message.includes('401')) authenticate();
+      }
+    }
+    
+    async function playAudio(audio) {
+      try {
+        toggleLoading(true, "Carregando áudio..."); // Mostra o loading
+        
+        // Atualiza o elemento ativo
+        $('.audio-item').removeClass('active');
+        $(`.audio-item:contains('${audio.name}')`).addClass('active');
+        currentAudioId = audio.id;
+        
+        // Carregando o arquivo de áudio - como não temos um endpoint específico, 
+        // você precisaria implementar isso no backend ou ajustar este código
+        $('#currentVideoTitle').text(audio.name);
+        toggleLoading(false);
+        
+        showError("Reprodução de áudio ainda não implementada");
+        
+      } catch (error) {
+        console.error('Erro:', error);
+        toggleLoading(false);
+        showError(`Erro ao reproduzir áudio: ${error.message}`);
+        if (error.message.includes('401')) authenticate();
+      }
+    }
+    
+    // Função para visualizar uma transcrição existente
+    async function viewTranscription(audio) {
+      if (!authToken) {
+        showError('Erro de autenticação. Tentando reconectar...');
+        return authenticate();
+      }
+      
+      try {
+        toggleLoading(true, "Carregando transcrição..."); 
+        
+        // Define o ID atual para download posterior
+        currentTranscriptionId = audio.id;
+        
+        // Atualiza o título do modal
+        $('#transcriptionTitle').text(`Transcrição: ${audio.name}`);
+        
+        // Carrega a transcrição
+        const response = await fetch(`${API_BASE_URL}/audio/transcription/${audio.id}`, {
+          headers: getAuthHeaders()
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Erro ao carregar transcrição: ${response.status} ${response.statusText}`);
+        }
+        
+        // Obtém o texto da transcrição
+        const transcriptionText = await response.text();
+        
+        // Exibe o texto formatado no modal
+        $('#transcriptionContent').text(transcriptionText);
+        
+        // Exibe o modal
+        modal.style.display = "block";
+        
+        toggleLoading(false);
+        
+      } catch (error) {
+        console.error('Erro:', error);
+        toggleLoading(false);
+        showError(`Erro ao carregar transcrição: ${error.message}`);
+        if (error.message.includes('401')) authenticate();
+      }
+    }
+    
+    // Download da transcrição atual
+    async function downloadTranscription() {
+      if (!currentTranscriptionId) {
+        showError('Nenhuma transcrição selecionada para download');
+        return;
+      }
+      
+      try {
+        // Abre a URL da transcrição em uma nova aba para download
+        window.open(`${API_BASE_URL}/audio/transcription/${currentTranscriptionId}`, '_blank');
+      } catch (error) {
+        console.error('Erro:', error);
+        showError(`Erro ao baixar transcrição: ${error.message}`);
+      }
+    }
+    
+    async function downloadAudio() {
+      if (!authToken) {
+        showError('Erro de autenticação. Tentando reconectar...');
+        return authenticate();
+      }
+      
+      const youtubeUrl = $('#youtubeUrl').val().trim();
+      const highQuality = $('#highQuality').is(':checked');
+      
+      if (!youtubeUrl) {
+        showError('Por favor, insira uma URL do YouTube válida');
+        return;
+      }
+      
+      // Validação básica da URL
+      if (!youtubeUrl.includes('youtube.com/') && !youtubeUrl.includes('youtu.be/')) {
+        showError('URL do YouTube inválida');
+        return;
+      }
+      
+      try {
+        toggleLoading(true, "Iniciando download de áudio..."); // Mostra o loading
+        
+        const response = await $.ajax({
+          url: `${API_BASE_URL}/audio/download`,
+          method: 'POST',
+          headers: {
+            ...getAuthHeaders(),
+            'Content-Type': 'application/json'
+          },
+          data: JSON.stringify({
+            url: youtubeUrl,
+            high_quality: highQuality
+          })
+        });
+        
+        toggleLoading(false);
+        
+        if (response.status === 'processando') {
+          showSuccess('Download de áudio iniciado em segundo plano. Veja a aba "Áudio" após a conclusão.');
+          // Limpa o campo de URL
+          $('#youtubeUrl').val('');
+          
+          // Programa uma atualização da lista de áudio após algum tempo
+          setTimeout(() => {
+            localStorage.removeItem(AUDIO_CACHE_KEY); // Invalida o cache
+            loadAudioList(); // Recarrega a lista
+          }, 10000); // Aguarda 10 segundos
+        } else {
+          showError('Falha ao iniciar o download de áudio');
+        }
+        
+      } catch (error) {
+        console.error('Erro:', error);
+        toggleLoading(false);
+        
+        let errorMessage = 'Erro ao fazer download do áudio';
+        if (error.responseJSON && error.responseJSON.detail) {
+          errorMessage += `: ${error.responseJSON.detail}`;
+        }
+        
+        showError(errorMessage);
+        if (error.status === 401) authenticate();
+      }
+    }
+    
+    async function transcribeAudio(audio) {
+      if (!authToken) {
+        showError('Erro de autenticação. Tentando reconectar...');
+        return authenticate();
+      }
+      
+      if (!audio || !audio.id) {
+        showError('Nenhum áudio selecionado para transcrição');
+        return;
+      }
+      
+      // Se já existe transcrição
+      if (audio.has_transcription) {
+        // Verifica se deseja baixar ou substituir
+        if (confirm('Este áudio já possui uma transcrição. Deseja visualizá-la?')) {
+          // Visualiza a transcrição
+          viewTranscription(audio);
+          return;
+        } else if (!confirm('Deseja substituir a transcrição existente?')) {
+          return; // Usuário cancelou
+        }
+      }
+      
+      try {
+        toggleLoading(true, "Iniciando transcrição de áudio..."); // Mostra o loading
+        
+        const response = await $.ajax({
+          url: `${API_BASE_URL}/audio/transcribe`,
+          method: 'POST',
+          headers: {
+            ...getAuthHeaders(),
+            'Content-Type': 'application/json'
+          },
+          data: JSON.stringify({
+            file_id: audio.id,
+            provider: "groq",  // Default provider
+            language: "pt"     // Português
+          })
+        });
+        
+        toggleLoading(false);
+        
+        if (response.status === 'processing') {
+          showSuccess('Transcrição iniciada em segundo plano. Isso pode levar alguns minutos.');
+          
+          // Programa uma atualização da lista de áudio após algum tempo
+          setTimeout(() => {
+            localStorage.removeItem(AUDIO_CACHE_KEY); // Invalida o cache
+            loadAudioList(); // Recarrega a lista
+          }, 30000); // Aguarda 30 segundos
+        } else if (response.status === 'success') {
+          showSuccess('Transcrição já existe! Carregando visualização...');
+          // Mostrar a transcrição existente
+          viewTranscription(audio);
+          localStorage.removeItem(AUDIO_CACHE_KEY); // Invalida o cache
+          loadAudioList(); // Recarrega a lista
+        } else {
+          showError('Falha ao iniciar a transcrição');
+        }
+        
+      } catch (error) {
+        console.error('Erro:', error);
+        toggleLoading(false);
+        
+        let errorMessage = 'Erro ao transcrever áudio';
+        if (error.responseJSON && error.responseJSON.detail) {
+          errorMessage += `: ${error.responseJSON.detail}`;
+        }
+        
+        showError(errorMessage);
+        if (error.status === 401) authenticate();
       }
     }
 
@@ -490,13 +1199,23 @@
       return false;
     });
 
-    let searchTimeout;
-    $('#searchInput').on('input', function () {
-      clearTimeout(searchTimeout);
+    let searchVideoTimeout;
+    $('#searchVideoInput').on('input', function () {
+      clearTimeout(searchVideoTimeout);
       const searchTerm = $(this).val();
 
-      searchTimeout = setTimeout(() => {
+      searchVideoTimeout = setTimeout(() => {
         filterVideos(searchTerm);
+      }, 300);
+    });
+    
+    let searchAudioTimeout;
+    $('#searchAudioInput').on('input', function () {
+      clearTimeout(searchAudioTimeout);
+      const searchTerm = $(this).val();
+
+      searchAudioTimeout = setTimeout(() => {
+        filterAudios(searchTerm);
       }, 300);
     });
 
@@ -505,6 +1224,37 @@
       $('.sort-button').removeClass('active');
       $(this).addClass('active');
       loadVideoList(sortBy);
+    });
+    
+    // Navegação por abas
+    $('.tab').click(function() {
+      // Remove a classe active de todas as abas e conteúdos
+      $('.tab').removeClass('active');
+      $('.tab-content').removeClass('active');
+      
+      // Adiciona a classe active na aba clicada
+      $(this).addClass('active');
+      
+      // Exibe o conteúdo correspondente
+      const tabId = $(this).data('tab');
+      $(`#${tabId}-tab`).addClass('active');
+      
+      // Recarrega os dados se necessário
+      if (tabId === 'audio') {
+        loadAudioList();
+      } else if (tabId === 'videos') {
+        loadVideoList($('.sort-button.active').data('sort'));
+      }
+    });
+    
+    // Download de áudio
+    $('#downloadAudioBtn').click(function() {
+      downloadAudio();
+    });
+    
+    // Download de transcrição do modal
+    $('#downloadTranscriptionBtn').click(function() {
+      downloadTranscription();
     });
 
     // Inicia a aplicação

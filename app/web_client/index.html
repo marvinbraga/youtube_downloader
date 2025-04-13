@@ -741,6 +741,11 @@
         text;
 
       audios.forEach(audio => {
+        // Verificar explicitamente se o áudio tem transcrição
+        const hasTranscription = audio.has_transcription === true;
+        
+        console.log(`Áudio ${audio.id} - has_transcription: ${hasTranscription}`);
+        
         // Botões de ação para cada áudio
         const actionButtons = $('<div>')
           .addClass('action-buttons')
@@ -755,7 +760,7 @@
           );
           
         // Adiciona o botão de transcrição
-        if (audio.has_transcription) {
+        if (hasTranscription) {
           // Se já tem transcrição, adiciona botão para visualizá-la
           actionButtons.append(
             $('<button>')
@@ -781,7 +786,7 @@
         
         // Indicador visual de transcrição
         let transcriptionBadge = '';
-        if (audio.has_transcription) {
+        if (hasTranscription) {
           transcriptionBadge = $('<span>')
             .addClass('badge badge-success')
             .html('<i class="fas fa-check"></i> Transcrito')
@@ -884,13 +889,8 @@
         return;
       }
 
-      // Tentamos obter do cache
-      const cachedAudios = getFromCache(null, AUDIO_CACHE_KEY);
-      if (cachedAudios) {
-        currentAudios = cachedAudios;
-        filterAudios($('#searchAudioInput').val());
-        return;
-      }
+      // Limpa o cache para forçar uma atualização dos dados
+      localStorage.removeItem(AUDIO_CACHE_KEY);
 
       $.ajax({
         url: `${API_BASE_URL}/audio/list`,
@@ -898,6 +898,7 @@
         headers: getAuthHeaders(),
         success: function (response) {
           currentAudios = response.audio_files || [];
+          console.log("Áudios carregados:", currentAudios);
           saveToCache(currentAudios, null, AUDIO_CACHE_KEY);
           filterAudios($('#searchAudioInput').val());
         },
@@ -1131,7 +1132,7 @@
       }
       
       // Se já existe transcrição
-      if (audio.has_transcription) {
+      if (audio.has_transcription === true) {
         // Verifica se deseja baixar ou substituir
         if (confirm('Este áudio já possui uma transcrição. Deseja visualizá-la?')) {
           // Visualiza a transcrição

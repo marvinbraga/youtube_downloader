@@ -12,6 +12,7 @@ from loguru import logger
 from yt_dlp import YoutubeDL
 
 from app.services.configs import AUDIO_DIR, audio_mapping, AUDIO_CONFIG_PATH
+from app.services.files import load_json_audios
 
 
 class VideoStreamManager:
@@ -79,20 +80,12 @@ class AudioDownloadManager:
     
     def _load_audio_data(self) -> Dict[str, Any]:
         """
-        Carrega os dados de áudio do arquivo JSON
+        Carrega os dados de áudio do arquivo JSON utilizando a função load_json_audios
         
         Returns:
             Dicionário com os dados de áudio
         """
-        if AUDIO_CONFIG_PATH.exists():
-            try:
-                with open(AUDIO_CONFIG_PATH, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except Exception as e:
-                logger.error(f"Erro ao carregar arquivo de configuração de áudio: {str(e)}")
-        
-        # Se não existir ou houver erro, retorna um dicionário vazio
-        return {"audios": [], "mappings": {}}
+        return load_json_audios()
     
     def _save_audio_data(self) -> None:
         """

@@ -11,7 +11,7 @@ from loguru import logger
 from app.models.video import TokenData, ClientAuth, SortOption
 from app.models.audio import AudioDownloadRequest, TranscriptionRequest, TranscriptionResponse, TranscriptionProvider
 from app.services.configs import video_mapping, AUDIO_DIR, audio_mapping
-from app.services.files import scan_video_directory, generate_video_stream
+from app.services.files import scan_video_directory, generate_video_stream, scan_audio_directory
 from app.services.managers import VideoStreamManager, AudioDownloadManager
 from app.services.securities import AUTHORIZED_CLIENTS, create_access_token, verify_token, ACCESS_TOKEN_EXPIRE_MINUTES
 from app.services.transcription.service import TranscriptionService
@@ -149,48 +149,15 @@ async def list_audio_files(
 ):
     """
     Lista todos os arquivos de áudio disponíveis (requer autenticação)
+    Usa o arquivo data/audios.json como fonte de dados
     """
     try:
-        logger.debug(f"Listando arquivos de áudio")
+        logger.debug(f"Listando arquivos de áudio a partir do arquivo audios.json")
         
-        # Usa os dados do gerenciador de áudio
-        audio_files = []
+        # Carrega os dados do arquivo audios.json usando a função scan_audio_directory
+        audio_files = scan_audio_directory()
         
-        for audio in audio_manager.audio_data.get("audios", []):
-            try:
-                # Verificar se o arquivo existe
-                audio_path = AUDIO_DIR.parent / audio["path"]
-                if not audio_path.exists():
-                    logger.warning(f"Arquivo não encontrado no caminho: {audio_path}")
-                    continue
-                
-                # Obtém informações básicas do arquivo
-                stats = audio_path.stat()
-                
-                # Verifica se existe transcrição
-                has_transcription = audio.get("has_transcription", False)
-                
-                # Adiciona à lista de arquivos
-                audio_files.append({
-                    "id": audio["id"],
-                    "name": audio.get("title", audio_path.stem),
-                    "path": audio["path"],
-                    "format": audio.get("format", "m4a"),
-                    "created_date": stats.st_ctime,
-                    "modified_date": stats.st_mtime,
-                    "size": stats.st_size,
-                    "has_transcription": has_transcription,
-                    "youtube_id": audio.get("youtube_id", ""),
-                    "url": audio.get("url", "")
-                })
-            except Exception as e:
-                logger.error(f"Erro ao processar áudio {audio.get('id')}: {str(e)}")
-                continue
-            
-        # Ordena por data de modificação (mais recente primeiro)
-        audio_files.sort(key=lambda x: x["modified_date"], reverse=True)
-        
-        logger.info(f"Encontrados {len(audio_files)} arquivos de áudio")
+        logger.info(f"Encontrados {len(audio_files)} arquivos de áudio no audios.json")
         return {"audio_files": audio_files}
     except Exception as e:
         logger.exception(f"Erro ao listar arquivos de áudio: {str(e)}")
@@ -362,7 +329,7 @@ async def get_transcription(
             logger.debug(f"Transcrição encontrada por busca de arquivo: {transcription_file}")
         except FileNotFoundError:
             # Tenta procurar a transcrição diretamente
-            transcription_files = list(AUDIO_DIR.glob(f"**/*.md"))
+            transcription_files = list(AUDIO_DIR.glob("**/*.md"))
             
             # Filtra por similaridade com o ID
             matching_transcriptions = []

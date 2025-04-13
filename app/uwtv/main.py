@@ -30,6 +30,12 @@ app.add_middleware(
 stream_manager = VideoStreamManager()
 audio_manager = AudioDownloadManager()
 
+# Executa a migração de has_transcription para transcription_status se necessário
+try:
+    audio_manager.migrate_has_transcription_to_status()
+except Exception as e:
+    logger.error(f"Erro durante a migração do campo has_transcription: {str(e)}")
+
 
 @app.post("/auth/token", response_model=TokenData)
 async def login_for_access_token(client: ClientAuth):
@@ -234,8 +240,11 @@ async def transcribe_audio(
                     detail=f"Arquivo de áudio não encontrado: {audio_path}"
                 )
                 
-            # Verifica se já existe transcrição
-            if audio_info.get("has_transcription", False) and audio_info.get("transcription_path"):
+            # Verifica o status da transcrição
+            transcription_status = audio_info.get("transcription_status", "none")
+            
+            # Se a transcrição já estiver concluída (status "ended")
+            if transcription_status == "ended" and audio_info.get("transcription_path"):
                 transcription_path = AUDIO_DIR.parent / audio_info["transcription_path"]
                 if transcription_path.exists():
                     logger.info(f"Transcrição já existe: {transcription_path}")
@@ -245,6 +254,21 @@ async def transcribe_audio(
                         status="success",
                         message="Transcrição já existe"
                     )
+            
+            # Se a transcrição estiver em andamento
+            elif transcription_status == "started":
+                logger.info(f"Transcrição já está em andamento para: {request.file_id}")
+                return TranscriptionResponse(
+                    file_id=request.file_id,
+                    transcription_path="",
+                    status="processing",
+                    message="A transcrição já está em andamento"
+                )
+            
+            # Se a transcrição teve erro anteriormente
+            elif transcription_status == "error":
+                logger.warning(f"Erro anterior na transcrição para: {request.file_id}. Tentando novamente.")
+                # Continua para reiniciar a transcrição
         else:
             # Se não encontrou no gerenciador, tenta encontrar o arquivo
             try:
@@ -264,11 +288,13 @@ async def transcribe_audio(
         if transcription_file.exists():
             logger.info(f"Transcrição já existe no caminho: {transcription_file}")
             
-            # Se encontramos no sistema de arquivos mas não no gerenciador, atualizamos o gerenciador
-            if audio_info and not audio_info.get("has_transcription", False):
+            # Se encontramos no sistema de arquivos mas o status não está correto, atualizamos o gerenciador
+            if audio_info:
+                rel_path = str(transcription_file.relative_to(AUDIO_DIR.parent))
                 audio_manager.update_transcription_status(
                     audio_info["id"],
-                    str(transcription_file.relative_to(AUDIO_DIR.parent))
+                    "ended",
+                    rel_path
                 )
                 
             return TranscriptionResponse(
@@ -277,6 +303,10 @@ async def transcribe_audio(
                 status="success",
                 message="Transcrição já existe"
             )
+            
+        # Atualiza o status para "started" antes de iniciar a transcrição
+        if audio_info:
+            audio_manager.update_transcription_status(audio_info["id"], "started")
             
         # Cria uma tarefa em segundo plano para transcrição
         def transcribe_task():
@@ -299,12 +329,22 @@ async def transcribe_audio(
                     # Atualiza o status no gerenciador se houver ID
                     if audio_info:
                         rel_path = Path(transcription_path).relative_to(AUDIO_DIR.parent)
-                        audio_manager.update_transcription_status(audio_info["id"], str(rel_path))
+                        audio_manager.update_transcription_status(
+                            audio_info["id"], 
+                            "ended",
+                            str(rel_path)
+                        )
                         
                     logger.success(f"Transcrição concluída: {output_path}")
                 else:
+                    # Se não gerou conteúdo, atualiza para status de erro
+                    if audio_info:
+                        audio_manager.update_transcription_status(audio_info["id"], "error")
                     logger.error(f"Falha na transcrição: nenhum conteúdo gerado")
             except Exception as e:
+                # Em caso de erro, atualiza o status para "error"
+                if audio_info:
+                    audio_manager.update_transcription_status(audio_info["id"], "error")
                 logger.exception(f"Erro na tarefa de transcrição: {str(e)}")
                 
         # Adiciona a tarefa em segundo plano
@@ -340,7 +380,7 @@ async def get_transcription(
         # Primeiro verifica no gerenciador de áudio
         audio_info = audio_manager.get_audio_info(file_id)
         
-        if audio_info and audio_info.get("has_transcription", False):
+        if audio_info and audio_info.get("transcription_status") == "ended":
             transcription_path = AUDIO_DIR.parent / audio_info["transcription_path"]
             
             if transcription_path.exists():
@@ -353,7 +393,7 @@ async def get_transcription(
             else:
                 logger.warning(f"Caminho de transcrição no gerenciador não existe: {transcription_path}")
         
-        # Se não encontrou no gerenciador, tenta encontrar o arquivo de áudio e seu arquivo .md correspondente
+        # Se não encontrou no gerenciador ou o status não é "ended", tenta encontrar o arquivo
         try:
             # Tenta encontrar o arquivo de áudio
             audio_file = TranscriptionService.find_audio_file(file_id)
@@ -367,6 +407,11 @@ async def get_transcription(
                 )
                 
             logger.debug(f"Transcrição encontrada por busca de arquivo: {transcription_file}")
+            
+            # Se encontrou o arquivo, mas o status no gerenciador não está correto, atualiza-o
+            if audio_info and audio_info.get("transcription_status") != "ended":
+                rel_path = str(transcription_file.relative_to(AUDIO_DIR.parent))
+                audio_manager.update_transcription_status(audio_info["id"], "ended", rel_path)
         except FileNotFoundError:
             # Tenta procurar a transcrição diretamente
             transcription_files = list(AUDIO_DIR.glob("**/*.md"))
@@ -387,6 +432,11 @@ async def get_transcription(
             # Usa a transcrição com maior similaridade
             transcription_file = matching_transcriptions[0]
             logger.debug(f"Transcrição encontrada por busca direta: {transcription_file}")
+            
+            # Também atualiza o status no gerenciador se possível
+            if audio_info:
+                rel_path = str(transcription_file.relative_to(AUDIO_DIR.parent))
+                audio_manager.update_transcription_status(audio_info["id"], "ended", rel_path)
         
         # Retorna o arquivo de transcrição
         return FileResponse(
@@ -401,4 +451,49 @@ async def get_transcription(
         raise HTTPException(
             status_code=500,
             detail=f"Erro ao obter transcrição: {str(e)}"
+        )
+
+
+@app.get("/audio/transcription_status/{file_id}")
+async def get_transcription_status(
+        file_id: str,
+        token_data: dict = Depends(verify_token)
+):
+    """
+    Obtém o status atual da transcrição (requer autenticação)
+    """
+    try:
+        logger.info(f"Solicitação de status de transcrição para ID: {file_id}")
+        
+        # Procura no gerenciador de áudio
+        audio_info = audio_manager.get_audio_info(file_id)
+        
+        if not audio_info:
+            logger.warning(f"Áudio não encontrado: {file_id}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Áudio não encontrado: {file_id}"
+            )
+        
+        # Obtém o status da transcrição
+        transcription_status = audio_info.get("transcription_status", "none")
+        
+        # Verifica se há caminho de transcrição para status "ended"
+        transcription_path = None
+        if transcription_status == "ended" and audio_info.get("transcription_path"):
+            transcription_path = audio_info["transcription_path"]
+        
+        return {
+            "file_id": file_id,
+            "status": transcription_status,
+            "transcription_path": transcription_path
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Erro ao obter status da transcrição: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao obter status da transcrição: {str(e)}"
         )

@@ -77,6 +77,8 @@ class AudioDownloadManager:
         self.download_dir = AUDIO_DIR
         self.audio_data = self._load_audio_data()
         logger.info(f"Gerenciador de download de áudio inicializado com diretório: {self.download_dir}")
+        # Executa a migração automaticamente para garantir que todos os dados estejam atualizados
+        self.migrate_has_transcription_to_status()
     
     def _load_audio_data(self) -> Dict[str, Any]:
         """
@@ -219,7 +221,7 @@ class AudioDownloadManager:
                     "modified_date": created_date,
                     "format": "m4a",
                     "filesize": filename.stat().st_size if filename.exists() else 0,
-                    "has_transcription": False,
+                    "transcription_status": "none",  # Novo campo para status da transcrição: none, started, ended, error
                     "transcription_path": "",
                     "keywords": self._extract_keywords(info.get('title', ''))
                 }
@@ -278,25 +280,47 @@ class AudioDownloadManager:
         
         return None
     
-    def update_transcription_status(self, audio_id: str, transcription_path: str) -> bool:
+    def update_transcription_status(self, audio_id: str, status: str, transcription_path: str = None) -> bool:
         """
         Atualiza o status de transcrição de um áudio
         
         Args:
             audio_id: ID do áudio
-            transcription_path: Caminho do arquivo de transcrição
+            status: Status da transcrição (none, started, ended, error)
+            transcription_path: Caminho do arquivo de transcrição (opcional)
             
         Returns:
             True se atualizado com sucesso, False caso contrário
         """
         for audio in self.audio_data["audios"]:
             if audio["id"] == audio_id:
-                audio["has_transcription"] = True
-                audio["transcription_path"] = transcription_path
+                # Verifica se o status é válido
+                if status not in ["none", "started", "ended", "error"]:
+                    logger.warning(f"Status de transcrição inválido: {status}")
+                    return False
+                
+                # Atualiza o status
+                audio["transcription_status"] = status
+                
+                # Atualiza o caminho da transcrição se fornecido
+                if transcription_path:
+                    audio["transcription_path"] = transcription_path
+                
+                # Atualiza a data de modificação
                 audio["modified_date"] = datetime.datetime.now().isoformat()
+                
+                # Salva os dados
                 self._save_audio_data()
+                
+                # Log de sucesso
+                logger.info(f"Status da transcrição atualizado para '{status}' para áudio {audio_id}")
+                if transcription_path:
+                    logger.info(f"Caminho da transcrição: {transcription_path}")
+                
                 return True
                 
+        # Se não encontrou o áudio
+        logger.warning(f"Áudio não encontrado para atualização do status de transcrição: {audio_id}")
         return False
     
     def _normalize_filename(self, filename: str) -> str:
@@ -374,3 +398,47 @@ class AudioDownloadManager:
         for word in self._extract_keywords(title):
             audio_mapping[word] = filename
             logger.debug(f"Mapeamento para palavra-chave: '{word}' -> {filename}")
+    
+    def migrate_has_transcription_to_status(self) -> None:
+        """
+        Migra o campo 'has_transcription' para o novo campo 'transcription_status'.
+        Esta é uma função temporária para migração de dados.
+        """
+        try:
+            logger.info("Iniciando migração de dados 'has_transcription' para 'transcription_status'")
+            changes_made = False
+            
+            for audio in self.audio_data.get("audios", []):
+                # Caso 1: Tem o campo antigo mas não o novo
+                if "has_transcription" in audio and "transcription_status" not in audio:
+                    audio["transcription_status"] = "ended" if audio.get("has_transcription") else "none"
+                    changes_made = True
+                    logger.debug(f"Migração para áudio {audio.get('id')}: has_transcription={audio.get('has_transcription')} -> transcription_status={audio['transcription_status']}")
+                
+                # Caso 2: Tem os dois campos (remover o antigo)
+                elif "has_transcription" in audio and "transcription_status" in audio:
+                    del audio["has_transcription"]
+                    changes_made = True
+                    logger.debug(f"Removendo campo 'has_transcription' redundante do áudio {audio.get('id')}")
+                
+                # Caso 3: Não tem o novo campo
+                elif "transcription_status" not in audio:
+                    audio["transcription_status"] = "none"
+                    changes_made = True
+                    logger.debug(f"Adicionando 'transcription_status=none' para áudio {audio.get('id')}")
+                
+                # Outra verificação: Se tem caminho de transcrição mas status não é "ended"
+                if audio.get("transcription_path") and audio.get("transcription_status") != "ended":
+                    path = Path(AUDIO_DIR.parent / audio["transcription_path"])
+                    if path.exists():
+                        audio["transcription_status"] = "ended"
+                        changes_made = True
+                        logger.debug(f"Ajustando status para 'ended' para áudio {audio.get('id')} que já tem transcrição")
+            
+            if changes_made:
+                logger.info("Migração de dados concluída com sucesso. Salvando alterações.")
+                self._save_audio_data()
+            else:
+                logger.info("Nenhuma alteração necessária durante a migração.")
+        except Exception as e:
+            logger.error(f"Erro durante a migração de dados: {str(e)}")

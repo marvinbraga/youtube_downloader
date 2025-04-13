@@ -6,477 +6,12 @@
     <title>Cliente de Streaming de Vídeos</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 1000px;
-            margin: 0 auto;
-            padding: 20px;
-            color: #333;
-        }
-
-        :root {
-            --primary-color: #3498db;
-            --secondary-color: #007bff;
-            --tertiary-color: #28a745;
-            --error-color: #dc3545;
-            --border-color: #ddd;
-            --background-light: #f8f8f8;
-            --text-dark: #666;
-            --tab-active-bg: #e3f2fd;
-            --tab-hover-bg: #f0f8ff;
-        }
-
-        /* Adicionar media query para responsividade */
-        @media (max-width: 768px) {
-            .video-container {
-                margin: -10px -10px 10px -10px;
-            }
-
-            .sort-button {
-                margin: 5px 2px;
-                padding: 6px 12px;
-            }
-            
-            .tabs {
-                flex-direction: column;
-            }
-        }
-
-        /* Estilo para o container do vídeo */
-        .video-container {
-            background-color: #000;
-            padding: 20px 0;
-            margin: -20px -20px 20px -20px;
-            text-align: center;
-            position: relative;
-        }
-
-        .loading-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: rgba(0, 0, 0, 0.7);
-            display: none;
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
-        }
-
-        .loading-spinner {
-            width: 50px;
-            height: 50px;
-            border: 5px solid #f3f3f3;
-            border-top: 5px solid #3498db;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-
-        .loading-text {
-            color: white;
-            margin-top: 10px;
-            font-size: 16px;
-        }
-
-        @keyframes spin {
-            0% {
-                transform: rotate(0deg);
-            }
-            100% {
-                transform: rotate(360deg);
-            }
-        }
-
-        #videoPlayer {
-            max-width: 800px;
-            width: 100%;
-            aspect-ratio: 16/9;
-            background-color: #000;
-            margin: 0 auto;
-        }
-
-        .video-title {
-            color: #fff;
-            padding: 10px;
-            margin: 0;
-            font-size: 1.2em;
-        }
-
-        /* Estilos para os controles e busca */
-        .controls {
-            margin: 20px 0;
-            padding: 15px;
-            background-color: var(--background-light);
-            border-radius: 5px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        }
-
-        .search-container {
-            margin: 15px 0;
-        }
-
-        .search-input {
-            width: 100%;
-            padding: 8px;
-            border: 1px solid var(--border-color);
-            border-radius: 4px;
-            font-size: 16px;
-            box-sizing: border-box;
-        }
-
-        .video-list, .audio-list {
-            margin: 20px 0;
-            padding: 10px;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-            max-height: 500px;
-            overflow-y: auto;
-        }
-
-        .video-item, .audio-item {
-            cursor: pointer;
-            padding: 10px;
-            margin: 5px 0;
-            background-color: #f5f5f5;
-            border-radius: 3px;
-            transition: all 0.2s ease;
-        }
-
-        .video-item:hover, .audio-item:hover {
-            background-color: #e0e0e0;
-            transform: translateX(5px);
-        }
-
-        .video-item.active, .audio-item.active {
-            background-color: var(--tab-active-bg);
-            border-left: 4px solid #1976d2;
-        }
-
-        .video-info, .audio-info {
-            color: var(--text-dark);
-            font-size: 0.9em;
-            margin-top: 5px;
-        }
-
-        .highlight {
-            background-color: #fff3cd;
-            padding: 2px;
-            border-radius: 2px;
-        }
-
-        .sort-button {
-            padding: 8px 16px;
-            margin: 0 5px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            background-color: #fff;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .sort-button.active {
-            background-color: var(--secondary-color);
-            color: white;
-            border-color: #0056b3;
-        }
-
-        .error {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            color: white;
-            padding: 10px 20px;
-            background-color: var(--error-color);
-            border-radius: 4px;
-            display: none;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-            z-index: 1000;
-        }
-
-        .success {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            color: white;
-            padding: 10px 20px;
-            background-color: var(--tertiary-color);
-            border-radius: 4px;
-            display: none;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-            z-index: 1000;
-        }
-
-        .no-results {
-            padding: 20px;
-            text-align: center;
-            color: var(--text-dark);
-            font-style: italic;
-        }
-
-        #videoPlayer::-webkit-media-controls-enclosure {
-            overflow: hidden;
-        }
-
-        #videoPlayer::-webkit-media-controls-panel {
-            width: calc(100% + 30px);
-        }
-
-        #videoPlayer {
-            -webkit-user-select: none;
-            -moz-user-select: none;
-            -ms-user-select: none;
-            user-select: none;
-        }
-        
-        /* Estilos para as abas */
-        .tabs {
-            display: flex;
-            border-bottom: 1px solid var(--border-color);
-            margin-bottom: 20px;
-        }
-        
-        .tab {
-            padding: 10px 20px;
-            cursor: pointer;
-            border: 1px solid transparent;
-            border-bottom: none;
-            border-radius: 4px 4px 0 0;
-            margin-right: 5px;
-            background-color: #f8f8f8;
-        }
-        
-        .tab:hover {
-            background-color: var(--tab-hover-bg);
-        }
-        
-        .tab.active {
-            background-color: var(--tab-active-bg);
-            border-color: var(--border-color);
-            border-bottom-color: white;
-            color: var(--secondary-color);
-            font-weight: bold;
-        }
-        
-        .tab-content {
-            display: none;
-        }
-        
-        .tab-content.active {
-            display: block;
-        }
-        
-        /* Estilos para os botões de ação */
-        .action-buttons {
-            display: flex;
-            justify-content: space-between;
-            margin-top: 10px;
-        }
-        
-        .btn {
-            padding: 8px 16px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-weight: bold;
-            transition: all 0.2s;
-        }
-        
-        .btn-primary {
-            background-color: var(--secondary-color);
-            color: white;
-        }
-        
-        .btn-primary:hover {
-            background-color: #0056b3;
-        }
-        
-        .btn-success {
-            background-color: var(--tertiary-color);
-            color: white;
-        }
-        
-        .btn-success:hover {
-            background-color: #218838;
-        }
-        
-        .btn-danger {
-            background-color: var(--error-color);
-            color: white;
-        }
-        
-        .btn-danger:hover {
-            background-color: #c82333;
-        }
-        
-        .btn-warning {
-            background-color: #ffc107;
-            color: #212529;
-        }
-        
-        .btn-warning:hover {
-            background-color: #e0a800;
-        }
-        
-        /* Estilos para o formulário de download de áudio */
-        .download-form {
-            margin: 20px 0;
-            padding: 15px;
-            background-color: var(--background-light);
-            border-radius: 5px;
-        }
-        
-        .form-group {
-            margin-bottom: 15px;
-        }
-        
-        .form-group label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
-        }
-        
-        .form-group input, .form-group select {
-            width: 100%;
-            padding: 8px;
-            border: 1px solid var(--border-color);
-            border-radius: 4px;
-            font-size: 16px;
-            box-sizing: border-box;
-        }
-        
-        .form-group .checkbox-group {
-            margin-top: 10px;
-        }
-        
-        .form-group .checkbox-label {
-            display: inline-flex;
-            align-items: center;
-            cursor: pointer;
-        }
-        
-        .form-group .checkbox-label input {
-            width: auto;
-            margin-right: 8px;
-        }
-        
-        .badge {
-            display: inline-block;
-            padding: 3px 7px;
-            border-radius: 10px;
-            font-size: 12px;
-            font-weight: bold;
-            text-align: center;
-            white-space: nowrap;
-            margin-left: 5px;
-        }
-        
-        .badge-success {
-            background-color: var(--tertiary-color);
-            color: white;
-        }
-        
-        .badge-warning {
-            background-color: #ffc107;
-            color: #212529;
-        }
-        
-        .badge-info {
-            background-color: var(--primary-color);
-            color: white;
-        }
-        
-        /* Ícones */
-        .icon {
-            margin-right: 5px;
-        }
-        
-        /* Modal de Transcrição */
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1100;
-            padding-top: 50px;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            overflow: auto;
-            background-color: rgba(0,0,0,0.7);
-        }
-        
-        .modal-content {
-            background-color: #fefefe;
-            margin: auto;
-            padding: 20px;
-            border-radius: 5px;
-            width: 80%;
-            max-width: 1000px;
-            max-height: 80vh;
-            overflow-y: auto;
-        }
-        
-        .modal-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding-bottom: 10px;
-            border-bottom: 1px solid #ddd;
-        }
-        
-        .modal-header h2 {
-            margin: 0;
-            font-size: 1.5em;
-        }
-        
-        .modal-body {
-            margin: 20px 0;
-            line-height: 1.6;
-            font-size: 16px;
-            white-space: pre-line;
-        }
-        
-        .close {
-            color: #aaa;
-            float: right;
-            font-size: 28px;
-            font-weight: bold;
-            cursor: pointer;
-        }
-        
-        .close:hover,
-        .close:focus {
-            color: #000;
-            text-decoration: none;
-            cursor: pointer;
-        }
-        
-        .modal-footer {
-            display: flex;
-            justify-content: flex-end;
-            padding-top: 10px;
-            border-top: 1px solid #ddd;
-        }
-    </style>
+    <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
 <div class="error" id="errorMessage"></div>
 <div class="success" id="successMessage"></div>
-
-<div class="video-container">
-    <div class="loading-overlay" id="loadingOverlay">
-        <div style="text-align: center;">
-            <div class="loading-spinner"></div>
-            <div class="loading-text">Carregando vídeo...</div>
-        </div>
-    </div>
-    <video id="videoPlayer" controls controlsList="nodownload">
-        <source src="" type="video/mp4">
-        Seu navegador não suporta a tag de vídeo.
-    </video>
-    <h2 class="video-title" id="currentVideoTitle">Selecione um conteúdo para reproduzir</h2>
-</div>
+<div class="info" id="infoMessage"></div>
 
 <div class="tabs">
     <div class="tab active" data-tab="videos"><i class="fas fa-video icon"></i>Vídeos</div>
@@ -485,6 +20,21 @@
 </div>
 
 <div class="tab-content active" id="videos-tab">
+    <!-- Movido o video-container para dentro da aba de vídeos -->
+    <div class="video-container">
+        <div class="loading-overlay" id="loadingOverlay">
+            <div style="text-align: center;">
+                <div class="loading-spinner"></div>
+                <div class="loading-text">Carregando vídeo...</div>
+            </div>
+        </div>
+        <video id="videoPlayer" controls controlsList="nodownload">
+            <source src="" type="video/mp4">
+            Seu navegador não suporta a tag de vídeo.
+        </video>
+        <h2 class="video-title" id="currentVideoTitle">Selecione um conteúdo para reproduzir</h2>
+    </div>
+
     <div class="controls">
         <div class="search-container">
             <input type="text"
@@ -586,6 +136,34 @@
     const VIDEO_CACHE_KEY = 'video_list_cache';
     const AUDIO_CACHE_KEY = 'audio_list_cache';
     const CACHE_DURATION = 5 * 60 * 1000; // 5 minutos
+
+    // Mapeamento de status de transcrição para mensagens e cores
+    const transcriptionStatusMap = {
+        "none": {
+            badge: null,
+            buttonClass: "btn-success",
+            buttonIcon: "fas fa-microphone",
+            buttonText: "Transcrever"
+        },
+        "started": {
+            badge: { text: "Transcrevendo", class: "badge-warning", icon: "fas fa-spinner fa-spin" },
+            buttonClass: "btn-warning",
+            buttonIcon: "fas fa-spinner fa-spin",
+            buttonText: "Transcrevendo..."
+        },
+        "ended": {
+            badge: { text: "Transcrito", class: "badge-success", icon: "fas fa-check" },
+            buttonClass: "btn-warning",
+            buttonIcon: "fas fa-file-alt",
+            buttonText: "Ver Transcrição"
+        },
+        "error": {
+            badge: { text: "Erro", class: "badge-error", icon: "fas fa-exclamation-circle" },
+            buttonClass: "btn-danger",
+            buttonIcon: "fas fa-redo",
+            buttonText: "Tentar Novamente"
+        }
+    };
 
     // Configurações do modal
     const modal = document.getElementById("transcriptionModal");
@@ -694,6 +272,11 @@
       $('#successMessage').text(message).show();
       setTimeout(() => $('#successMessage').hide(), 5000);
     }
+    
+    function showInfo(message) {
+      $('#infoMessage').text(message).show();
+      setTimeout(() => $('#infoMessage').hide(), 5000);
+    }
 
     // Renderização e gerenciamento de vídeos
     function renderVideoList(videos, searchTerm = '') {
@@ -709,18 +292,60 @@
         text;
 
       videos.forEach(video => {
+        // Verifica o status da transcrição (se existir)
+        const transcriptionStatus = video.transcription_status || "none";
+        
+        // Obtém os detalhes de exibição com base no status
+        const statusConfig = transcriptionStatusMap[transcriptionStatus] || transcriptionStatusMap["none"];
+        
+        // Indicador visual de transcrição (badge)
+        let transcriptionBadge = '';
+        if (statusConfig.badge) {
+          transcriptionBadge = $('<span>')
+            .addClass(`badge ${statusConfig.badge.class}`)
+            .html(`<i class="${statusConfig.badge.icon}"></i> ${statusConfig.badge.text}`)
+            .css('margin-left', '10px');
+        }
+        
+        // Adiciona botões de ação para o vídeo
+        const actionButtons = $('<div>')
+          .addClass('action-buttons')
+          .append(
+            $('<button>')
+              .addClass('btn btn-primary')
+              .html('<i class="fas fa-play icon"></i>Reproduzir')
+              .click((e) => {
+                e.stopPropagation();
+                playVideo(video);
+              })
+          );
+        
+        // Adiciona botão de transcrição se aplicável
+        if (transcriptionStatus === "ended") {
+          actionButtons.append(
+            $('<button>')
+              .addClass(`btn ${statusConfig.buttonClass}`)
+              .html(`<i class="${statusConfig.buttonIcon} icon"></i>${statusConfig.buttonText}`)
+              .click((e) => {
+                e.stopPropagation();
+                viewTranscription(video);
+              })
+          );
+        }
+        
         const videoElement = $('<div>')
           .addClass('video-item')
           .toggleClass('active', video.id === currentVideoId)
           .append(
-            $('<div>').html(highlight(video.name)),
+            $('<div>').html(highlight(video.name)).append(transcriptionBadge),
             $('<div>')
               .addClass('video-info')
               .append(
                 $('<div>').text(`Caminho: ${video.path}`),
                 $('<div>').text(`Modificado em: ${formatDate(video.modified_date)}`),
                 $('<div>').text(`Tamanho: ${formatFileSize(video.size)}`)
-              )
+              ),
+            actionButtons
           )
           .click(() => playVideo(video));
         videosDiv.append(videoElement);
@@ -741,10 +366,13 @@
         text;
 
       audios.forEach(audio => {
-        // Verificar explicitamente se o áudio tem transcrição
-        const hasTranscription = audio.has_transcription === true;
+        // Verifica o status da transcrição
+        const transcriptionStatus = audio.transcription_status || "none";
         
-        console.log(`Áudio ${audio.id} - has_transcription: ${hasTranscription}`);
+        console.log(`Áudio ${audio.id} - transcription_status: ${transcriptionStatus}`);
+        
+        // Obtém os detalhes de exibição com base no status
+        const statusConfig = transcriptionStatusMap[transcriptionStatus] || transcriptionStatusMap["none"];
         
         // Botões de ação para cada áudio
         const actionButtons = $('<div>')
@@ -759,37 +387,39 @@
               })
           );
           
-        // Adiciona o botão de transcrição
-        if (hasTranscription) {
-          // Se já tem transcrição, adiciona botão para visualizá-la
-          actionButtons.append(
-            $('<button>')
-              .addClass('btn btn-warning')
-              .html('<i class="fas fa-file-alt icon"></i>Ver Transcrição')
-              .click((e) => {
-                e.stopPropagation();
-                viewTranscription(audio);
-              })
-          );
-        } else {
-          // Se não tem transcrição, adiciona botão para criar
-          actionButtons.append(
-            $('<button>')
-              .addClass('btn btn-success')
-              .html('<i class="fas fa-microphone icon"></i>Transcrever')
-              .click((e) => {
-                e.stopPropagation();
-                transcribeAudio(audio);
-              })
-          );
+        // Adiciona o botão de transcrição com base no status
+        const transcribeBtn = $('<button>')
+          .addClass(`btn ${statusConfig.buttonClass}`)
+          .html(`<i class="${statusConfig.buttonIcon} icon"></i>${statusConfig.buttonText}`)
+          .click((e) => {
+            e.stopPropagation();
+            
+            // Comportamento com base no status
+            if (transcriptionStatus === "ended") {
+              // Se já está transcrito, visualiza a transcrição
+              viewTranscription(audio);
+            } else if (transcriptionStatus === "started") {
+              // Se está em andamento, verifica o status atual
+              checkTranscriptionStatus(audio);
+            } else {
+              // Se não tem transcrição ou teve erro, inicia nova transcrição
+              transcribeAudio(audio);
+            }
+          });
+          
+        // Se está em andamento, desabilita o botão
+        if (transcriptionStatus === "started") {
+          transcribeBtn.prop('disabled', true).addClass('btn-disabled');
         }
         
-        // Indicador visual de transcrição
+        actionButtons.append(transcribeBtn);
+        
+        // Indicador visual de transcrição (badge)
         let transcriptionBadge = '';
-        if (hasTranscription) {
+        if (statusConfig.badge) {
           transcriptionBadge = $('<span>')
-            .addClass('badge badge-success')
-            .html('<i class="fas fa-check"></i> Transcrito')
+            .addClass(`badge ${statusConfig.badge.class}`)
+            .html(`<i class="${statusConfig.badge.icon}"></i> ${statusConfig.badge.text}`)
             .css('margin-left', '10px');
         }
         
@@ -797,6 +427,7 @@
         const audioElement = $('<div>')
           .addClass('audio-item')
           .toggleClass('active', audio.id === currentAudioId)
+          .attr('data-id', audio.id)  // Adicionando o ID como atributo para facilitar a busca
           .append(
             $('<div>').html(highlight(audio.name)).append(transcriptionBadge),
             $('<div>')
@@ -816,6 +447,12 @@
           
         audiosDiv.append(audioElement);
       });
+      
+      // Inicia verificação periódica para áudios em transcrição
+      const inProgressAudios = audios.filter(audio => audio.transcription_status === "started");
+      if (inProgressAudios.length > 0) {
+        startTranscriptionStatusCheck(inProgressAudios);
+      }
     }
 
     // Funções de gerenciamento de vídeos
@@ -856,13 +493,8 @@
         return;
       }
 
-      // Tentamos obter do cache com a ordenação específica
-      const cachedVideos = getFromCache(sortBy, VIDEO_CACHE_KEY);
-      if (cachedVideos) {
-        currentVideos = cachedVideos;
-        filterVideos($('#searchVideoInput').val());
-        return;
-      }
+      // Limpa o cache para forçar atualização dos dados
+      localStorage.removeItem(VIDEO_CACHE_KEY);
 
       $.ajax({
         url: `${API_BASE_URL}/videos?sort_by=${sortBy}`,
@@ -870,6 +502,10 @@
         headers: getAuthHeaders(),
         success: function (response) {
           currentVideos = response.videos || [];
+          
+          // Verifica e atualiza status de transcrição para cada vídeo
+          checkTranscriptionStatusForAllItems(currentVideos, "video");
+          
           saveToCache(currentVideos, sortBy, VIDEO_CACHE_KEY);  // Salvamos com a ordenação atual
           filterVideos($('#searchVideoInput').val());
         },
@@ -899,6 +535,10 @@
         success: function (response) {
           currentAudios = response.audio_files || [];
           console.log("Áudios carregados:", currentAudios);
+          
+          // Verifica e atualiza status de transcrição para áudios (para manter compatibilidade com sistemas antigos)
+          checkTranscriptionStatusForAllItems(currentAudios, "audio");
+          
           saveToCache(currentAudios, null, AUDIO_CACHE_KEY);
           filterAudios($('#searchAudioInput').val());
         },
@@ -910,6 +550,120 @@
           }
         }
       });
+    }
+    
+    // Função para verificar o status de transcrição de todos os itens
+    function checkTranscriptionStatusForAllItems(items, type) {
+      // Para cada item, verifica se há has_transcription definido sem transcription_status
+      items.forEach(item => {
+        // Migra has_transcription antigo para transcription_status
+        if (item.has_transcription === true && !item.transcription_status) {
+          item.transcription_status = "ended";
+          console.log(`Atualizando ${type} ${item.id}: has_transcription = true -> transcription_status = ended`);
+        }
+        
+        // Se tiver caminho de transcrição mas não tiver status, considera como "ended"
+        if (item.transcription_path && (!item.transcription_status || item.transcription_status === "none")) {
+          item.transcription_status = "ended";
+          console.log(`Atualizando ${type} ${item.id}: tem caminho de transcrição -> transcription_status = ended`);
+        }
+        
+        // Para compatibilidade, verifica se o arquivo corresponde a um MD no sistema
+        // Isso só seria feito para uma migração completa, aqui só registramos no console
+        if (!item.transcription_status || item.transcription_status === "none") {
+          console.log(`${type} ${item.id} (${item.name}) não possui status de transcrição definido`);
+        }
+      });
+    }
+    
+    // Timer para verificar transcrições em andamento
+    let transcriptionCheckTimer = null;
+    
+    function startTranscriptionStatusCheck(audiosToCheck) {
+      // Limpa o timer existente, se houver
+      if (transcriptionCheckTimer) {
+        clearInterval(transcriptionCheckTimer);
+      }
+      
+      // Define um intervalo para verificar o status da transcrição
+      transcriptionCheckTimer = setInterval(() => {
+        audiosToCheck.forEach(audio => {
+          checkTranscriptionStatus(audio, false); // false indica verificação silenciosa
+        });
+      }, 10000); // Verifica a cada 10 segundos
+    }
+    
+    // Verifica o status da transcrição
+    async function checkTranscriptionStatus(audio, showMessages = true) {
+      if (!authToken) {
+        if (showMessages) showError('Erro de autenticação. Tentando reconectar...');
+        return authenticate();
+      }
+      
+      try {
+        if (showMessages) toggleLoading(true, "Verificando status da transcrição...");
+        
+        const response = await $.ajax({
+          url: `${API_BASE_URL}/audio/transcription_status/${audio.id}`,
+          method: 'GET',
+          headers: getAuthHeaders()
+        });
+        
+        if (showMessages) toggleLoading(false);
+        
+        console.log("Status da transcrição:", response);
+        
+        // Se o status mudou, atualiza a interface
+        if (response.status !== audio.transcription_status) {
+          console.log(`Status da transcrição mudou: ${audio.transcription_status} -> ${response.status}`);
+          
+          // Encontra o áudio na lista e atualiza seu status
+          const updatedAudios = currentAudios.map(a => {
+            if (a.id === audio.id) {
+              return { ...a, transcription_status: response.status };
+            }
+            return a;
+          });
+          
+          // Atualiza a lista de áudios
+          currentAudios = updatedAudios;
+          saveToCache(currentAudios, null, AUDIO_CACHE_KEY);
+          
+          // Renderiza novamente para mostrar o novo status
+          renderAudioList(currentAudios, $('#searchAudioInput').val());
+          
+          // Se a transcrição foi concluída e estamos mostrando mensagens
+          if (response.status === "ended" && showMessages) {
+            showSuccess("Transcrição concluída com sucesso!");
+            
+            // Pergunta se o usuário quer visualizar a transcrição
+            if (confirm("Transcrição concluída! Deseja visualizá-la agora?")) {
+              viewTranscription({...audio, transcription_status: "ended"});
+            }
+          } 
+          // Se houve erro e estamos mostrando mensagens
+          else if (response.status === "error" && showMessages) {
+            showError("Ocorreu um erro durante a transcrição. Você pode tentar novamente.");
+          }
+        } else if (showMessages) {
+          // Se o status não mudou, mas estamos mostrando mensagens
+          if (response.status === "started") {
+            showInfo("A transcrição ainda está em andamento. Por favor, aguarde.");
+          } else if (response.status === "ended") {
+            viewTranscription({...audio, transcription_status: "ended"});
+          }
+        }
+        
+        return response.status;
+      } catch (error) {
+        if (showMessages) {
+          console.error('Erro:', error);
+          toggleLoading(false);
+          showError(`Erro ao verificar status da transcrição: ${error.message}`);
+        }
+        if (error.status === 401) authenticate();
+        return null;
+      }
     }
 
     async function playVideo(video) {
@@ -976,12 +730,11 @@
         
         // Atualiza o elemento ativo
         $('.audio-item').removeClass('active');
-        $(`.audio-item:contains('${audio.name}')`).addClass('active');
+        $(`.audio-item[data-id="${audio.id}"]`).addClass('active');
         currentAudioId = audio.id;
         
         // Carregando o arquivo de áudio - como não temos um endpoint específico, 
         // você precisaria implementar isso no backend ou ajustar este código
-        $('#currentVideoTitle').text(audio.name);
         toggleLoading(false);
         
         showError("Reprodução de áudio ainda não implementada");
@@ -995,7 +748,7 @@
     }
     
     // Função para visualizar uma transcrição existente
-    async function viewTranscription(audio) {
+    async function viewTranscription(item) {
       if (!authToken) {
         showError('Erro de autenticação. Tentando reconectar...');
         return authenticate();
@@ -1005,13 +758,13 @@
         toggleLoading(true, "Carregando transcrição..."); 
         
         // Define o ID atual para download posterior
-        currentTranscriptionId = audio.id;
+        currentTranscriptionId = item.id;
         
         // Atualiza o título do modal
-        $('#transcriptionTitle').text(`Transcrição: ${audio.name}`);
+        $('#transcriptionTitle').text(`Transcrição: ${item.name || item.title}`);
         
         // Carrega a transcrição
-        const response = await fetch(`${API_BASE_URL}/audio/transcription/${audio.id}`, {
+        const response = await fetch(`${API_BASE_URL}/audio/transcription/${item.id}`, {
           headers: getAuthHeaders()
         });
         
@@ -1111,7 +864,7 @@
           // Tenta encontrar o áudio na lista
           const audioId = existsCheck.audio_info.id;
           setTimeout(() => {
-            const audioElement = $(`.audio-item:contains('${existsCheck.audio_info.title}')`);
+            const audioElement = $(`.audio-item[data-id="${audioId}"]`);
             if (audioElement.length) {
               // Rola para o elemento
               const container = $('.audio-list');
@@ -1187,16 +940,24 @@
         return;
       }
       
-      // Se já existe transcrição
-      if (audio.has_transcription === true) {
-        // Verifica se deseja baixar ou substituir
-        if (confirm('Este áudio já possui uma transcrição. Deseja visualizá-la?')) {
-          // Visualiza a transcrição
-          viewTranscription(audio);
-          return;
-        } else if (!confirm('Deseja substituir a transcrição existente?')) {
-          return; // Usuário cancelou
-        }
+      // Verifica o status atual da transcrição
+      const transcriptionStatus = audio.transcription_status || "none";
+      
+      // Se já está concluída
+      if (transcriptionStatus === "ended") {
+        viewTranscription(audio);
+        return;
+      }
+      
+      // Se está em andamento
+      if (transcriptionStatus === "started") {
+        showInfo("Transcrição em andamento. Por favor, aguarde a conclusão.");
+        return;
+      }
+      
+      // Se teve erro anteriormente, confirma se deseja tentar novamente
+      if (transcriptionStatus === "error" && !confirm("Houve um erro na transcrição anterior. Deseja tentar novamente?")) {
+        return;
       }
       
       try {
@@ -1221,17 +982,37 @@
         if (response.status === 'processing') {
           showSuccess('Transcrição iniciada em segundo plano. Isso pode levar alguns minutos.');
           
-          // Programa uma atualização da lista de áudio após algum tempo
-          setTimeout(() => {
-            localStorage.removeItem(AUDIO_CACHE_KEY); // Invalida o cache
-            loadAudioList(); // Recarrega a lista
-          }, 30000); // Aguarda 30 segundos
+          // Atualiza o status na interface
+          const updatedAudios = currentAudios.map(a => {
+            if (a.id === audio.id) {
+              return { ...a, transcription_status: "started" };
+            }
+            return a;
+          });
+          
+          currentAudios = updatedAudios;
+          saveToCache(currentAudios, null, AUDIO_CACHE_KEY);
+          renderAudioList(currentAudios, $('#searchAudioInput').val());
+          
+          // Inicia verificação periódica do status
+          startTranscriptionStatusCheck([{...audio, transcription_status: "started"}]);
         } else if (response.status === 'success') {
           showSuccess('Transcrição já existe! Carregando visualização...');
+          
+          // Atualiza o status na interface
+          const updatedAudios = currentAudios.map(a => {
+            if (a.id === audio.id) {
+              return { ...a, transcription_status: "ended" };
+            }
+            return a;
+          });
+          
+          currentAudios = updatedAudios;
+          saveToCache(currentAudios, null, AUDIO_CACHE_KEY);
+          renderAudioList(currentAudios, $('#searchAudioInput').val());
+          
           // Mostrar a transcrição existente
-          viewTranscription(audio);
-          localStorage.removeItem(AUDIO_CACHE_KEY); // Invalida o cache
-          loadAudioList(); // Recarrega a lista
+          viewTranscription({...audio, transcription_status: "ended"});
         } else {
           showError('Falha ao iniciar a transcrição');
         }

@@ -1054,6 +1054,27 @@
       }
     }
     
+    // Verifica se o áudio já existe
+    async function checkAudioExists(url) {
+      if (!authToken) {
+        showError('Erro de autenticação. Tentando reconectar...');
+        return authenticate();
+      }
+      
+      try {
+        const response = await $.ajax({
+          url: `${API_BASE_URL}/audio/check_exists?youtube_url=${encodeURIComponent(url)}`,
+          method: 'GET',
+          headers: getAuthHeaders()
+        });
+        
+        return response;
+      } catch (error) {
+        console.error('Erro ao verificar existência do áudio:', error);
+        throw error;
+      }
+    }
+    
     async function downloadAudio() {
       if (!authToken) {
         showError('Erro de autenticação. Tentando reconectar...');
@@ -1075,7 +1096,42 @@
       }
       
       try {
-        toggleLoading(true, "Iniciando download de áudio..."); // Mostra o loading
+        toggleLoading(true, "Verificando se o áudio já existe..."); // Mostra o loading
+        
+        // Primeiro, verifica se o áudio já existe
+        const existsCheck = await checkAudioExists(youtubeUrl);
+        
+        if (existsCheck.exists) {
+          toggleLoading(false);
+          showSuccess(`Áudio já foi baixado anteriormente: ${existsCheck.audio_info.title}`);
+          
+          // Navega para a aba de áudio e destaca o áudio existente
+          $('.tab[data-tab="audio"]').click();
+          
+          // Tenta encontrar o áudio na lista
+          const audioId = existsCheck.audio_info.id;
+          setTimeout(() => {
+            const audioElement = $(`.audio-item:contains('${existsCheck.audio_info.title}')`);
+            if (audioElement.length) {
+              // Rola para o elemento
+              const container = $('.audio-list');
+              container.animate({
+                scrollTop: audioElement.offset().top - container.offset().top + container.scrollTop()
+              }, 500);
+              
+              // Destaca o elemento por um momento
+              audioElement.addClass('highlight');
+              setTimeout(() => {
+                audioElement.removeClass('highlight');
+              }, 2000);
+            }
+          }, 500);
+          
+          return;
+        }
+        
+        // Se não existe, continua com o download
+        toggleLoading(true, "Iniciando download de áudio..."); 
         
         const response = await $.ajax({
           url: `${API_BASE_URL}/audio/download`,

@@ -98,6 +98,43 @@ class AudioDownloadManager:
         except Exception as e:
             logger.error(f"Erro ao salvar arquivo de configuração de áudio: {str(e)}")
     
+    def extract_youtube_id(self, url: str) -> Optional[str]:
+        """
+        Extrai o ID do YouTube de uma URL
+        
+        Args:
+            url: URL do vídeo do YouTube
+            
+        Returns:
+            ID do YouTube ou None se não for possível extrair
+        """
+        try:
+            # Primeiro, tenta extrair o ID usando expressões regulares
+            youtube_id = None
+            
+            # Padrão para URLs no formato https://www.youtube.com/watch?v=VIDEO_ID
+            match = re.search(r'(?:youtube\.com/watch\?v=|youtu\.be/)([a-zA-Z0-9_-]+)', url)
+            if match:
+                youtube_id = match.group(1)
+            
+            # Se não encontrou com regex, tenta usando yt-dlp
+            if not youtube_id:
+                ydl_info_opts = {
+                    'quiet': True,
+                    'no_warnings': True,
+                    'skip_download': True,
+                    'extract_flat': True
+                }
+                
+                with YoutubeDL(ydl_info_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    youtube_id = info.get('id', '')
+            
+            return youtube_id
+        except Exception as e:
+            logger.error(f"Erro ao extrair ID do YouTube: {str(e)}")
+            return None
+    
     def download_audio(self, url: str) -> str:
         """
         Baixa apenas o áudio de um vídeo do YouTube em alta qualidade.
@@ -113,22 +150,12 @@ class AudioDownloadManager:
             logger.info(f"Iniciando download de áudio: {url}")
             
             # Primeiro, vamos extrair as informações do vídeo para obter o ID do YouTube
-            ydl_info_opts = {
-                'quiet': True,
-                'no_warnings': True,
-                'skip_download': True,
-                'extract_flat': True
-            }
-            
-            # Obtém informações do vídeo primeiro
-            with YoutubeDL(ydl_info_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                youtube_id = info.get('id', '')
+            youtube_id = self.extract_youtube_id(url)
                 
-                if not youtube_id:
-                    logger.warning("Não foi possível obter o ID do YouTube, usando data atual como fallback")
-                    # Fallback para um formato de data se não conseguir obter o ID
-                    youtube_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            if not youtube_id:
+                logger.warning("Não foi possível obter o ID do YouTube, usando data atual como fallback")
+                # Fallback para um formato de data se não conseguir obter o ID
+                youtube_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             
             # Cria um diretório específico usando o ID do YouTube
             download_dir = self.download_dir / youtube_id

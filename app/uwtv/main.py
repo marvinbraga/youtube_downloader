@@ -106,6 +106,46 @@ async def stream_video(
     )
 
 
+# Novo endpoint para verificar se um áudio já existe
+@app.get("/audio/check_exists")
+async def check_audio_exists(
+        youtube_url: str,
+        token_data: dict = Depends(verify_token)
+):
+    """
+    Verifica se um áudio de um vídeo do YouTube já foi baixado (requer autenticação)
+    """
+    try:
+        logger.info(f"Verificando se áudio já existe para URL: {youtube_url}")
+        
+        # Extrai o ID do YouTube da URL
+        youtube_id = audio_manager.extract_youtube_id(youtube_url)
+        
+        if not youtube_id:
+            logger.warning(f"Não foi possível extrair o ID do YouTube da URL: {youtube_url}")
+            return {"exists": False, "message": "URL inválida ou não reconhecida"}
+        
+        # Verifica se existe algum áudio com este ID do YouTube
+        for audio in audio_manager.audio_data["audios"]:
+            if audio.get("youtube_id") == youtube_id:
+                logger.info(f"Áudio com ID '{youtube_id}' já existe no sistema")
+                return {
+                    "exists": True, 
+                    "message": "Este áudio já foi baixado anteriormente",
+                    "audio_info": audio
+                }
+        
+        logger.info(f"Áudio com ID '{youtube_id}' não encontrado no sistema")
+        return {"exists": False, "message": "Áudio não encontrado no sistema"}
+        
+    except Exception as e:
+        logger.exception(f"Erro ao verificar existência do áudio: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao verificar existência do áudio: {str(e)}"
+        )
+
+
 # Novos endpoints para download de áudio e transcrição
 
 @app.post("/audio/download")

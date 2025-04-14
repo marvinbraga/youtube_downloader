@@ -2,7 +2,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import theme from '../styles/theme';
+import { themes } from '../styles/theme';
 
 // Chave para armazenar preferência de tema
 const THEME_PREFERENCE_KEY = '@theme_preference';
@@ -17,13 +17,15 @@ type ThemeContextType = {
   colors: any;
   toggleTheme: () => void;
   setThemeMode: (mode: ThemeMode) => void;
+  theme: any; // Tema completo incluindo cores e outras propriedades
 };
 
 // Criar o contexto
 const ThemeContext = createContext<ThemeContextType>({
   themeMode: 'system',
   isDarkTheme: true,
-  colors: theme.colors,
+  colors: themes.dark.colors,
+  theme: themes.dark,
   toggleTheme: () => {},
   setThemeMode: () => {},
 });
@@ -45,8 +47,11 @@ export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       ? colorScheme === 'dark' 
       : themeMode === 'dark';
   
+  // Selecionar o tema completo baseado na preferência
+  const currentTheme = isDarkTheme ? themes.dark : themes.light;
+  
   // Cores baseadas no tema atual
-  const colors = theme.colors;
+  const colors = currentTheme.colors;
   
   // Alternar entre temas
   const toggleTheme = () => {
@@ -91,6 +96,7 @@ export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     themeMode,
     isDarkTheme,
     colors,
+    theme: currentTheme,
     toggleTheme,
     setThemeMode: setThemeModeAndSave,
   };

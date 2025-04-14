@@ -2,7 +2,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import { theme } from '../styles/theme';
+import { useTheme } from '../context/ThemeContext';
 
 interface TranscriptionModalProps {
   visible: boolean;
@@ -21,6 +21,8 @@ const TranscriptionModal: React.FC<TranscriptionModalProps> = ({
   onClose,
   onDownload
 }) => {
+  const { colors, theme } = useTheme();
+
   return (
     <Modal
       animationType="fade"
@@ -28,29 +30,59 @@ const TranscriptionModal: React.FC<TranscriptionModalProps> = ({
       visible={visible}
       onRequestClose={onClose}
     >
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>{title}</Text>
+      <View style={[
+        styles.modalOverlay,
+        theme.componentStyles.modal.overlay
+      ]}>
+        <View style={[
+          styles.modalContainer,
+          theme.componentStyles.modal.container,
+          { 
+            backgroundColor: colors.background.primary,
+            ...theme.shadows.lg
+          }
+        ]}>
+          <View style={[
+            styles.modalHeader,
+            theme.componentStyles.modal.header,
+            { borderBottomColor: colors.border }
+          ]}>
+            <Text style={[styles.modalTitle, { color: colors.text.primary }]}>
+              {title}
+            </Text>
             <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-              <Feather name="x" size={24} color="#aaa" />
+              <Feather name="x" size={24} color={colors.text.secondary} />
             </TouchableOpacity>
           </View>
           
-          <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalContent}>
+          <ScrollView 
+            style={[styles.modalBody, theme.componentStyles.modal.body]}
+            contentContainerStyle={styles.modalContent}
+          >
             {isLoading ? (
               <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color={theme.colors.primary} />
-                <Text style={styles.loadingText}>Carregando transcrição...</Text>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <Text style={[styles.loadingText, { color: colors.text.primary }]}>
+                  Carregando transcrição...
+                </Text>
               </View>
             ) : (
-              <Text style={styles.transcriptionText}>{content}</Text>
+              <Text style={[styles.transcriptionText, { color: colors.text.primary }]}>
+                {content}
+              </Text>
             )}
           </ScrollView>
           
-          <View style={styles.modalFooter}>
+          <View style={[
+            styles.modalFooter,
+            theme.componentStyles.modal.footer,
+            { borderTopColor: colors.border }
+          ]}>
             <TouchableOpacity 
-              style={styles.downloadButton}
+              style={[
+                styles.downloadButton,
+                { backgroundColor: colors.primary }
+              ]}
               onPress={onDownload}
               disabled={isLoading}
             >
@@ -74,10 +106,8 @@ const styles = StyleSheet.create({
   modalContainer: {
     width: '90%',
     maxHeight: '80%',
-    backgroundColor: 'white',
     borderRadius: 12,
     overflow: 'hidden',
-    ...theme.shadows.lg
   },
   modalHeader: {
     flexDirection: 'row',
@@ -85,12 +115,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: theme.colors.textDark,
   },
   closeButton: {
     padding: 4,
@@ -104,7 +132,6 @@ const styles = StyleSheet.create({
   transcriptionText: {
     fontSize: 16,
     lineHeight: 24,
-    color: theme.colors.textDark,
   },
   loadingContainer: {
     padding: 20,
@@ -114,16 +141,13 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 12,
     fontSize: 16,
-    color: theme.colors.textDark,
   },
   modalFooter: {
     borderTopWidth: 1,
-    borderTopColor: theme.colors.border,
     padding: 16,
     alignItems: 'flex-end',
   },
   downloadButton: {
-    backgroundColor: theme.colors.primary,
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 8,

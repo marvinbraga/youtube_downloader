@@ -10,7 +10,7 @@ import ThemeToggle from '../components/ThemeToggle';
 const Tab = createBottomTabNavigator();
 
 const Navigation = () => {
-  const { isDarkTheme, colors } = useTheme();
+  const { isDarkTheme, colors, theme } = useTheme();
   
   // Criar um tema personalizado para o NavigationContainer baseado no tema atual
   const navigationTheme = {
@@ -18,10 +18,10 @@ const Navigation = () => {
     colors: {
       ...(isDarkTheme ? DarkTheme.colors : DefaultTheme.colors),
       primary: colors.primary,
-      background: colors.background?.primary || '#f8fafc',
-      card: colors.background?.secondary || '#f1f5f9',
-      text: colors.text?.primary || '#0f172a',
-      border: colors.border || '#cbd5e1',
+      background: colors.background.primary,
+      card: colors.background.secondary,
+      text: colors.text.primary,
+      border: colors.border,
     },
   };
   
@@ -42,17 +42,21 @@ const Navigation = () => {
 
             return <Ionicons name={iconName as any} size={size} color={color} />;
           },
-          tabBarActiveTintColor: colors.accent || '#3B82F6',
-          tabBarInactiveTintColor: colors.text?.secondary || '#64748b',
+          tabBarActiveTintColor: colors.accent,
+          tabBarInactiveTintColor: colors.text.secondary,
+          tabBarStyle: {
+            backgroundColor: colors.background.secondary,
+            borderTopColor: colors.border,
+          },
           headerStyle: {
-            backgroundColor: colors.background?.secondary || '#f1f5f9',
-            shadowColor: colors.accent || '#3B82F6',
+            backgroundColor: colors.background.secondary,
+            shadowColor: colors.accent,
             shadowOpacity: 0.1,
             shadowOffset: { width: 0, height: 2 },
             shadowRadius: 2,
             elevation: 3,
           },
-          headerTintColor: colors.text?.primary || '#0f172a',
+          headerTintColor: colors.text.primary,
           headerTitleStyle: {
             fontWeight: 'bold',
           },

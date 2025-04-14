@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
-import { theme } from '../styles/theme';
+import { useTheme } from '../context/ThemeContext';
 
 type MessageType = 'error' | 'success' | 'info';
 
@@ -19,6 +19,7 @@ const StatusMessage: React.FC<StatusMessageProps> = ({
   onClose
 }) => {
   const [fadeAnim] = useState(new Animated.Value(0));
+  const { colors, theme } = useTheme();
   
   useEffect(() => {
     Animated.sequence([
@@ -41,13 +42,13 @@ const StatusMessage: React.FC<StatusMessageProps> = ({
   const getBackgroundColor = () => {
     switch (type) {
       case 'error':
-        return theme.colors.error;
+        return colors.error;
       case 'success':
-        return theme.colors.tertiary;
+        return colors.success;
       case 'info':
-        return theme.colors.info;
+        return colors.info;
       default:
-        return theme.colors.info;
+        return colors.info;
     }
   };
   
@@ -55,10 +56,17 @@ const StatusMessage: React.FC<StatusMessageProps> = ({
     <Animated.View 
       style={[
         styles.container, 
-        { backgroundColor: getBackgroundColor(), opacity: fadeAnim }
+        theme.componentStyles.statusMessage.container,
+        { backgroundColor: getBackgroundColor(), opacity: fadeAnim },
+        theme.shadows.md
       ]}
     >
-      <Text style={styles.message}>{message}</Text>
+      <Text style={[
+        styles.message, 
+        theme.componentStyles.statusMessage.text
+      ]}>
+        {message}
+      </Text>
     </Animated.View>
   );
 };
@@ -69,14 +77,7 @@ const styles = StyleSheet.create({
     top: 40,
     right: 20,
     left: 20,
-    padding: 12,
-    borderRadius: 8,
     zIndex: 1000,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
   },
   message: {
     color: 'white',

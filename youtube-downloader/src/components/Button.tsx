@@ -39,7 +39,7 @@ const Button: React.FC<ButtonProps> = ({
   disabled,
   ...rest
 }) => {
-  const { isDarkTheme, colors } = useTheme();
+  const { isDarkTheme, colors, theme } = useTheme();
   
   // Determinar os gradientes com base no tema e variante
   const getGradientColors = () => {
@@ -47,20 +47,23 @@ const Button: React.FC<ButtonProps> = ({
       return gradientColors;
     }
     
+    // Gradientes padrão baseados no tema atual
+    const themeMode = isDarkTheme ? 'dark' : 'light';
+    
     // Gradientes padrão para cada variante
     switch (variant) {
       case 'primary':
-        return ['#4F46E5', '#3B82F6'];
+        return theme.gradients.primary[themeMode];
       case 'secondary':
-        return ['#3B82F6', '#38BDF8'];
+        return theme.gradients.secondary[themeMode];
       case 'success':
-        return ['#22c55e', '#4ade80'];
+        return [colors.success, isDarkTheme ? '#4ade80' : '#86efac'];
       case 'warning':
-        return ['#f59e0b', '#fbbf24'];
+        return [colors.warning, isDarkTheme ? '#fbbf24' : '#fcd34d'];
       case 'danger':
-        return ['#ef4444', '#f87171'];
+        return [colors.error, isDarkTheme ? '#f87171' : '#fca5a5'];
       default:
-        return ['#4F46E5', '#3B82F6'];
+        return theme.gradients.primary[themeMode];
     }
   };
   
@@ -69,24 +72,24 @@ const Button: React.FC<ButtonProps> = ({
     switch (size) {
       case 'sm':
         return {
-          paddingVertical: 6,
-          paddingHorizontal: 12,
-          fontSize: 14,
+          paddingVertical: theme.spacing.xs,
+          paddingHorizontal: theme.spacing.sm,
+          fontSize: theme.fontSizes.sm,
           iconSize: 14,
         };
       case 'lg':
         return {
-          paddingVertical: 12,
-          paddingHorizontal: 24,
-          fontSize: 18,
+          paddingVertical: theme.spacing.sm,
+          paddingHorizontal: theme.spacing.md,
+          fontSize: theme.fontSizes.lg,
           iconSize: 18,
         };
       case 'md':
       default:
         return {
-          paddingVertical: 10,
-          paddingHorizontal: 16,
-          fontSize: 16,
+          paddingVertical: theme.spacing.sm,
+          paddingHorizontal: theme.spacing.md,
+          fontSize: theme.fontSizes.md,
           iconSize: 16,
         };
     }
@@ -96,23 +99,26 @@ const Button: React.FC<ButtonProps> = ({
   
   // Conteúdo do botão (ícones, texto ou loading)
   const renderContent = () => {
+    const iconColor = variant === 'outline' ? colors.text.primary : '#fff';
+    const textColor = variant === 'outline' ? colors.text.primary : '#fff';
+    
     const content = (
       <>
         {isLoading ? (
-          <ActivityIndicator color="#fff" size={sizeStyle.iconSize} />
+          <ActivityIndicator color={textColor} size={sizeStyle.iconSize} />
         ) : (
           <>
             {leftIcon && (
               <Feather 
                 name={leftIcon as any} 
                 size={sizeStyle.iconSize} 
-                color="#fff" 
+                color={iconColor} 
                 style={styles.leftIcon} 
               />
             )}
             <Text style={[
               styles.text, 
-              { fontSize: sizeStyle.fontSize },
+              { fontSize: sizeStyle.fontSize, color: textColor },
               textStyle
             ]}>
               {title}
@@ -121,7 +127,7 @@ const Button: React.FC<ButtonProps> = ({
               <Feather 
                 name={rightIcon as any} 
                 size={sizeStyle.iconSize} 
-                color="#fff" 
+                color={iconColor} 
                 style={styles.rightIcon} 
               />
             )}
@@ -142,8 +148,9 @@ const Button: React.FC<ButtonProps> = ({
             { 
               paddingVertical: sizeStyle.paddingVertical,
               paddingHorizontal: sizeStyle.paddingHorizontal,
+              borderRadius: theme.borderRadius.md,
             },
-            disabled && styles.disabled,
+            disabled && theme.states.button.disabled,
             style
           ]}
         >
@@ -153,6 +160,11 @@ const Button: React.FC<ButtonProps> = ({
     }
     
     // Para botões 'outline' e 'secondary'
+    return content;
+  };
+  
+  // Se for outline ou secondary, coloca o TouchableOpacity fora
+  if (variant === 'outline' || variant === 'secondary') {
     return (
       <TouchableOpacity
         style={[
@@ -163,19 +175,30 @@ const Button: React.FC<ButtonProps> = ({
             backgroundColor: variant === 'secondary' ? colors.background.secondary : 'transparent',
             borderWidth: variant === 'outline' ? 1 : 0,
             borderColor: colors.border,
+            borderRadius: theme.borderRadius.md,
           },
-          disabled && styles.disabled,
+          disabled && theme.states.button.disabled,
           style
         ]}
         disabled={disabled || isLoading}
         {...rest}
       >
-        {content}
+        {renderContent()}
       </TouchableOpacity>
     );
-  };
+  }
   
-  return renderContent();
+  // Para botões com gradiente
+  return (
+    <TouchableOpacity
+      activeOpacity={0.8}
+      disabled={disabled || isLoading}
+      style={[disabled && theme.states.button.disabled]}
+      {...rest}
+    >
+      {renderContent()}
+    </TouchableOpacity>
+  );
 };
 
 const styles = StyleSheet.create({
@@ -183,11 +206,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 8,
     overflow: 'hidden',
   },
   text: {
-    color: 'white',
     fontWeight: '600',
     textAlign: 'center',
   },
@@ -196,9 +217,6 @@ const styles = StyleSheet.create({
   },
   rightIcon: {
     marginLeft: 8,
-  },
-  disabled: {
-    opacity: 0.6,
   },
 });
 

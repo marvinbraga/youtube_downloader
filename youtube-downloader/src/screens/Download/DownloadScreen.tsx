@@ -15,12 +15,13 @@ import {
 import { Feather } from '@expo/vector-icons';
 import { checkAudioExists, downloadAudio } from '../../services/api';
 import StatusMessage from '../../components/StatusMessage';
-import { theme } from '../../styles/theme';
+import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigation } from '@react-navigation/native';
 
 const DownloadScreen: React.FC = () => {
   const { authState, login } = useAuth();
+  const { colors, theme } = useTheme();
   const navigation = useNavigation();
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [highQuality, setHighQuality] = useState(true);
@@ -108,8 +109,11 @@ const DownloadScreen: React.FC = () => {
       style={{ flex: 1 }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
-        <View style={styles.container}>
+      <ScrollView 
+        contentContainerStyle={styles.scrollContainer}
+        style={{ backgroundColor: colors.background.primary }}
+      >
+        <View style={[styles.container, { backgroundColor: colors.background.primary }]}>
           {statusMessage && (
             <StatusMessage
               message={statusMessage.message}
@@ -118,17 +122,33 @@ const DownloadScreen: React.FC = () => {
             />
           )}
           
-          <View style={styles.formContainer}>
+          <View style={[
+            styles.formContainer, 
+            { 
+              backgroundColor: colors.background.secondary,
+              ...theme.shadows.sm
+            }
+          ]}>
             <View style={styles.formHeader}>
-              <Feather name="download" size={24} color={theme.colors.primary} />
-              <Text style={styles.formTitle}>Download de Áudio do YouTube</Text>
+              <Feather name="download" size={24} color={colors.primary} />
+              <Text style={[styles.formTitle, { color: colors.text.primary }]}>
+                Download de Áudio do YouTube
+              </Text>
             </View>
             
             <View style={styles.formGroup}>
-              <Text style={styles.label}>URL do YouTube:</Text>
+              <Text style={[styles.label, { color: colors.text.primary }]}>URL do YouTube:</Text>
               <TextInput
-                style={styles.input}
+                style={[
+                  styles.input, 
+                  { 
+                    backgroundColor: colors.background.primary,
+                    borderColor: colors.border,
+                    color: colors.text.primary
+                  }
+                ]}
                 placeholder="https://www.youtube.com/watch?v=..."
+                placeholderTextColor={colors.text.secondary}
                 value={youtubeUrl}
                 onChangeText={setYoutubeUrl}
                 autoCapitalize="none"
@@ -138,18 +158,24 @@ const DownloadScreen: React.FC = () => {
             
             <View style={styles.formGroup}>
               <View style={styles.switchContainer}>
-                <Text style={styles.switchLabel}>Alta qualidade de áudio</Text>
+                <Text style={[styles.switchLabel, { color: colors.text.primary }]}>
+                  Alta qualidade de áudio
+                </Text>
                 <Switch
                   value={highQuality}
                   onValueChange={setHighQuality}
                   trackColor={{ false: '#d1d1d1', true: '#a3d4ff' }}
-                  thumbColor={highQuality ? theme.colors.primary : '#f4f3f4'}
+                  thumbColor={highQuality ? colors.primary : '#f4f3f4'}
                 />
               </View>
             </View>
             
             <TouchableOpacity
-              style={[styles.downloadButton, !isValidYoutubeUrl(youtubeUrl) && styles.downloadButtonDisabled]}
+              style={[
+                styles.downloadButton, 
+                { backgroundColor: colors.secondary },
+                !isValidYoutubeUrl(youtubeUrl) && styles.downloadButtonDisabled
+              ]}
               onPress={handleDownload}
               disabled={!isValidYoutubeUrl(youtubeUrl) || isLoading}
             >
@@ -164,27 +190,35 @@ const DownloadScreen: React.FC = () => {
             </TouchableOpacity>
             
             <View style={styles.infoContainer}>
-              <Feather name="info" size={18} color={theme.colors.info} style={styles.infoIcon} />
-              <Text style={styles.infoText}>
+              <Feather name="info" size={18} color={colors.info} style={styles.infoIcon} />
+              <Text style={[styles.infoText, { color: colors.text.primary }]}>
                 O download pode demorar alguns minutos dependendo do tamanho do vídeo.
                 Após concluído, o áudio estará disponível na aba "Áudio".
               </Text>
             </View>
           </View>
           
-          <View style={styles.transcriptionInfoContainer}>
+          <View style={[
+            styles.transcriptionInfoContainer, 
+            { 
+              backgroundColor: colors.background.secondary,
+              ...theme.shadows.sm
+            }
+          ]}>
             <View style={styles.formHeader}>
-              <Feather name="file-text" size={24} color={theme.colors.primary} />
-              <Text style={styles.formTitle}>Transcrição de Áudio</Text>
+              <Feather name="file-text" size={24} color={colors.primary} />
+              <Text style={[styles.formTitle, { color: colors.text.primary }]}>
+                Transcrição de Áudio
+              </Text>
             </View>
             
-            <Text style={styles.transcriptionInfoText}>
+            <Text style={[styles.transcriptionInfoText, { color: colors.text.primary }]}>
               Selecione um arquivo de áudio na aba "Áudio" e use o botão de transcrição para converter áudio em texto.
             </Text>
             
             <View style={styles.infoContainer}>
-              <Feather name="alert-circle" size={18} color={theme.colors.warning} style={styles.infoIcon} />
-              <Text style={styles.infoText}>
+              <Feather name="alert-circle" size={18} color={colors.warning} style={styles.infoIcon} />
+              <Text style={[styles.infoText, { color: colors.text.primary }]}>
                 A transcrição é processada em segundo plano e pode demorar alguns minutos para ser concluída.
               </Text>
             </View>
@@ -201,15 +235,12 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    backgroundColor: '#fff',
     padding: 16,
   },
   formContainer: {
-    backgroundColor: theme.colors.backgroundLight,
     borderRadius: 8,
     padding: 16,
     marginBottom: 20,
-    ...theme.shadows.sm
   },
   formHeader: {
     flexDirection: 'row',
@@ -220,7 +251,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     marginLeft: 10,
-    color: theme.colors.textDark,
   },
   formGroup: {
     marginBottom: 16,
@@ -229,12 +259,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 8,
     fontWeight: '500',
-    color: theme.colors.textDark,
   },
   input: {
-    backgroundColor: '#fff',
     borderWidth: 1,
-    borderColor: theme.colors.border,
     borderRadius: 4,
     padding: 12,
     fontSize: 16,
@@ -247,10 +274,8 @@ const styles = StyleSheet.create({
   },
   switchLabel: {
     fontSize: 16,
-    color: theme.colors.textDark,
   },
   downloadButton: {
-    backgroundColor: theme.colors.secondary,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -281,18 +306,14 @@ const styles = StyleSheet.create({
   },
   infoText: {
     flex: 1,
-    color: theme.colors.textDark,
     lineHeight: 20,
   },
   transcriptionInfoContainer: {
-    backgroundColor: theme.colors.backgroundLight,
     borderRadius: 8,
     padding: 16,
-    ...theme.shadows.sm
   },
   transcriptionInfoText: {
     fontSize: 16,
-    color: theme.colors.textDark,
     marginBottom: 16,
     lineHeight: 22,
   },

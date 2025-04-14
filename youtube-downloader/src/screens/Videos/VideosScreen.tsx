@@ -26,7 +26,7 @@ import { Video } from '../../types';
 import VideoItem from '../../components/VideoItem';
 import TranscriptionModal from '../../components/TranscriptionModal';
 import StatusMessage from '../../components/StatusMessage';
-import theme from '../../styles/theme';
+import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 
 const { width } = Dimensions.get('window');
@@ -39,6 +39,7 @@ enum SortOption {
 
 const VideosScreen: React.FC = () => {
   const { authState, login } = useAuth();
+  const { colors, theme } = useTheme();
   const videoPlayerRef = useRef<VideoPlayer>(null);
   const transcriptionCheckTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [videos, setVideos] = useState<Video[]>([]);
@@ -523,7 +524,7 @@ const VideosScreen: React.FC = () => {
   };
   
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background.primary }]}>
       {statusMessage && (
         <StatusMessage
           message={statusMessage.message}
@@ -535,7 +536,7 @@ const VideosScreen: React.FC = () => {
       <View style={styles.videoContainer}>
         {isPlayerLoading && (
           <View style={styles.loadingOverlay}>
-            <ActivityIndicator size="large" color={theme.colors.primary} />
+            <ActivityIndicator size="large" color={colors.primary} />
             <Text style={styles.loadingText}>Carregando vídeo...</Text>
           </View>
         )}
@@ -571,57 +572,119 @@ const VideosScreen: React.FC = () => {
         <Text style={styles.videoTitle}>{currentVideoTitle}</Text>
       </View>
       
-      <View style={styles.controlsContainer}>
+      <View style={[styles.controlsContainer, { backgroundColor: colors.background.secondary }]}>
         <TextInput
-          style={styles.searchInput}
+          style={[styles.searchInput, { 
+            backgroundColor: colors.background.primary,
+            borderColor: colors.border,
+            color: colors.text.primary
+          }]}
           placeholder="Digite para buscar vídeos..."
+          placeholderTextColor={colors.text.secondary}
           value={searchQuery}
           onChangeText={setSearchQuery}
         />
         
-        <Text style={styles.sortLabel}>Ordenar por:</Text>
+        <Text style={[styles.sortLabel, { color: colors.text.primary }]}>Ordenar por:</Text>
         <View style={styles.sortButtons}>
           <TouchableOpacity
-            style={[styles.sortButton, sortBy === SortOption.NONE && styles.activeSortButton]}
+            style={[
+              styles.sortButton, 
+              { 
+                backgroundColor: colors.background.primary,
+                borderColor: colors.border 
+              },
+              sortBy === SortOption.NONE && [
+                styles.activeSortButton, 
+                { 
+                  backgroundColor: colors.secondary,
+                  borderColor: colors.secondary 
+                }
+              ]
+            ]}
             onPress={() => changeSortOrder(SortOption.NONE)}
           >
-            <Text style={[styles.sortButtonText, sortBy === SortOption.NONE && styles.activeSortButtonText]}>
+            <Text style={[
+              styles.sortButtonText, 
+              { color: colors.text.primary },
+              sortBy === SortOption.NONE && styles.activeSortButtonText
+            ]}>
               Padrão
             </Text>
           </TouchableOpacity>
           
           <TouchableOpacity
-            style={[styles.sortButton, sortBy === SortOption.TITLE && styles.activeSortButton]}
+            style={[
+              styles.sortButton, 
+              { 
+                backgroundColor: colors.background.primary,
+                borderColor: colors.border 
+              },
+              sortBy === SortOption.TITLE && [
+                styles.activeSortButton, 
+                { 
+                  backgroundColor: colors.secondary,
+                  borderColor: colors.secondary 
+                }
+              ]
+            ]}
             onPress={() => changeSortOrder(SortOption.TITLE)}
           >
-            <Text style={[styles.sortButtonText, sortBy === SortOption.TITLE && styles.activeSortButtonText]}>
+            <Text style={[
+              styles.sortButtonText, 
+              { color: colors.text.primary },
+              sortBy === SortOption.TITLE && styles.activeSortButtonText
+            ]}>
               Título
             </Text>
           </TouchableOpacity>
           
           <TouchableOpacity
-            style={[styles.sortButton, sortBy === SortOption.DATE && styles.activeSortButton]}
+            style={[
+              styles.sortButton, 
+              { 
+                backgroundColor: colors.background.primary,
+                borderColor: colors.border 
+              },
+              sortBy === SortOption.DATE && [
+                styles.activeSortButton, 
+                { 
+                  backgroundColor: colors.secondary,
+                  borderColor: colors.secondary 
+                }
+              ]
+            ]}
             onPress={() => changeSortOrder(SortOption.DATE)}
           >
-            <Text style={[styles.sortButtonText, sortBy === SortOption.DATE && styles.activeSortButtonText]}>
+            <Text style={[
+              styles.sortButtonText, 
+              { color: colors.text.primary },
+              sortBy === SortOption.DATE && styles.activeSortButtonText
+            ]}>
               Data
             </Text>
           </TouchableOpacity>
         </View>
       </View>
       
-      <View style={styles.videoListContainer}>
-        <Text style={styles.listTitle}>Vídeos Disponíveis</Text>
+      <View style={[
+        styles.videoListContainer, 
+        { 
+          backgroundColor: colors.background.primary,
+          borderColor: colors.border 
+        }
+      ]}>
+        <Text style={[styles.listTitle, { color: colors.text.primary }]}>Vídeos Disponíveis</Text>
         
         {isLoading && !refreshing ? (
           <View style={styles.centerLoading}>
-            <ActivityIndicator size="large" color={theme.colors.primary} />
-            <Text style={styles.loadingText}>Carregando vídeos...</Text>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={[styles.loadingText, { color: colors.text.primary }]}>Carregando vídeos...</Text>
           </View>
         ) : filteredVideos.length === 0 ? (
           <View style={styles.noResults}>
-            <Feather name="inbox" size={48} color="#cccccc" />
-            <Text style={styles.noResultsText}>
+            <Feather name="inbox" size={48} color={colors.text.secondary} />
+            <Text style={[styles.noResultsText, { color: colors.text.primary }]}>
               {searchQuery ? 'Nenhum vídeo corresponde à sua busca.' : 'Nenhum vídeo disponível.'}
             </Text>
           </View>
@@ -633,8 +696,8 @@ const VideosScreen: React.FC = () => {
               <RefreshControl
                 refreshing={refreshing}
                 onRefresh={onRefresh}
-                colors={[theme.colors.primary]}
-                tintColor={theme.colors.primary}
+                colors={[colors.primary]}
+                tintColor={colors.primary}
               />
             }
           >
@@ -668,7 +731,6 @@ const VideosScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
     padding: 16,
   },
   videoContainer: {
@@ -707,7 +769,6 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   loadingText: {
-    color: theme.colors.textDark,
     marginTop: 10,
     textAlign: 'center',
   },
@@ -719,24 +780,20 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   controlsContainer: {
-    backgroundColor: theme.colors.backgroundLight,
     padding: 16,
     borderRadius: 8,
     marginBottom: 16,
   },
   searchInput: {
-    backgroundColor: '#fff',
     padding: 10,
     borderRadius: 4,
     borderWidth: 1,
-    borderColor: theme.colors.border,
     marginBottom: 12,
   },
   sortLabel: {
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 8,
-    color: theme.colors.textDark,
   },
   sortButtons: {
     flexDirection: 'row',
@@ -745,17 +802,13 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderRadius: 4,
-    backgroundColor: '#fff',
     marginRight: 8,
     borderWidth: 1,
-    borderColor: theme.colors.border,
   },
   activeSortButton: {
-    backgroundColor: theme.colors.secondary,
-    borderColor: theme.colors.secondary,
+    borderWidth: 1,
   },
   sortButtonText: {
-    color: theme.colors.textDark,
   },
   activeSortButtonText: {
     color: '#fff',
@@ -764,16 +817,13 @@ const styles = StyleSheet.create({
   videoListContainer: {
     flex: 1,
     borderWidth: 1,
-    borderColor: theme.colors.border,
     borderRadius: 8,
     padding: 12,
-    backgroundColor: '#fff',
   },
   listTitle: {
     fontSize: 18,
     fontWeight: '600',
     marginBottom: 12,
-    color: theme.colors.textDark,
   },
   videosList: {
     flex: 1,
@@ -793,7 +843,6 @@ const styles = StyleSheet.create({
     paddingVertical: 40,
   },
   noResultsText: {
-    color: theme.colors.textDark,
     marginTop: 16,
     textAlign: 'center',
     fontSize: 16,

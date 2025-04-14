@@ -317,13 +317,21 @@ const commonTheme = {
   },
 };
 
-// Criando o tema completo
-export const theme = {
-  colors: {
-    ...darkTheme,
+// Exportando ambos os temas
+export const themes = {
+  light: {
+    colors: {
+      ...lightTheme,
+    },
+    ...commonTheme,
   },
-  ...commonTheme,
+  dark: {
+    colors: {
+      ...darkTheme,
+    },
+    ...commonTheme,
+  }
 };
 
 // Exportação padrão - facilita o uso
-export default theme;
+export default themes;

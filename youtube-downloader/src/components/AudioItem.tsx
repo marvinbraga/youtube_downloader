@@ -3,7 +3,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { Audio } from '../types';
-import { theme } from '../styles/theme';
+import { useTheme } from '../context/ThemeContext';
 
 interface AudioItemProps {
   audio: Audio;
@@ -32,6 +32,8 @@ const AudioItem: React.FC<AudioItemProps> = ({
   onPlay,
   onTranscribe
 }) => {
+  const { colors, theme } = useTheme();
+
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
@@ -91,13 +93,13 @@ const AudioItem: React.FC<AudioItemProps> = ({
   const getBadgeColor = () => {
     switch (statusConfig.badgeClass) {
       case 'warning':
-        return theme.colors.warning;
+        return colors.warning;
       case 'success':
-        return theme.colors.tertiary;
+        return colors.success;
       case 'error':
-        return theme.colors.error;
+        return colors.error;
       default:
-        return theme.colors.info;
+        return colors.info;
     }
   };
   
@@ -106,13 +108,13 @@ const AudioItem: React.FC<AudioItemProps> = ({
     
     switch (statusConfig.buttonClass) {
       case 'warning':
-        return theme.colors.warning;
+        return colors.warning;
       case 'success':
-        return theme.colors.tertiary;
+        return colors.success;
       case 'danger':
-        return theme.colors.error;
+        return colors.error;
       default:
-        return theme.colors.tertiary;
+        return colors.success;
     }
   };
   
@@ -123,14 +125,29 @@ const AudioItem: React.FC<AudioItemProps> = ({
     <TouchableOpacity
       style={[
         styles.container,
-        isActive && styles.activeContainer,
-        isHighlighted && styles.highlightedContainer
+        { 
+          backgroundColor: colors.background.secondary,
+          borderLeftWidth: 4,
+          borderLeftColor: 'transparent',
+          ...theme.shadows.sm
+        },
+        isActive && [
+          styles.activeContainer,
+          { 
+            borderLeftColor: colors.primary,
+            backgroundColor: colors.tabActiveBg,
+          }
+        ],
+        isHighlighted && [
+          styles.highlightedContainer,
+          theme.states.item.highlighted
+        ]
       ]}
       onPress={() => onPress(audio)}
     >
       <View style={styles.content}>
         <View style={styles.header}>
-          <Text style={styles.title} numberOfLines={1}>
+          <Text style={[styles.title, { color: colors.text.primary }]} numberOfLines={1}>
             {audio.name}
           </Text>
           
@@ -147,25 +164,40 @@ const AudioItem: React.FC<AudioItemProps> = ({
         </View>
         
         <View style={styles.info}>
-          <Text style={styles.infoText} numberOfLines={1}>Caminho: {audio.path}</Text>
-          <Text style={styles.infoText}>Modificado em: {formatDate(audio.modified_date)}</Text>
-          <Text style={styles.infoText}>Tamanho: {formatFileSize(audio.size)}</Text>
+          <Text style={[styles.infoText, { color: colors.text.secondary }]} numberOfLines={1}>
+            Caminho: {audio.path}
+          </Text>
+          <Text style={[styles.infoText, { color: colors.text.secondary }]}>
+            Modificado em: {formatDate(audio.modified_date)}
+          </Text>
+          <Text style={[styles.infoText, { color: colors.text.secondary }]}>
+            Tamanho: {formatFileSize(audio.size)}
+          </Text>
         </View>
         
         <View style={styles.actions}>
           <TouchableOpacity 
-            style={styles.actionButton}
+            style={[
+              styles.actionButton,
+              { 
+                backgroundColor: colors.background.primary,
+                borderColor: colors.border 
+              }
+            ]}
             onPress={() => onPlay(audio)}
           >
-            <Feather name="play" size={16} color={theme.colors.secondary} />
-            <Text style={styles.actionButtonText}>Reproduzir</Text>
+            <Feather name="play" size={16} color={colors.secondary} />
+            <Text style={[styles.actionButtonText, { color: colors.secondary }]}>Reproduzir</Text>
           </TouchableOpacity>
           
           <TouchableOpacity 
             style={[
               styles.actionButton, 
-              { backgroundColor: getButtonColor(), borderColor: getButtonColor() },
-              statusConfig.isDisabled && styles.disabledButton
+              { 
+                backgroundColor: getButtonColor(), 
+                borderColor: getButtonColor() 
+              },
+              statusConfig.isDisabled && theme.states.button.disabled
             ]}
             onPress={() => onTranscribe(audio)}
             disabled={statusConfig.isDisabled}
@@ -190,18 +222,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     padding: 12,
     borderRadius: 8,
-    backgroundColor: theme.colors.backgroundLight,
-    borderLeftWidth: 4,
-    borderLeftColor: 'transparent'
   },
-  activeContainer: {
-    borderLeftColor: theme.colors.primary,
-    backgroundColor: theme.colors.tabActiveBg,
-  },
-  highlightedContainer: {
-    backgroundColor: 'rgba(255, 215, 0, 0.3)',
-    borderLeftColor: 'goldenrod',
-  },
+  activeContainer: {},
+  highlightedContainer: {},
   content: {
     flex: 1,
   },
@@ -214,7 +237,6 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 16,
     fontWeight: '600',
-    color: theme.colors.textDark,
     flex: 1,
   },
   badge: {
@@ -235,7 +257,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   infoText: {
-    color: theme.colors.textDark,
     fontSize: 14,
     marginBottom: 4,
   },
@@ -246,16 +267,13 @@ const styles = StyleSheet.create({
   actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
     paddingVertical: 6,
     paddingHorizontal: 12,
     borderRadius: 4,
     marginRight: 8,
     borderWidth: 1,
-    borderColor: theme.colors.border,
   },
   actionButtonText: {
-    color: theme.colors.secondary,
     marginLeft: 6,
     fontSize: 14,
     fontWeight: '500',
@@ -265,9 +283,6 @@ const styles = StyleSheet.create({
     marginLeft: 6,
     fontSize: 14,
     fontWeight: '500',
-  },
-  disabledButton: {
-    opacity: 0.65,
   },
   animatedIcon: {
     // Esta propriedade será usada para implementar animação posteriormente

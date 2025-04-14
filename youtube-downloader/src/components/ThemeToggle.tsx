@@ -14,7 +14,7 @@ const ThemeToggle: React.FC<ThemeToggleProps> = ({ showLabel = false }) => {
   return (
     <View style={styles.container}>
       {showLabel && (
-        <Text style={[styles.label, { color: colors.text?.primary || '#0f172a' }]}>
+        <Text style={[styles.label, { color: colors.text.primary }]}>
           {isDarkTheme ? 'Modo Escuro' : 'Modo Claro'}
         </Text>
       )}
@@ -23,7 +23,7 @@ const ThemeToggle: React.FC<ThemeToggleProps> = ({ showLabel = false }) => {
         onPress={toggleTheme}
         style={[
           styles.toggle,
-          { backgroundColor: isDarkTheme ? '#1e293b' : '#e2e8f0' }
+          { backgroundColor: isDarkTheme ? colors.background.secondary : '#e2e8f0' }
         ]}
         activeOpacity={0.7}
       >
@@ -31,7 +31,7 @@ const ThemeToggle: React.FC<ThemeToggleProps> = ({ showLabel = false }) => {
           style={[
             styles.indicator,
             { 
-              backgroundColor: isDarkTheme ? '#3B82F6' : '#0284c7',
+              backgroundColor: isDarkTheme ? colors.secondary : colors.accent,
               transform: [{ translateX: isDarkTheme ? 24 : 0 }]
             }
           ]}

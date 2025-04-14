@@ -3,7 +3,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { Video } from '../types';
-import theme from '../styles/theme';
+import { useTheme } from '../context/ThemeContext';
 
 interface VideoItemProps {
   video: Video;
@@ -32,6 +32,8 @@ const VideoItem: React.FC<VideoItemProps> = ({
   onViewTranscription,
   onTranscribe
 }) => {
+  const { colors, theme } = useTheme();
+
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
@@ -91,13 +93,13 @@ const VideoItem: React.FC<VideoItemProps> = ({
   const getBadgeColor = () => {
     switch (statusConfig.badgeClass) {
       case 'warning':
-        return theme.colors.warning;
+        return colors.warning;
       case 'success':
-        return theme.colors.tertiary;
+        return colors.success;
       case 'error':
-        return theme.colors.error;
+        return colors.error;
       default:
-        return theme.colors.info;
+        return colors.info;
     }
   };
   
@@ -106,13 +108,13 @@ const VideoItem: React.FC<VideoItemProps> = ({
     
     switch (statusConfig.buttonClass) {
       case 'warning':
-        return theme.colors.warning;
+        return colors.warning;
       case 'success':
-        return theme.colors.tertiary;
+        return colors.success;
       case 'danger':
-        return theme.colors.error;
+        return colors.error;
       default:
-        return theme.colors.tertiary;
+        return colors.success;
     }
   };
   
@@ -131,13 +133,25 @@ const VideoItem: React.FC<VideoItemProps> = ({
     <TouchableOpacity
       style={[
         styles.container,
-        isActive && styles.activeContainer
+        { 
+          backgroundColor: colors.background.secondary,
+          borderLeftWidth: 4,
+          borderLeftColor: 'transparent',
+          ...theme.shadows.sm
+        },
+        isActive && [
+          styles.activeContainer,
+          { 
+            borderLeftColor: colors.primary,
+            backgroundColor: colors.tabActiveBg,
+          }
+        ]
       ]}
       onPress={() => onPress(video)}
     >
       <View style={styles.content}>
         <View style={styles.header}>
-          <Text style={styles.title} numberOfLines={1}>
+          <Text style={[styles.title, { color: colors.text.primary }]} numberOfLines={1}>
             {video.name}
           </Text>
           
@@ -154,18 +168,30 @@ const VideoItem: React.FC<VideoItemProps> = ({
         </View>
         
         <View style={styles.info}>
-          <Text style={styles.infoText} numberOfLines={1}>Caminho: {video.path}</Text>
-          <Text style={styles.infoText}>Modificado em: {formatDate(video.modified_date)}</Text>
-          <Text style={styles.infoText}>Tamanho: {formatFileSize(video.size)}</Text>
+          <Text style={[styles.infoText, { color: colors.text.secondary }]} numberOfLines={1}>
+            Caminho: {video.path}
+          </Text>
+          <Text style={[styles.infoText, { color: colors.text.secondary }]}>
+            Modificado em: {formatDate(video.modified_date)}
+          </Text>
+          <Text style={[styles.infoText, { color: colors.text.secondary }]}>
+            Tamanho: {formatFileSize(video.size)}
+          </Text>
         </View>
         
         <View style={styles.actions}>
           <TouchableOpacity 
-            style={styles.actionButton}
+            style={[
+              styles.actionButton,
+              { 
+                backgroundColor: colors.background.primary,
+                borderColor: colors.border
+              }
+            ]}
             onPress={() => onPlay(video)}
           >
-            <Feather name="play" size={16} color={theme.colors.secondary} />
-            <Text style={styles.actionButtonText}>Reproduzir</Text>
+            <Feather name="play" size={16} color={colors.secondary} />
+            <Text style={[styles.actionButtonText, { color: colors.secondary }]}>Reproduzir</Text>
           </TouchableOpacity>
           
           {/* Botão de transcrição (para qualquer status) */}
@@ -173,8 +199,11 @@ const VideoItem: React.FC<VideoItemProps> = ({
             <TouchableOpacity 
               style={[
                 styles.actionButton, 
-                { backgroundColor: getButtonColor(), borderColor: getButtonColor() },
-                statusConfig.isDisabled && styles.disabledButton
+                { 
+                  backgroundColor: getButtonColor(), 
+                  borderColor: getButtonColor() 
+                },
+                statusConfig.isDisabled && theme.states.button.disabled
               ]}
               onPress={handleTranscriptionAction}
               disabled={statusConfig.isDisabled}
@@ -200,14 +229,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     padding: 12,
     borderRadius: 8,
-    backgroundColor: theme.colors.backgroundLight,
-    borderLeftWidth: 4,
-    borderLeftColor: 'transparent',
-    ...theme.shadows.sm
   },
   activeContainer: {
-    borderLeftColor: theme.colors.primary,
-    backgroundColor: theme.colors.tabActiveBg,
   },
   content: {
     flex: 1,
@@ -221,7 +244,6 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 16,
     fontWeight: '600',
-    color: theme.colors.textDark,
     flex: 1,
   },
   badge: {
@@ -242,7 +264,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   infoText: {
-    color: theme.colors.textDark,
     fontSize: 14,
     marginBottom: 4,
   },
@@ -253,16 +274,13 @@ const styles = StyleSheet.create({
   actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
     paddingVertical: 6,
     paddingHorizontal: 12,
     borderRadius: 4,
     marginRight: 8,
     borderWidth: 1,
-    borderColor: theme.colors.border,
   },
   actionButtonText: {
-    color: theme.colors.secondary,
     marginLeft: 6,
     fontSize: 14,
     fontWeight: '500',
@@ -273,9 +291,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
-  disabledButton: {
-    opacity: 0.65,
-  }
 });
 
 export default VideoItem;

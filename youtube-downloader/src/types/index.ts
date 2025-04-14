@@ -7,6 +7,7 @@ export interface Video {
   size: number;
   transcription_status?: 'none' | 'started' | 'ended' | 'error';
   transcription_path?: string;
+  has_transcription?: boolean; // Para compatibilidade com versões anteriores
 }
 
 export interface Audio {
@@ -17,6 +18,7 @@ export interface Audio {
   size: number;
   transcription_status?: 'none' | 'started' | 'ended' | 'error';
   transcription_path?: string;
+  has_transcription?: boolean; // Para compatibilidade com versões anteriores
 }
 
 export interface AuthState {

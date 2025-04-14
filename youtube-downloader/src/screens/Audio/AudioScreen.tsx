@@ -62,12 +62,16 @@ const AudioScreen: React.FC = () => {
         filterAudios(cachedAudios, searchQuery);
       } else {
         const fetchedAudios = await fetchAudios();
-        setAudios(fetchedAudios);
-        filterAudios(fetchedAudios, searchQuery);
-        cacheAudios(fetchedAudios);
+        
+        // Verificamos e atualizamos o status de transcrição para cada áudio
+        const processedAudios = checkTranscriptionStatusForAllItems(fetchedAudios);
+        
+        setAudios(processedAudios);
+        filterAudios(processedAudios, searchQuery);
+        cacheAudios(processedAudios);
         
         // Iniciar verificação para áudios em transcrição
-        startTranscriptionStatusCheck(fetchedAudios);
+        startTranscriptionStatusCheck(processedAudios);
       }
     } catch (error) {
       console.error('Erro ao carregar áudios:', error);
@@ -97,6 +101,30 @@ const AudioScreen: React.FC = () => {
       }
     };
   }, [authState.isAuthenticated, authState.isLoading, login, loadAudios]);
+  
+  // Função para verificar o status de transcrição para todos os áudios
+  const checkTranscriptionStatusForAllItems = (items: Audio[]): Audio[] => {
+    return items.map(item => {
+      // Migra has_transcription antigo para transcription_status
+      if (item.has_transcription === true && !item.transcription_status) {
+        console.log(`Atualizando áudio ${item.id}: has_transcription = true -> transcription_status = ended`);
+        return { ...item, transcription_status: "ended" };
+      }
+      
+      // Se tiver caminho de transcrição mas não tiver status, considera como "ended"
+      if (item.transcription_path && (!item.transcription_status || item.transcription_status === "none")) {
+        console.log(`Atualizando áudio ${item.id}: tem caminho de transcrição -> transcription_status = ended`);
+        return { ...item, transcription_status: "ended" };
+      }
+      
+      // Para compatibilidade, verifica se o arquivo corresponde a um MD no sistema
+      if (!item.transcription_status || item.transcription_status === "none") {
+        console.log(`Áudio ${item.id} (${item.name}) não possui status de transcrição definido`);
+      }
+      
+      return item;
+    });
+  };
   
   // Funções para cache
   const AUDIO_CACHE_KEY = '@audio_list_cache';
@@ -157,6 +185,7 @@ const AudioScreen: React.FC = () => {
     );
     
     if (audiosInProgress.length > 0) {
+      console.log(`Iniciando verificação para ${audiosInProgress.length} áudios em transcrição`);
       transcriptionCheckTimerRef.current = setInterval(() => {
         audiosInProgress.forEach(audio => {
           checkAudioTranscriptionStatus(audio, false);
@@ -308,47 +337,52 @@ const AudioScreen: React.FC = () => {
     }
   };
   
-  // Função para transcrever áudio
+  // Função para transcrever áudio - Ponto de entrada principal da lógica de transcrição
   const transcribeAudioFile = async (audio: Audio) => {
     // Verifica o status atual da transcrição
     const transcriptionStatus = audio.transcription_status || 'none';
     
-    // Se já está concluída
-    if (transcriptionStatus === 'ended') {
-      viewTranscription(audio);
-      return;
-    }
+    console.log(`Solicitação de transcrição para áudio ${audio.id} com status: ${transcriptionStatus}`);
     
-    // Se está em andamento
-    if (transcriptionStatus === 'started') {
-      setStatusMessage({
-        message: 'Transcrição em andamento. Por favor, aguarde a conclusão.',
-        type: 'info'
-      });
-      return;
+    // Escolhe a ação correta baseada no status atual
+    switch (transcriptionStatus) {
+      case 'ended':
+        // Se já está concluída, visualiza a transcrição
+        viewTranscription(audio);
+        break;
+        
+      case 'started':
+        // Se está em andamento, verifica o status atual
+        setStatusMessage({
+          message: 'Transcrição em andamento. Verificando status...',
+          type: 'info'
+        });
+        await checkAudioTranscriptionStatus(audio, true);
+        break;
+        
+      case 'error':
+        // Se teve erro anteriormente, confirma se deseja tentar novamente
+        Alert.alert(
+          'Tentar Novamente',
+          'Houve um erro na transcrição anterior. Deseja tentar novamente?',
+          [
+            {
+              text: 'Cancelar',
+              style: 'cancel'
+            },
+            {
+              text: 'Sim, tentar novamente',
+              onPress: () => startTranscription(audio)
+            }
+          ]
+        );
+        break;
+        
+      default:
+        // Para 'none' ou qualquer outro status, inicia uma nova transcrição
+        startTranscription(audio);
+        break;
     }
-    
-    // Se teve erro anteriormente, confirma se deseja tentar novamente
-    if (transcriptionStatus === 'error') {
-      Alert.alert(
-        'Tentar Novamente',
-        'Houve um erro na transcrição anterior. Deseja tentar novamente?',
-        [
-          {
-            text: 'Cancelar',
-            style: 'cancel'
-          },
-          {
-            text: 'Sim, tentar novamente',
-            onPress: () => startTranscription(audio)
-          }
-        ]
-      );
-      return;
-    }
-    
-    // Iniciar nova transcrição
-    startTranscription(audio);
   };
   
   // Iniciar processo de transcrição

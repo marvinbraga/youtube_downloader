@@ -9,17 +9,24 @@ import {
   TouchableOpacity, 
   ActivityIndicator,
   RefreshControl,
-  Dimensions
+  Dimensions,
+  Alert
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { Video as VideoPlayer } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { fetchVideos, fetchVideoStream, fetchTranscription } from '../../services/api';
+import { 
+  fetchVideos, 
+  fetchVideoStream, 
+  fetchTranscription, 
+  transcribeAudio, 
+  checkTranscriptionStatus 
+} from '../../services/api';
 import { Video } from '../../types';
 import VideoItem from '../../components/VideoItem';
 import TranscriptionModal from '../../components/TranscriptionModal';
 import StatusMessage from '../../components/StatusMessage';
-import { theme } from '../../styles/theme';
+import theme from '../../styles/theme';
 import { useAuth } from '../../context/AuthContext';
 
 const { width } = Dimensions.get('window');
@@ -33,6 +40,7 @@ enum SortOption {
 const VideosScreen: React.FC = () => {
   const { authState, login } = useAuth();
   const videoPlayerRef = useRef<VideoPlayer>(null);
+  const transcriptionCheckTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [videos, setVideos] = useState<Video[]>([]);
   const [filteredVideos, setFilteredVideos] = useState<Video[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -70,11 +78,17 @@ const VideosScreen: React.FC = () => {
       if (cachedVideos && cachedVideos.sortBy === sortBy) {
         setVideos(cachedVideos.data);
         filterVideos(cachedVideos.data, searchQuery);
+        
+        // Verificar se há algum vídeo em transcrição
+        startTranscriptionStatusCheck(cachedVideos.data);
       } else {
         const fetchedVideos = await fetchVideos(sortBy);
         setVideos(fetchedVideos);
         filterVideos(fetchedVideos, searchQuery);
         cacheVideos(fetchedVideos, sortBy);
+        
+        // Verificar se há algum vídeo em transcrição
+        startTranscriptionStatusCheck(fetchedVideos);
       }
     } catch (error) {
       console.error('Erro ao carregar vídeos:', error);
@@ -95,6 +109,14 @@ const VideosScreen: React.FC = () => {
     } else if (!authState.isLoading) {
       login();
     }
+    
+    // Cleanup: stop timers when component unmounts
+    return () => {
+      if (transcriptionCheckTimerRef.current) {
+        clearInterval(transcriptionCheckTimerRef.current);
+        transcriptionCheckTimerRef.current = null;
+      }
+    };
   }, [authState.isAuthenticated, authState.isLoading, sortBy, login, loadVideos]);
   
   // Funções para cache
@@ -145,22 +167,257 @@ const VideosScreen: React.FC = () => {
     filterVideos(videos, searchQuery);
   }, [searchQuery, videos]);
   
-  // Função para reproduzir vídeo
-  const playVideo = async (video: Video) => {
+  // Iniciar verificação periódica de transcrições em andamento
+  const startTranscriptionStatusCheck = (videosList: Video[]) => {
+    // Limpar temporizador existente
+    if (transcriptionCheckTimerRef.current) {
+      clearInterval(transcriptionCheckTimerRef.current);
+    }
+    
+    const videosInProgress = videosList.filter(
+      video => video.transcription_status === 'started'
+    );
+    
+    if (videosInProgress.length > 0) {
+      transcriptionCheckTimerRef.current = setInterval(() => {
+        videosInProgress.forEach(video => {
+          checkVideoTranscriptionStatus(video, false);
+        });
+      }, 10000); // Verifica a cada 10 segundos
+      
+      // Log para depuração
+      console.log(`Iniciada verificação periódica para ${videosInProgress.length} vídeos em transcrição`);
+    }
+  };
+  
+  // Verificar status da transcrição
+  const checkVideoTranscriptionStatus = async (video: Video, showMessages = true) => {
+    if (!authState.isAuthenticated) {
+      if (showMessages) {
+        setStatusMessage({
+          message: 'Erro de autenticação. Tentando reconectar...',
+          type: 'error'
+        });
+      }
+      await login();
+      return;
+    }
+    
+    try {
+      if (showMessages) {
+        setStatusMessage({
+          message: 'Verificando status da transcrição...',
+          type: 'info'
+        });
+      }
+      
+      const response = await checkTranscriptionStatus(video.id);
+      
+      // Se o status mudou, atualiza a interface
+      if (response.status !== video.transcription_status) {
+        console.log(`Status da transcrição mudou: ${video.transcription_status} -> ${response.status}`);
+        
+        // Atualiza o vídeo na lista
+        const updatedVideos = videos.map(v => {
+          if (v.id === video.id) {
+            return { ...v, transcription_status: response.status };
+          }
+          return v;
+        });
+        
+        setVideos(updatedVideos);
+        filterVideos(updatedVideos, searchQuery);
+        cacheVideos(updatedVideos, sortBy);
+        
+        // Se a transcrição foi concluída e estamos mostrando mensagens
+        if (response.status === 'ended' && showMessages) {
+          setStatusMessage({
+            message: 'Transcrição concluída com sucesso!',
+            type: 'success'
+          });
+          
+          // Pergunta se o usuário quer visualizar a transcrição
+          Alert.alert(
+            'Transcrição Concluída',
+            'Deseja visualizar a transcrição agora?',
+            [
+              {
+                text: 'Não',
+                style: 'cancel'
+              },
+              {
+                text: 'Sim',
+                onPress: () => viewTranscription({ ...video, transcription_status: 'ended' })
+              }
+            ]
+          );
+        } 
+        // Se houve erro e estamos mostrando mensagens
+        else if (response.status === 'error' && showMessages) {
+          setStatusMessage({
+            message: 'Ocorreu um erro durante a transcrição. Você pode tentar novamente.',
+            type: 'error'
+          });
+        }
+      } else if (showMessages) {
+        // Se o status não mudou, mas estamos mostrando mensagens
+        if (response.status === 'started') {
+          setStatusMessage({
+            message: 'A transcrição ainda está em andamento. Por favor, aguarde.',
+            type: 'info'
+          });
+        } else if (response.status === 'ended') {
+          viewTranscription({ ...video, transcription_status: 'ended' });
+        }
+      }
+      
+      return response.status;
+    } catch (error) {
+      if (showMessages) {
+        console.error('Erro:', error);
+        setStatusMessage({
+          message: 'Erro ao verificar status da transcrição',
+          type: 'error'
+        });
+      }
+      return null;
+    }
+  };
+  
+  // Função para transcrever vídeo
+  const transcribeVideo = async (video: Video) => {
+    // Verifica o status atual da transcrição
+    const transcriptionStatus = video.transcription_status || 'none';
+    
+    // Se já está concluída
+    if (transcriptionStatus === 'ended') {
+      viewTranscription(video);
+      return;
+    }
+    
+    // Se está em andamento
+    if (transcriptionStatus === 'started') {
+      setStatusMessage({
+        message: 'Transcrição em andamento. Por favor, aguarde a conclusão.',
+        type: 'info'
+      });
+      return;
+    }
+    
+    // Se teve erro anteriormente, confirma se deseja tentar novamente
+    if (transcriptionStatus === 'error') {
+      Alert.alert(
+        'Tentar Novamente',
+        'Houve um erro na transcrição anterior. Deseja tentar novamente?',
+        [
+          {
+            text: 'Cancelar',
+            style: 'cancel'
+          },
+          {
+            text: 'Sim, tentar novamente',
+            onPress: () => startVideoTranscription(video)
+          }
+        ]
+      );
+      return;
+    }
+    
+    // Iniciar nova transcrição
+    startVideoTranscription(video);
+  };
+  
+  // Iniciar processo de transcrição
+  const startVideoTranscription = async (video: Video) => {
     try {
       if (!authState.isAuthenticated) {
         await login();
       }
+      
+      setStatusMessage({
+        message: 'Iniciando transcrição de vídeo...',
+        type: 'info'
+      });
+      
+      // Reutiliza a API de transcrição de áudio (backend trata ambos da mesma forma)
+      const response = await transcribeAudio(video.id, 'groq', 'pt');
+      
+      if (response.status === 'processing') {
+        setStatusMessage({
+          message: 'Transcrição iniciada em segundo plano. Isso pode levar alguns minutos.',
+          type: 'success'
+        });
+        
+        // Atualiza o status na interface
+        const updatedVideos = videos.map(v => {
+          if (v.id === video.id) {
+            return { ...v, transcription_status: 'started' };
+          }
+          return v;
+        });
+        
+        setVideos(updatedVideos);
+        filterVideos(updatedVideos, searchQuery);
+        cacheVideos(updatedVideos, sortBy);
+        
+        // Inicia verificação periódica do status
+        startTranscriptionStatusCheck(updatedVideos);
+      } else if (response.status === 'success') {
+        setStatusMessage({
+          message: 'Transcrição já existe! Carregando visualização...',
+          type: 'success'
+        });
+        
+        // Atualiza o status na interface
+        const updatedVideos = videos.map(v => {
+          if (v.id === video.id) {
+            return { ...v, transcription_status: 'ended' };
+          }
+          return v;
+        });
+        
+        setVideos(updatedVideos);
+        filterVideos(updatedVideos, searchQuery);
+        cacheVideos(updatedVideos, sortBy);
+        
+        // Mostrar a transcrição existente
+        viewTranscription({ ...video, transcription_status: 'ended' });
+      } else {
+        setStatusMessage({
+          message: 'Falha ao iniciar a transcrição',
+          type: 'error'
+        });
+      }
+    } catch (error) {
+      console.error('Erro:', error);
+      setStatusMessage({
+        message: 'Erro ao transcrever vídeo. Tente novamente.',
+        type: 'error'
+      });
+    }
+  };
+  
+  async function playVideo(video: Video) {
+    if (!authState.isAuthenticated) {
+      setStatusMessage({
+        message: 'Erro de autenticação. Tentando reconectar...',
+        type: 'error'
+      });
+      return login();
+    }
+
+    try {
+      setIsPlayerLoading(true);
       
       if (currentVideoId === video.id && currentVideoUri) {
         // Já está carregado, apenas reproduz
         if (videoPlayerRef.current) {
           await videoPlayerRef.current.playAsync();
         }
+        setIsPlayerLoading(false);
         return;
       }
       
-      setIsPlayerLoading(true);
       setCurrentVideoId(video.id);
       setCurrentVideoTitle(video.name);
       
@@ -203,7 +460,7 @@ const VideosScreen: React.FC = () => {
       });
       setIsPlayerLoading(false);
     }
-  };
+  }
   
   // Função para visualizar transcrição
   const viewTranscription = async (video: Video) => {
@@ -389,6 +646,7 @@ const VideosScreen: React.FC = () => {
                 onPress={() => setCurrentVideoId(video.id)}
                 onPlay={playVideo}
                 onViewTranscription={video.transcription_status === 'ended' ? viewTranscription : undefined}
+                onTranscribe={transcribeVideo}
               />
             ))}
           </ScrollView>

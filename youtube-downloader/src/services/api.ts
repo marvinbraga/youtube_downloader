@@ -29,6 +29,7 @@ const TOKEN_STORAGE_KEY = '@auth_token';
 // Funções de autenticação
 export const authenticate = async () => {
   try {
+    console.log("Iniciando autenticação...");
     const response = await api.post('/auth/token', {
       client_id: CLIENT_ID,
       client_secret: CLIENT_SECRET
@@ -36,6 +37,7 @@ export const authenticate = async () => {
     
     const { access_token } = response.data;
     await AsyncStorage.setItem(TOKEN_STORAGE_KEY, access_token);
+    console.log("Autenticação bem-sucedida!");
     
     return access_token;
   } catch (error) {
@@ -78,7 +80,9 @@ export const fetchVideoStream = async (videoId: string): Promise<Blob> => {
 // Funções para áudios
 export const fetchAudios = async (): Promise<Audio[]> => {
   try {
+    console.log("Buscando lista de áudios...");
     const response = await api.get('/audio/list');
+    console.log(`Áudios encontrados: ${response.data.audio_files?.length || 0}`);
     return response.data.audio_files || [];
   } catch (error) {
     if (axios.isAxiosError(error) && error.response?.status === 401) {
@@ -130,11 +134,13 @@ export const transcribeAudio = async (
   language: string = 'pt'
 ): Promise<TranscriptionResponse> => {
   try {
+    console.log(`Iniciando transcrição do áudio ${audioId}...`);
     const response = await api.post('/audio/transcribe', {
       file_id: audioId,
       provider,
       language
     });
+    console.log(`Resposta da transcrição:`, response.data);
     return response.data;
   } catch (error) {
     if (axios.isAxiosError(error) && error.response?.status === 401) {
@@ -148,7 +154,9 @@ export const transcribeAudio = async (
 
 export const checkTranscriptionStatus = async (audioId: string): Promise<{status: string}> => {
   try {
+    console.log(`Verificando status da transcrição para o áudio ${audioId}...`);
     const response = await api.get(`/audio/transcription_status/${audioId}`);
+    console.log(`Status da transcrição: ${response.data.status}`);
     return response.data;
   } catch (error) {
     if (axios.isAxiosError(error) && error.response?.status === 401) {
@@ -162,6 +170,7 @@ export const checkTranscriptionStatus = async (audioId: string): Promise<{status
 
 export const fetchTranscription = async (itemId: string): Promise<string> => {
   try {
+    console.log(`Buscando texto da transcrição para o item ${itemId}...`);
     const response = await api.get(`/audio/transcription/${itemId}`, {
       responseType: 'text'
     });

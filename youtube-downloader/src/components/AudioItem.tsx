@@ -116,6 +116,9 @@ const AudioItem: React.FC<AudioItemProps> = ({
     }
   };
   
+  // Verifica se o ícone está animado (para o caso de loading)
+  const isAnimatedIcon = statusConfig.buttonIcon === 'loader';
+  
   return (
     <TouchableOpacity
       style={[
@@ -189,8 +192,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: theme.colors.backgroundLight,
     borderLeftWidth: 4,
-    borderLeftColor: 'transparent',
-    ...theme.shadows.sm
+    borderLeftColor: 'transparent'
   },
   activeContainer: {
     borderLeftColor: theme.colors.primary,
@@ -266,6 +268,9 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     opacity: 0.65,
+  },
+  animatedIcon: {
+    // Esta propriedade será usada para implementar animação posteriormente
   }
 });
 

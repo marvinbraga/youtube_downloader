@@ -3,7 +3,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { Video } from '../types';
-import { theme } from '../styles/theme';
+import theme from '../styles/theme';
 
 interface VideoItemProps {
   video: Video;
@@ -11,6 +11,7 @@ interface VideoItemProps {
   onPress: (video: Video) => void;
   onPlay: (video: Video) => void;
   onViewTranscription?: (video: Video) => void;
+  onTranscribe?: (video: Video) => void; // Nova prop para transcrição
 }
 
 interface TranscriptionStatusConfig {
@@ -20,6 +21,7 @@ interface TranscriptionStatusConfig {
   buttonClass?: string;
   buttonIcon?: string;
   buttonText?: string;
+  isDisabled?: boolean;
 }
 
 const VideoItem: React.FC<VideoItemProps> = ({
@@ -27,7 +29,8 @@ const VideoItem: React.FC<VideoItemProps> = ({
   isActive,
   onPress,
   onPlay,
-  onViewTranscription
+  onViewTranscription,
+  onTranscribe
 }) => {
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -53,7 +56,8 @@ const VideoItem: React.FC<VideoItemProps> = ({
           badgeIcon: "loader",
           buttonClass: "warning",
           buttonIcon: "loader",
-          buttonText: "Transcrevendo..."
+          buttonText: "Transcrevendo...",
+          isDisabled: true
         };
       case "ended":
         return {
@@ -74,7 +78,11 @@ const VideoItem: React.FC<VideoItemProps> = ({
           buttonText: "Tentar Novamente"
         };
       default:
-        return {};
+        return {
+          buttonClass: "success",
+          buttonIcon: "mic",
+          buttonText: "Transcrever"
+        };
     }
   };
 
@@ -90,6 +98,32 @@ const VideoItem: React.FC<VideoItemProps> = ({
         return theme.colors.error;
       default:
         return theme.colors.info;
+    }
+  };
+  
+  const getButtonColor = () => {
+    if (statusConfig.isDisabled) return '#6c757d';
+    
+    switch (statusConfig.buttonClass) {
+      case 'warning':
+        return theme.colors.warning;
+      case 'success':
+        return theme.colors.tertiary;
+      case 'danger':
+        return theme.colors.error;
+      default:
+        return theme.colors.tertiary;
+    }
+  };
+  
+  // Função para determinar o manipulador de transcrição
+  const handleTranscriptionAction = () => {
+    const transcriptionStatus = video.transcription_status || "none";
+    
+    if (transcriptionStatus === "ended" && onViewTranscription) {
+      onViewTranscription(video);
+    } else if (onTranscribe) {
+      onTranscribe(video);
     }
   };
   
@@ -134,13 +168,25 @@ const VideoItem: React.FC<VideoItemProps> = ({
             <Text style={styles.actionButtonText}>Reproduzir</Text>
           </TouchableOpacity>
           
-          {video.transcription_status === "ended" && onViewTranscription && (
+          {/* Botão de transcrição (para qualquer status) */}
+          {(onTranscribe || onViewTranscription) && (
             <TouchableOpacity 
-              style={[styles.actionButton, styles.transcriptionButton]}
-              onPress={() => onViewTranscription(video)}
+              style={[
+                styles.actionButton, 
+                { backgroundColor: getButtonColor(), borderColor: getButtonColor() },
+                statusConfig.isDisabled && styles.disabledButton
+              ]}
+              onPress={handleTranscriptionAction}
+              disabled={statusConfig.isDisabled}
             >
-              <Feather name="file-text" size={16} color="white" />
-              <Text style={styles.transcriptionButtonText}>Ver Transcrição</Text>
+              <Feather 
+                name={(statusConfig.buttonIcon as any) || 'mic'} 
+                size={16} 
+                color="white" 
+              />
+              <Text style={styles.transcriptionButtonText}>
+                {statusConfig.buttonText || 'Transcrever'}
+              </Text>
             </TouchableOpacity>
           )}
         </View>
@@ -221,16 +267,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
-  transcriptionButton: {
-    backgroundColor: theme.colors.warning,
-    borderColor: theme.colors.warning,
-  },
   transcriptionButtonText: {
     color: 'white',
     marginLeft: 6,
     fontSize: 14,
     fontWeight: '500',
   },
+  disabledButton: {
+    opacity: 0.65,
+  }
 });
 
 export default VideoItem;

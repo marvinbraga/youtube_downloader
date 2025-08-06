@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest --version)",
+      "Bash(python:*)",
+      "Bash(pip show:*)",
+      "Bash(pip install:*)",
+      "Bash(poetry update:*)",
+      "Bash(yt-dlp:*)",
+      "Bash(curl:*)"
+    ],
+    "deny": []
+  }
+}

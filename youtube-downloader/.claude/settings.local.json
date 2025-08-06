@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(poetry run:*)",
+      "Bash(curl:*)",
+      "Bash(yarn start:*)",
+      "Bash(yarn install)",
+      "Bash(npx tsc:*)",
+      "Bash(yarn add:*)",
+      "Bash(findstr:*)",
+      "Bash(powershell:*)"
+    ],
+    "deny": []
+  }
+}

@@ -1,7 +1,8 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
 import { useTheme } from '../context/ThemeContext';
 
 interface TranscriptionModalProps {
@@ -22,6 +23,17 @@ const TranscriptionModal: React.FC<TranscriptionModalProps> = ({
   onDownload
 }) => {
   const { colors, theme } = useTheme();
+  const [copySuccess, setCopySuccess] = useState(false);
+
+  const handleCopyToClipboard = async () => {
+    try {
+      await Clipboard.setStringAsync(content);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    } catch (error) {
+      console.error('Erro ao copiar para área de transferência:', error);
+    }
+  };
 
   return (
     <Modal
@@ -78,17 +90,40 @@ const TranscriptionModal: React.FC<TranscriptionModalProps> = ({
             theme.componentStyles.modal.footer,
             { borderTopColor: colors.border }
           ]}>
-            <TouchableOpacity 
-              style={[
-                styles.downloadButton,
-                { backgroundColor: colors.primary }
-              ]}
-              onPress={onDownload}
-              disabled={isLoading}
-            >
-              <Feather name="download" size={18} color="white" />
-              <Text style={styles.downloadButtonText}>Baixar Transcrição</Text>
-            </TouchableOpacity>
+            <View style={styles.footerButtons}>
+              <TouchableOpacity 
+                style={[
+                  styles.actionButton,
+                  { 
+                    backgroundColor: copySuccess ? colors.success : colors.secondary,
+                    borderColor: copySuccess ? colors.success : colors.secondary
+                  }
+                ]}
+                onPress={handleCopyToClipboard}
+                disabled={isLoading || !content}
+              >
+                <Feather 
+                  name={copySuccess ? "check" : "copy"} 
+                  size={18} 
+                  color="white" 
+                />
+                <Text style={styles.actionButtonText}>
+                  {copySuccess ? "Copiado!" : "Copiar"}
+                </Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[
+                  styles.actionButton,
+                  { backgroundColor: colors.primary }
+                ]}
+                onPress={onDownload}
+                disabled={isLoading}
+              >
+                <Feather name="download" size={18} color="white" />
+                <Text style={styles.actionButtonText}>Baixar</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </View>
@@ -145,16 +180,20 @@ const styles = StyleSheet.create({
   modalFooter: {
     borderTopWidth: 1,
     padding: 16,
-    alignItems: 'flex-end',
   },
-  downloadButton: {
+  footerButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+  },
+  actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderRadius: 4,
   },
-  downloadButtonText: {
+  actionButtonText: {
     color: 'white',
     fontWeight: '500',
     marginLeft: 8,

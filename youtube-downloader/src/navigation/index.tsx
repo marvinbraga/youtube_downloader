@@ -4,6 +4,8 @@ import { NavigationContainer, DefaultTheme, DarkTheme } from '@react-navigation/
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { VideosScreen, AudioScreen, DownloadScreen } from '../screens';
+import QueueScreen from '../screens/Queue/QueueScreen';
+import SettingsScreen from '../screens/Settings/SettingsScreen';
 import { useTheme } from '../context/ThemeContext';
 import ThemeToggle from '../components/ThemeToggle';
 
@@ -38,6 +40,10 @@ const Navigation = () => {
               iconName = focused ? 'headset' : 'headset-outline';
             } else if (route.name === 'Download') {
               iconName = focused ? 'download' : 'download-outline';
+            } else if (route.name === 'Fila') {
+              iconName = focused ? 'list' : 'list-outline';
+            } else if (route.name === 'Configurações') {
+              iconName = focused ? 'settings' : 'settings-outline';
             }
 
             return <Ionicons name={iconName as any} size={size} color={color} />;
@@ -86,6 +92,24 @@ const Navigation = () => {
         <Tab.Screen 
           name="Download" 
           component={DownloadScreen}
+          options={{
+            headerRight: () => (
+              <ThemeToggle showLabel={false} />
+            ),
+          }}
+        />
+        <Tab.Screen 
+          name="Fila" 
+          component={QueueScreen}
+          options={{
+            headerRight: () => (
+              <ThemeToggle showLabel={false} />
+            ),
+          }}
+        />
+        <Tab.Screen 
+          name="Configurações" 
+          component={SettingsScreen}
           options={{
             headerRight: () => (
               <ThemeToggle showLabel={false} />

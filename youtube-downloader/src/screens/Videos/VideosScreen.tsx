@@ -13,14 +13,15 @@ import {
   Alert
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import { Video as VideoPlayer } from 'expo-av';
+import { Video as VideoPlayer, ResizeMode } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { 
   fetchVideos, 
   fetchVideoStream, 
   fetchTranscription, 
   transcribeAudio, 
-  checkTranscriptionStatus 
+  checkTranscriptionStatus,
+  ensureTranscriptionStatus 
 } from '../../services/api';
 import { Video } from '../../types';
 import VideoItem from '../../components/VideoItem';
@@ -221,7 +222,7 @@ const VideosScreen: React.FC = () => {
         // Atualiza o vídeo na lista
         const updatedVideos = videos.map(v => {
           if (v.id === video.id) {
-            return { ...v, transcription_status: response.status };
+            return { ...v, transcription_status: ensureTranscriptionStatus(response.status) };
           }
           return v;
         });
@@ -343,7 +344,7 @@ const VideosScreen: React.FC = () => {
       // Reutiliza a API de transcrição de áudio (backend trata ambos da mesma forma)
       const response = await transcribeAudio(video.id, 'groq', 'pt');
       
-      if (response.status === 'processing') {
+      if (response.status === 'started') {
         setStatusMessage({
           message: 'Transcrição iniciada em segundo plano. Isso pode levar alguns minutos.',
           type: 'success'
@@ -357,13 +358,13 @@ const VideosScreen: React.FC = () => {
           return v;
         });
         
-        setVideos(updatedVideos);
-        filterVideos(updatedVideos, searchQuery);
-        cacheVideos(updatedVideos, sortBy);
+        setVideos(updatedVideos as Video[]);
+        filterVideos(updatedVideos as Video[], searchQuery);
+        cacheVideos(updatedVideos as Video[], sortBy);
         
         // Inicia verificação periódica do status
-        startTranscriptionStatusCheck(updatedVideos);
-      } else if (response.status === 'success') {
+        startTranscriptionStatusCheck(updatedVideos as Video[]);
+      } else if (response.status === 'ended') {
         setStatusMessage({
           message: 'Transcrição já existe! Carregando visualização...',
           type: 'success'
@@ -377,9 +378,9 @@ const VideosScreen: React.FC = () => {
           return v;
         });
         
-        setVideos(updatedVideos);
-        filterVideos(updatedVideos, searchQuery);
-        cacheVideos(updatedVideos, sortBy);
+        setVideos(updatedVideos as Video[]);
+        filterVideos(updatedVideos as Video[], searchQuery);
+        cacheVideos(updatedVideos as Video[], sortBy);
         
         // Mostrar a transcrição existente
         viewTranscription({ ...video, transcription_status: 'ended' });
@@ -547,7 +548,7 @@ const VideosScreen: React.FC = () => {
             style={styles.videoPlayer}
             source={{ uri: currentVideoUri }}
             useNativeControls
-            resizeMode="contain"
+            resizeMode={ResizeMode.CONTAIN}
             isLooping={false}
             onLoadStart={() => setIsPlayerLoading(true)}
             onLoad={() => setIsPlayerLoading(false)}

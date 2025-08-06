@@ -137,6 +137,113 @@ class AudioDownloadManager:
             logger.error(f"Erro ao extrair ID do YouTube: {str(e)}")
             return None
     
+    def register_audio_for_download(self, url: str) -> str:
+        """
+        Registra um áudio para download com status 'downloading'.
+        Retorna o ID do áudio registrado.
+        
+        Args:
+            url: URL do vídeo do YouTube
+            
+        Returns:
+            ID do áudio registrado
+        """
+        try:
+            logger.info(f"Registrando áudio para download: {url}")
+            
+            # Extrair ID e informações básicas do YouTube
+            youtube_id = self.extract_youtube_id(url)
+            if not youtube_id:
+                youtube_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # Obter informações básicas sem baixar
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'skip_download': True,
+            }
+            
+            with YoutubeDL(ydl_opts) as ydl:
+                try:
+                    info = ydl.extract_info(url, download=False)
+                    title = info.get('title', 'Unknown')
+                except Exception as extract_error:
+                    logger.warning(f"Erro ao extrair informações do vídeo, usando título padrão: {str(extract_error)}")
+                    # Fallback para um título baseado no ID do YouTube
+                    title = f"Video_{youtube_id}"
+            
+            # Criar entrada no audios.json com status downloading
+            created_date = datetime.datetime.now().isoformat()
+            
+            audio_metadata = {
+                "id": youtube_id,
+                "title": title,
+                "name": f"{title}.m4a",
+                "youtube_id": youtube_id,
+                "url": url,
+                "path": "",  # Será preenchido após download
+                "directory": "",  # Será preenchido após download
+                "created_date": created_date,
+                "modified_date": created_date,
+                "format": "m4a",
+                "filesize": 0,
+                "download_status": "downloading",  # Novo campo
+                "download_progress": 0,  # Novo campo
+                "download_error": "",  # Novo campo
+                "transcription_status": "none",
+                "transcription_path": "",
+                "keywords": self._extract_keywords(title)
+            }
+            
+            # Adicionar à lista de áudios
+            self.audio_data["audios"].append(audio_metadata)
+            
+            # Salvar os dados
+            self._save_audio_data()
+            
+            logger.info(f"Áudio registrado com ID: {youtube_id}")
+            return youtube_id
+            
+        except Exception as e:
+            error_str = str(e)
+            logger.error(f"Erro ao registrar áudio: {error_str}")
+            
+            # Verificar se é um erro de conectividade ou extração
+            if "Failed to extract any player response" in error_str or "getaddrinfo failed" in error_str or "Failed to resolve" in error_str:
+                # Para problemas de conectividade, registrar o áudio mesmo assim com título genérico
+                logger.warning("Problemas de conectividade detectados, registrando áudio com informações limitadas")
+                
+                created_date = datetime.datetime.now().isoformat()
+                title = f"Video_{youtube_id}"
+                
+                audio_metadata = {
+                    "id": youtube_id,
+                    "title": title,
+                    "name": f"{title}.m4a",
+                    "youtube_id": youtube_id,
+                    "url": url,
+                    "path": "",
+                    "directory": "",
+                    "created_date": created_date,
+                    "modified_date": created_date,
+                    "format": "m4a",
+                    "filesize": 0,
+                    "download_status": "queued",  # Status que indica que está na fila mas pode ter problemas
+                    "download_progress": 0,
+                    "download_error": "Problemas de conectividade durante registro",
+                    "transcription_status": "none",
+                    "transcription_path": "",
+                    "keywords": []
+                }
+                
+                self.audio_data["audios"].append(audio_metadata)
+                self._save_audio_data()
+                
+                logger.info(f"Áudio registrado com informações limitadas, ID: {youtube_id}")
+                return youtube_id
+            else:
+                raise
+    
     def download_audio(self, url: str) -> str:
         """
         Baixa apenas o áudio de um vídeo do YouTube em alta qualidade.
@@ -203,7 +310,18 @@ class AudioDownloadManager:
             
             # Faz o download do áudio
             with YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
+                try:
+                    info = ydl.extract_info(url, download=True)
+                except Exception as download_error:
+                    logger.error(f"Erro durante download do yt-dlp: {str(download_error)}")
+                    # Se houver erro de conectividade, relançar com informações específicas
+                    if "Failed to extract any player response" in str(download_error) or "getaddrinfo failed" in str(download_error):
+                        raise HTTPException(
+                            status_code=503,
+                            detail="Problemas de conectividade. Tente novamente mais tarde."
+                        )
+                    else:
+                        raise
                 
                 # O arquivo será m4a após o processamento
                 original_filename = ydl.prepare_filename(info)
@@ -253,6 +371,178 @@ class AudioDownloadManager:
                 status_code=500,
                 detail=f"Erro no download de áudio: {str(e)}"
             )
+    
+    async def download_audio_with_status_async(self, audio_id: str, url: str, sse_manager=None) -> str:
+        """
+        Baixa o áudio e atualiza o status de um áudio já registrado.
+        Versão assíncrona com suporte a eventos SSE.
+        
+        Args:
+            audio_id: ID do áudio registrado
+            url: URL do vídeo do YouTube
+            sse_manager: Gerenciador SSE para emitir eventos de progresso
+            
+        Returns:
+            Caminho do arquivo baixado
+        """
+        try:
+            logger.info(f"Iniciando download real do áudio {audio_id}: {url}")
+            
+            # Notificar início via SSE
+            if sse_manager:
+                await sse_manager.download_started(audio_id, f"Iniciando download de {url}")
+            
+            # Criar diretório para o download
+            download_dir = self.download_dir / audio_id
+            download_dir.mkdir(exist_ok=True)
+            
+            # Função de callback para progresso
+            last_progress = 0
+            
+            async def progress_hook(d):
+                nonlocal last_progress
+                if d['status'] == 'downloading':
+                    # Calcular percentual
+                    if d.get('total_bytes'):
+                        progress = int(d['downloaded_bytes'] / d['total_bytes'] * 100)
+                    elif d.get('total_bytes_estimate'):
+                        progress = int(d['downloaded_bytes'] / d['total_bytes_estimate'] * 100)
+                    else:
+                        progress = 0
+                    
+                    # Emitir evento apenas se o progresso mudou significativamente (a cada 5%)
+                    if progress - last_progress >= 5 or progress == 100:
+                        last_progress = progress
+                        if sse_manager:
+                            await sse_manager.download_progress(audio_id, progress, f"Baixando: {progress}%")
+                        
+                        # Atualizar no arquivo JSON também
+                        for i, audio in enumerate(self.audio_data["audios"]):
+                            if audio["id"] == audio_id:
+                                self.audio_data["audios"][i]["download_progress"] = progress
+                                break
+                        self._save_audio_data()
+                
+                elif d['status'] == 'finished':
+                    if sse_manager:
+                        await sse_manager.download_progress(audio_id, 95, "Processando áudio...")
+            
+            # Hook síncrono que chama a função assíncrona
+            def sync_progress_hook(d):
+                asyncio.create_task(progress_hook(d))
+            
+            # Configurações para download apenas de áudio em alta qualidade
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'outtmpl': str(download_dir / '%(title)s.%(ext)s'),
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'm4a',
+                    'preferredquality': '192',
+                }],
+                'progress_hooks': [sync_progress_hook],  # Adicionar hook de progresso
+                'socket_timeout': 30,
+                'retries': 10,
+                'fragment_retries': 10,
+                'nocheckcertificate': True,
+                'ignoreerrors': False,
+                'verbose': True,
+                'noplaylist': True,
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.5',
+                    'DNT': '1',
+                }
+            }
+            
+            # Faz o download do áudio
+            with YoutubeDL(ydl_opts) as ydl:
+                try:
+                    info = ydl.extract_info(url, download=True)
+                except Exception as download_error:
+                    error_str = str(download_error)
+                    logger.error(f"Erro durante download assíncrono do yt-dlp: {error_str}")
+                    
+                    # Atualizar status no áudio para erro
+                    for i, audio in enumerate(self.audio_data["audios"]):
+                        if audio["id"] == audio_id:
+                            self.audio_data["audios"][i].update({
+                                "download_status": "error",
+                                "download_error": error_str[:500],  # Limitar tamanho do erro
+                                "modified_date": datetime.datetime.now().isoformat()
+                            })
+                            break
+                    self._save_audio_data()
+                    
+                    # Notificar erro via SSE
+                    if sse_manager:
+                        await sse_manager.download_error(audio_id, f"Erro: {error_str}")
+                    
+                    # Se houver erro de conectividade, relançar com informações específicas
+                    if "Failed to extract any player response" in error_str or "getaddrinfo failed" in error_str:
+                        raise Exception("Problemas de conectividade. Tente novamente mais tarde.")
+                    else:
+                        raise
+                
+                # O arquivo será m4a após o processamento
+                original_filename = ydl.prepare_filename(info)
+                filename = Path(original_filename).with_suffix('.m4a')
+            
+            # Atualizar o áudio existente com os dados completos
+            for i, audio in enumerate(self.audio_data["audios"]):
+                if audio["id"] == audio_id:
+                    # Atualizar campos após download completo
+                    self.audio_data["audios"][i].update({
+                        "path": str(filename.relative_to(self.download_dir.parent)),
+                        "directory": str(download_dir.relative_to(self.download_dir.parent)),
+                        "filesize": filename.stat().st_size if filename.exists() else 0,
+                        "download_status": "ready",  # Marcar como pronto
+                        "download_progress": 100,
+                        "modified_date": datetime.datetime.now().isoformat()
+                    })
+                    break
+            
+            # Adicionar aos mapeamentos
+            mappings = {}
+            mappings[audio_id] = str(filename)
+            mappings[self._normalize_filename(filename.stem)] = str(filename)
+            mappings[self._normalize_filename(info.get('title', ''))] = str(filename)
+            
+            # Atualizar o dicionário de mapeamentos
+            self.audio_data["mappings"].update(mappings)
+            
+            # Salvar os dados
+            self._save_audio_data()
+            
+            # Atualizar o mapeamento em memória
+            self._add_audio_mappings(filename, info, audio_id)
+            
+            # Notificar conclusão via SSE
+            if sse_manager:
+                await sse_manager.download_completed(audio_id, f"Download concluído: {filename.name}")
+            
+            logger.success(f"Download de áudio concluído: {filename}")
+            return str(filename)
+            
+        except Exception as e:
+            logger.exception(f"Erro no download de áudio: {str(e)}")
+            
+            # Notificar erro via SSE
+            if sse_manager:
+                await sse_manager.download_error(audio_id, str(e))
+            
+            # Atualizar status para erro
+            for i, audio in enumerate(self.audio_data["audios"]):
+                if audio["id"] == audio_id:
+                    self.audio_data["audios"][i].update({
+                        "download_status": "error",
+                        "download_error": str(e)
+                    })
+                    break
+            
+            self._save_audio_data()
+            raise
     
     def get_audio_info(self, audio_id: str) -> Optional[Dict[str, Any]]:
         """

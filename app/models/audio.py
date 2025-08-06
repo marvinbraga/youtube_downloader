@@ -10,6 +10,13 @@ class AudioSource(str, Enum):
     YOUTUBE = "youtube"
 
 
+class DownloadStatus(str, Enum):
+    PENDING = "pending"
+    DOWNLOADING = "downloading"
+    READY = "ready"
+    ERROR = "error"
+
+
 class AudioInfo(BaseModel):
     id: str
     name: str

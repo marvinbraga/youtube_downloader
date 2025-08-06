@@ -66,3 +66,32 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) 
             status_code=401,
             detail="Token inválido"
         )
+
+
+def verify_token_sync(token: str) -> dict:
+    """
+    Versão síncrona de verify_token para uso em contextos não-async
+    """
+    try:
+        payload = PyJWT.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        client_id: str = payload.get("sub")
+
+        if client_id not in AUTHORIZED_CLIENTS:
+            raise HTTPException(
+                status_code=401,
+                detail="Cliente não autorizado"
+            )
+
+        return payload
+    except PyJWT.ExpiredSignatureError:
+        logger.error("Token expirado.")
+        raise HTTPException(
+            status_code=401,
+            detail="Token expirado"
+        )
+    except PyJWT.PyJWTError:
+        logger.error("Token invalido.")
+        raise HTTPException(
+            status_code=401,
+            detail="Token inválido"
+        )

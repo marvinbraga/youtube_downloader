@@ -3,6 +3,18 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Video, Audio, TranscriptionResponse, AudioExistsResponse } from '../types';
 
+// Helper para garantir type casting correto do transcription_status
+export const ensureTranscriptionStatus = (status: any): 'none' | 'started' | 'ended' | 'error' | undefined => {
+  if (!status) return undefined;
+  if (['none', 'started', 'ended', 'error'].includes(status)) {
+    return status as 'none' | 'started' | 'ended' | 'error';
+  }
+  // Mapeamento de valores antigos para novos
+  if (status === 'processing') return 'started';
+  if (status === 'success') return 'ended';
+  return 'error';
+};
+
 // Configuração do cliente axios
 const api = axios.create({
   baseURL: 'http://localhost:8000',
@@ -50,7 +62,13 @@ export const authenticate = async () => {
 export const fetchVideos = async (sortBy = 'none'): Promise<Video[]> => {
   try {
     const response = await api.get(`/videos?sort_by=${sortBy}`);
-    return response.data.videos || [];
+    const videos = response.data.videos || [];
+    
+    // Garantir que transcription_status tenha o tipo correto
+    return videos.map((video: any) => ({
+      ...video,
+      transcription_status: ensureTranscriptionStatus(video.transcription_status)
+    }));
   } catch (error) {
     if (axios.isAxiosError(error) && error.response?.status === 401) {
       await authenticate();
@@ -83,7 +101,13 @@ export const fetchAudios = async (): Promise<Audio[]> => {
     console.log("Buscando lista de áudios...");
     const response = await api.get('/audio/list');
     console.log(`Áudios encontrados: ${response.data.audio_files?.length || 0}`);
-    return response.data.audio_files || [];
+    const audioFiles = response.data.audio_files || [];
+    
+    // Garantir que transcription_status tenha o tipo correto
+    return audioFiles.map((audio: any) => ({
+      ...audio,
+      transcription_status: ensureTranscriptionStatus(audio.transcription_status)
+    }));
   } catch (error) {
     if (axios.isAxiosError(error) && error.response?.status === 401) {
       await authenticate();
@@ -141,7 +165,10 @@ export const transcribeAudio = async (
       language
     });
     console.log(`Resposta da transcrição:`, response.data);
-    return response.data;
+    return {
+      ...response.data,
+      status: ensureTranscriptionStatus(response.data.status)
+    };
   } catch (error) {
     if (axios.isAxiosError(error) && error.response?.status === 401) {
       await authenticate();
@@ -152,12 +179,15 @@ export const transcribeAudio = async (
   }
 };
 
-export const checkTranscriptionStatus = async (audioId: string): Promise<{status: string}> => {
+export const checkTranscriptionStatus = async (audioId: string): Promise<{status: 'none' | 'started' | 'ended' | 'error'}> => {
   try {
     console.log(`Verificando status da transcrição para o áudio ${audioId}...`);
     const response = await api.get(`/audio/transcription_status/${audioId}`);
     console.log(`Status da transcrição: ${response.data.status}`);
-    return response.data;
+    return {
+      ...response.data,
+      status: ensureTranscriptionStatus(response.data.status)
+    };
   } catch (error) {
     if (axios.isAxiosError(error) && error.response?.status === 401) {
       await authenticate();
@@ -181,6 +211,81 @@ export const fetchTranscription = async (itemId: string): Promise<string> => {
       return fetchTranscription(itemId);
     }
     console.error('Erro ao buscar transcrição:', error);
+    throw error;
+  }
+};
+
+// Funções para gerenciamento de fila de downloads (Fase 3)
+export const getQueueStatus = async (): Promise<any> => {
+  try {
+    const response = await api.get('/downloads/queue/status');
+    return response.data;
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 401) {
+      await authenticate();
+      return getQueueStatus();
+    }
+    console.error('Erro ao obter status da fila:', error);
+    throw error;
+  }
+};
+
+export const getQueueTasks = async (status?: string, audioId?: string): Promise<any> => {
+  try {
+    const params = new URLSearchParams();
+    if (status) params.append('status', status);
+    if (audioId) params.append('audio_id', audioId);
+    
+    const response = await api.get(`/downloads/queue/tasks?${params.toString()}`);
+    return response.data;
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 401) {
+      await authenticate();
+      return getQueueTasks(status, audioId);
+    }
+    console.error('Erro ao obter tasks da fila:', error);
+    throw error;
+  }
+};
+
+export const cancelDownloadTask = async (taskId: string): Promise<any> => {
+  try {
+    const response = await api.post(`/downloads/queue/cancel/${taskId}`);
+    return response.data;
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 401) {
+      await authenticate();
+      return cancelDownloadTask(taskId);
+    }
+    console.error('Erro ao cancelar download:', error);
+    throw error;
+  }
+};
+
+export const retryDownloadTask = async (taskId: string): Promise<any> => {
+  try {
+    const response = await api.post(`/downloads/queue/retry/${taskId}`);
+    return response.data;
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 401) {
+      await authenticate();
+      return retryDownloadTask(taskId);
+    }
+    console.error('Erro ao fazer retry do download:', error);
+    throw error;
+  }
+};
+
+export const cleanupQueue = async (maxAgeHours: number = 24): Promise<any> => {
+  try {
+    const response = await api.delete(`/downloads/queue/cleanup?max_age_hours=${maxAgeHours}`);
+    return response.data;
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 401) {
+      await authenticate();
+      return cleanupQueue(maxAgeHours);
+    }
+    console.error('Erro ao limpar fila:', error);
     throw error;
   }
 };

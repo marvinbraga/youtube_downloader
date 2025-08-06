@@ -13,6 +13,7 @@ import {
   ScrollView
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { checkAudioExists, downloadAudio } from '../../services/api';
 import StatusMessage from '../../components/StatusMessage';
 import { useTheme } from '../../context/ThemeContext';
@@ -83,10 +84,21 @@ const DownloadScreen: React.FC = () => {
       
       if (response.status === 'processando') {
         setStatusMessage({
-          message: 'Download de áudio iniciado em segundo plano. Veja a aba "Áudio" após a conclusão.',
+          message: 'Áudio registrado! Navegando para a lista de áudios...',
           type: 'success'
         });
+        
+        // Limpar o campo de URL
         setYoutubeUrl('');
+        
+        // Limpar cache de áudios para forçar reload
+        await AsyncStorage.removeItem('@audio_list_cache');
+        
+        // Aguardar um momento para a mensagem ser vista
+        setTimeout(() => {
+          // Navegar para a aba de áudio
+          navigation.navigate('Áudio' as never);
+        }, 1000);
       } else {
         setStatusMessage({
           message: 'Falha ao iniciar o download de áudio',

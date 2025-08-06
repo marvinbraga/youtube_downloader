@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { Audio as ExpoAudio } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { fetchAudios, transcribeAudio, checkTranscriptionStatus, fetchTranscription } from '../../services/api';
+import { fetchAudios, transcribeAudio, checkTranscriptionStatus, fetchTranscription, ensureTranscriptionStatus } from '../../services/api';
 import { Audio } from '../../types';
 import AudioItem from '../../components/AudioItem';
 import TranscriptionModal from '../../components/TranscriptionModal';
@@ -20,10 +20,12 @@ import StatusMessage from '../../components/StatusMessage';
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { useDownloads } from '../../context/DownloadContext';
 
 const AudioScreen: React.FC = () => {
   const { authState, login } = useAuth();
   const { colors, theme } = useTheme();
+  const { downloads, isConnected, getDownloadProgress, cancelDownload, retryDownload } = useDownloads();
   const [audios, setAudios] = useState<Audio[]>([]);
   const [filteredAudios, setFilteredAudios] = useState<Audio[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -102,6 +104,22 @@ const AudioScreen: React.FC = () => {
       }
     };
   }, [authState.isAuthenticated, authState.isLoading, login, loadAudios]);
+  
+  // Recarregar lista quando downloads mudam (via SSE)
+  useEffect(() => {
+    if (downloads.size > 0) {
+      // Se há downloads ativos, recarregar dados para manter sincronizado
+      const hasRecentChanges = Array.from(downloads.values()).some(download => {
+        const timeDiff = Date.now() - new Date(download.timestamp).getTime();
+        return timeDiff < 10000; // Mudanças nos últimos 10 segundos
+      });
+      
+      if (hasRecentChanges) {
+        console.log('Recarregando áudios devido a mudanças nos downloads');
+        loadAudios();
+      }
+    }
+  }, [downloads, loadAudios]);
   
   // Função para verificar o status de transcrição para todos os áudios
   const checkTranscriptionStatusForAllItems = (items: Audio[]): Audio[] => {
@@ -225,7 +243,7 @@ const AudioScreen: React.FC = () => {
         // Atualiza o áudio na lista
         const updatedAudios = audios.map(a => {
           if (a.id === audio.id) {
-            return { ...a, transcription_status: response.status };
+            return { ...a, transcription_status: ensureTranscriptionStatus(response.status) };
           }
           return a;
         });
@@ -400,7 +418,7 @@ const AudioScreen: React.FC = () => {
       
       const response = await transcribeAudio(audio.id, 'groq', 'pt');
       
-      if (response.status === 'processing') {
+      if (response.status === 'started') {
         setStatusMessage({
           message: 'Transcrição iniciada em segundo plano. Isso pode levar alguns minutos.',
           type: 'success'
@@ -414,13 +432,13 @@ const AudioScreen: React.FC = () => {
           return a;
         });
         
-        setAudios(updatedAudios);
-        filterAudios(updatedAudios, searchQuery);
-        cacheAudios(updatedAudios);
+        setAudios(updatedAudios as Audio[]);
+        filterAudios(updatedAudios as Audio[], searchQuery);
+        cacheAudios(updatedAudios as Audio[]);
         
         // Inicia verificação periódica do status
-        startTranscriptionStatusCheck(updatedAudios);
-      } else if (response.status === 'success') {
+        startTranscriptionStatusCheck(updatedAudios as Audio[]);
+      } else if (response.status === 'ended') {
         setStatusMessage({
           message: 'Transcrição já existe! Carregando visualização...',
           type: 'success'
@@ -434,9 +452,9 @@ const AudioScreen: React.FC = () => {
           return a;
         });
         
-        setAudios(updatedAudios);
-        filterAudios(updatedAudios, searchQuery);
-        cacheAudios(updatedAudios);
+        setAudios(updatedAudios as Audio[]);
+        filterAudios(updatedAudios as Audio[], searchQuery);
+        cacheAudios(updatedAudios as Audio[]);
         
         // Mostrar a transcrição existente
         viewTranscription({ ...audio, transcription_status: 'ended' });
@@ -507,6 +525,72 @@ const AudioScreen: React.FC = () => {
       loadAudios();
     });
   }, [loadAudios]);
+
+  // Função para cancelar download
+  const handleCancelDownload = useCallback(async (audio: Audio) => {
+    try {
+      setStatusMessage({
+        message: 'Cancelando download...',
+        type: 'info'
+      });
+
+      const success = await cancelDownload(audio.id);
+      
+      if (success) {
+        setStatusMessage({
+          message: 'Download cancelado com sucesso',
+          type: 'success'
+        });
+        // Recarregar lista
+        await AsyncStorage.removeItem('@audio_list_cache');
+        loadAudios();
+      } else {
+        setStatusMessage({
+          message: 'Não foi possível cancelar o download',
+          type: 'error'
+        });
+      }
+    } catch (error) {
+      console.error('Erro ao cancelar download:', error);
+      setStatusMessage({
+        message: 'Erro ao cancelar download. Tente novamente.',
+        type: 'error'
+      });
+    }
+  }, [cancelDownload, loadAudios]);
+
+  // Função para retry de download
+  const handleRetryDownload = useCallback(async (audio: Audio) => {
+    try {
+      setStatusMessage({
+        message: 'Tentando novamente...',
+        type: 'info'
+      });
+
+      const success = await retryDownload(audio.id);
+      
+      if (success) {
+        setStatusMessage({
+          message: 'Download reiniciado com sucesso',
+          type: 'success'
+        });
+        // Recarregar lista
+        await AsyncStorage.removeItem('@audio_list_cache');
+        loadAudios();
+      } else {
+        setStatusMessage({
+          message: 'Não foi possível reiniciar o download',
+          type: 'error'
+        });
+      }
+    } catch (error) {
+      console.error('Erro ao fazer retry do download:', error);
+      setStatusMessage({
+        message: 'Erro ao tentar novamente. Tente novamente.',
+        type: 'error'
+      });
+    }
+  }, [retryDownload, loadAudios]);
   
   return (
     <View style={[styles.container, { backgroundColor: colors.background.primary }]}>
@@ -542,7 +626,15 @@ const AudioScreen: React.FC = () => {
           backgroundColor: colors.background.primary
         }
       ]}>
-        <Text style={[styles.listTitle, { color: colors.text.primary }]}>Áudios Disponíveis</Text>
+        <View style={styles.listHeader}>
+          <Text style={[styles.listTitle, { color: colors.text.primary }]}>Áudios Disponíveis</Text>
+          {isConnected && (
+            <View style={styles.connectionIndicator}>
+              <View style={[styles.connectionDot, { backgroundColor: colors.success }]} />
+              <Text style={[styles.connectionText, { color: colors.text.secondary }]}>Tempo real</Text>
+            </View>
+          )}
+        </View>
         
         {isLoading && !refreshing ? (
           <View style={styles.centerLoading}>
@@ -569,16 +661,31 @@ const AudioScreen: React.FC = () => {
               />
             }
           >
-            {filteredAudios.map((audio) => (
-              <AudioItem
-                key={audio.id}
-                audio={audio}
-                isActive={currentAudioId === audio.id}
-                onPress={() => setCurrentAudioId(audio.id)}
-                onPlay={playAudio}
-                onTranscribe={transcribeAudioFile}
-              />
-            ))}
+            {filteredAudios.map((audio) => {
+              // Obter dados de progresso do SSE se disponível
+              const downloadProgress = getDownloadProgress(audio.id);
+              
+              // Combinar dados do áudio com dados de progresso em tempo real
+              const enrichedAudio = {
+                ...audio,
+                download_status: downloadProgress?.status || audio.download_status,
+                download_progress: downloadProgress?.progress ?? audio.download_progress,
+                download_error: downloadProgress?.error || audio.download_error
+              };
+              
+              return (
+                <AudioItem
+                  key={audio.id}
+                  audio={enrichedAudio}
+                  isActive={currentAudioId === audio.id}
+                  onPress={() => setCurrentAudioId(audio.id)}
+                  onPlay={playAudio}
+                  onTranscribe={transcribeAudioFile}
+                  onCancel={handleCancelDownload}
+                  onRetry={handleRetryDownload}
+                />
+              );
+            })}
           </ScrollView>
         )}
       </View>
@@ -616,10 +723,29 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
   },
+  listHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
   listTitle: {
     fontSize: 18,
     fontWeight: '600',
-    marginBottom: 12,
+  },
+  connectionIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  connectionDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6,
+  },
+  connectionText: {
+    fontSize: 12,
+    fontWeight: '500',
   },
   audiosList: {
     flex: 1,

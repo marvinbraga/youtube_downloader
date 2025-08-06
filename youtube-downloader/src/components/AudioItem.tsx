@@ -1,6 +1,6 @@
 
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Animated } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { Audio } from '../types';
 import { useTheme } from '../context/ThemeContext';
@@ -12,6 +12,8 @@ interface AudioItemProps {
   onPress: (audio: Audio) => void;
   onPlay: (audio: Audio) => void;
   onTranscribe: (audio: Audio) => void;
+  onCancel?: (audio: Audio) => void;
+  onRetry?: (audio: Audio) => void;
 }
 
 interface TranscriptionStatusConfig {
@@ -30,9 +32,12 @@ const AudioItem: React.FC<AudioItemProps> = ({
   isHighlighted = false,
   onPress,
   onPlay,
-  onTranscribe
+  onTranscribe,
+  onCancel,
+  onRetry
 }) => {
   const { colors, theme } = useTheme();
+  const spinValue = useRef(new Animated.Value(0)).current;
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -121,6 +126,37 @@ const AudioItem: React.FC<AudioItemProps> = ({
   // Verifica se o ícone está animado (para o caso de loading)
   const isAnimatedIcon = statusConfig.buttonIcon === 'loader';
   
+  // Animação de rotação para o ícone de loading
+  useEffect(() => {
+    if (isAnimatedIcon) {
+      const spinAnimation = Animated.loop(
+        Animated.timing(spinValue, {
+          toValue: 1,
+          duration: 1000,
+          useNativeDriver: true,
+        })
+      );
+      spinAnimation.start();
+      
+      return () => {
+        spinAnimation.stop();
+        spinValue.setValue(0);
+      };
+    } else {
+      spinValue.setValue(0);
+    }
+  }, [isAnimatedIcon, spinValue]);
+
+  const spin = spinValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+  
+  // Verificar status de download
+  const isDownloading = audio.download_status === 'downloading' || audio.download_status === 'pending';
+  const downloadError = audio.download_status === 'error';
+  const isNotReady = audio.download_status && audio.download_status !== 'ready';
+  
   return (
     <TouchableOpacity
       style={[
@@ -145,6 +181,51 @@ const AudioItem: React.FC<AudioItemProps> = ({
       ]}
       onPress={() => onPress(audio)}
     >
+      {/* Indicador de download em andamento */}
+      {isDownloading && (
+        <View style={[styles.downloadOverlay, { backgroundColor: colors.background.primary + 'E6' }]}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.downloadText, { color: colors.text.primary }]}>
+            {audio.download_status === 'pending' ? 'Preparando download...' : 'Baixando áudio...'}
+          </Text>
+          
+          {/* Barra de progresso */}
+          {audio.download_progress !== undefined && audio.download_progress > 0 && (
+            <View style={styles.progressContainer}>
+              <View style={[styles.progressBar, { backgroundColor: colors.border }]}>
+                <View 
+                  style={[
+                    styles.progressFill,
+                    { 
+                      backgroundColor: colors.primary,
+                      width: `${audio.download_progress}%`
+                    }
+                  ]}
+                />
+              </View>
+              <Text style={[styles.progressText, { color: colors.text.secondary }]}>
+                {audio.download_progress}%
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
+      
+      {/* Indicador de erro no download */}
+      {downloadError && (
+        <View style={[styles.errorOverlay, { backgroundColor: colors.error + '20' }]}>
+          <Feather name="alert-circle" size={24} color={colors.error} />
+          <Text style={[styles.errorText, { color: colors.error }]}>
+            Erro no download
+          </Text>
+          {audio.download_error && (
+            <Text style={[styles.errorDetail, { color: colors.text.secondary }]} numberOfLines={2}>
+              {audio.download_error}
+            </Text>
+          )}
+        </View>
+      )}
+      
       <View style={styles.content}>
         <View style={styles.header}>
           <Text style={[styles.title, { color: colors.text.primary }]} numberOfLines={1}>
@@ -153,11 +234,21 @@ const AudioItem: React.FC<AudioItemProps> = ({
           
           {statusConfig.badgeText && (
             <View style={[styles.badge, { backgroundColor: getBadgeColor() }]}>
-              <Feather 
-                name={(statusConfig.badgeIcon as any) || 'info'} 
-                size={12} 
-                color="white" 
-              />
+              {statusConfig.badgeIcon === 'loader' ? (
+                <Animated.View style={{ transform: [{ rotate: spin }] }}>
+                  <Feather 
+                    name="loader" 
+                    size={12} 
+                    color="white" 
+                  />
+                </Animated.View>
+              ) : (
+                <Feather 
+                  name={(statusConfig.badgeIcon as any) || 'info'} 
+                  size={12} 
+                  color="white" 
+                />
+              )}
               <Text style={styles.badgeText}>{statusConfig.badgeText}</Text>
             </View>
           )}
@@ -182,12 +273,16 @@ const AudioItem: React.FC<AudioItemProps> = ({
               { 
                 backgroundColor: colors.background.primary,
                 borderColor: colors.border 
-              }
+              },
+              isNotReady && styles.disabledButton
             ]}
             onPress={() => onPlay(audio)}
+            disabled={isNotReady}
           >
-            <Feather name="play" size={16} color={colors.secondary} />
-            <Text style={[styles.actionButtonText, { color: colors.secondary }]}>Reproduzir</Text>
+            <Feather name="play" size={16} color={isNotReady ? colors.text.secondary : colors.secondary} />
+            <Text style={[styles.actionButtonText, { color: isNotReady ? colors.text.secondary : colors.secondary }]}>
+              Reproduzir
+            </Text>
           </TouchableOpacity>
           
           <TouchableOpacity 
@@ -197,20 +292,64 @@ const AudioItem: React.FC<AudioItemProps> = ({
                 backgroundColor: getButtonColor(), 
                 borderColor: getButtonColor() 
               },
-              statusConfig.isDisabled && theme.states.button.disabled
+              (statusConfig.isDisabled || isNotReady) && theme.states.button.disabled
             ]}
             onPress={() => onTranscribe(audio)}
-            disabled={statusConfig.isDisabled}
+            disabled={statusConfig.isDisabled || isNotReady}
           >
-            <Feather 
-              name={(statusConfig.buttonIcon as any) || 'mic'} 
-              size={16} 
-              color="white" 
-            />
+            {isAnimatedIcon ? (
+              <Animated.View style={{ transform: [{ rotate: spin }] }}>
+                <Feather 
+                  name="loader" 
+                  size={16} 
+                  color="white" 
+                />
+              </Animated.View>
+            ) : (
+              <Feather 
+                name={(statusConfig.buttonIcon as any) || 'mic'} 
+                size={16} 
+                color="white" 
+              />
+            )}
             <Text style={styles.transcriptionButtonText}>
               {statusConfig.buttonText || 'Transcrever'}
             </Text>
           </TouchableOpacity>
+          
+          {/* Botão de cancelar download */}
+          {isDownloading && onCancel && (
+            <TouchableOpacity
+              style={[
+                styles.actionButton,
+                { 
+                  backgroundColor: colors.error,
+                  borderColor: colors.error
+                }
+              ]}
+              onPress={() => onCancel(audio)}
+            >
+              <Feather name="x" size={16} color="white" />
+              <Text style={[styles.actionButtonText, { color: 'white' }]}>Cancelar</Text>
+            </TouchableOpacity>
+          )}
+          
+          {/* Botão de retry */}
+          {downloadError && onRetry && (
+            <TouchableOpacity
+              style={[
+                styles.actionButton,
+                { 
+                  backgroundColor: colors.warning,
+                  borderColor: colors.warning
+                }
+              ]}
+              onPress={() => onRetry(audio)}
+            >
+              <Feather name="refresh-cw" size={16} color="white" />
+              <Text style={[styles.actionButtonText, { color: 'white' }]}>Tentar Novamente</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     </TouchableOpacity>
@@ -286,6 +425,68 @@ const styles = StyleSheet.create({
   },
   animatedIcon: {
     // Esta propriedade será usada para implementar animação posteriormente
+  },
+  downloadOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 8,
+    zIndex: 1,
+  },
+  downloadText: {
+    marginTop: 12,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  progressContainer: {
+    marginTop: 16,
+    width: '80%',
+    alignItems: 'center',
+  },
+  progressBar: {
+    width: '100%',
+    height: 6,
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 3,
+    minWidth: 2,
+  },
+  progressText: {
+    marginTop: 8,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  errorOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 8,
+    zIndex: 1,
+    padding: 16,
+  },
+  errorText: {
+    marginTop: 8,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  errorDetail: {
+    marginTop: 4,
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  disabledButton: {
+    opacity: 0.5,
   }
 });
 

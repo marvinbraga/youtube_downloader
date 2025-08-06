@@ -19,6 +19,9 @@ export interface Audio {
   transcription_status?: 'none' | 'started' | 'ended' | 'error';
   transcription_path?: string;
   has_transcription?: boolean; // Para compatibilidade com versões anteriores
+  download_status?: 'pending' | 'downloading' | 'ready' | 'error';
+  download_progress?: number;
+  download_error?: string;
 }
 
 export interface AuthState {
@@ -35,7 +38,7 @@ export interface APIResponse<T> {
 }
 
 export interface TranscriptionResponse {
-  status: 'processing' | 'success' | 'error';
+  status: 'none' | 'started' | 'ended' | 'error';
   message?: string;
   transcription_text?: string;
 }

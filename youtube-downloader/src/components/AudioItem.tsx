@@ -123,12 +123,13 @@ const AudioItem: React.FC<AudioItemProps> = ({
     }
   };
   
-  // Verifica se o ícone está animado (para o caso de loading)
-  const isAnimatedIcon = statusConfig.buttonIcon === 'loader';
+  // Verifica se deve animar - anima tanto o badge quanto o botão quando está transcrevendo
+  const isTranscribing = audio.transcription_status === 'started';
+  const isAnimatedIcon = statusConfig.buttonIcon === 'loader' || isTranscribing;
   
   // Animação de rotação para o ícone de loading
   useEffect(() => {
-    if (isAnimatedIcon) {
+    if (isAnimatedIcon || isTranscribing) {
       const spinAnimation = Animated.loop(
         Animated.timing(spinValue, {
           toValue: 1,
@@ -145,7 +146,7 @@ const AudioItem: React.FC<AudioItemProps> = ({
     } else {
       spinValue.setValue(0);
     }
-  }, [isAnimatedIcon, spinValue]);
+  }, [isAnimatedIcon, isTranscribing, spinValue]);
 
   const spin = spinValue.interpolate({
     inputRange: [0, 1],
@@ -234,7 +235,7 @@ const AudioItem: React.FC<AudioItemProps> = ({
           
           {statusConfig.badgeText && (
             <View style={[styles.badge, { backgroundColor: getBadgeColor() }]}>
-              {statusConfig.badgeIcon === 'loader' ? (
+              {(statusConfig.badgeIcon === 'loader' || isTranscribing) ? (
                 <Animated.View style={{ transform: [{ rotate: spin }] }}>
                   <Feather 
                     name="loader" 
@@ -306,7 +307,7 @@ const AudioItem: React.FC<AudioItemProps> = ({
             onPress={() => onTranscribe(audio)}
             disabled={statusConfig.isDisabled || isNotReady}
           >
-            {isAnimatedIcon ? (
+            {(isAnimatedIcon || isTranscribing) ? (
               <Animated.View style={{ transform: [{ rotate: spin }] }}>
                 <Feather 
                   name="loader" 

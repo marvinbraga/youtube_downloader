@@ -396,11 +396,11 @@ class AudioDownloadManager:
             download_dir = self.download_dir / audio_id
             download_dir.mkdir(exist_ok=True)
             
-            # Função de callback para progresso
-            last_progress = 0
+            # Criar um callback de progresso simples que será passado para a thread
+            progress_data = {'last_progress': 0}
             
-            async def progress_hook(d):
-                nonlocal last_progress
+            def simple_progress_hook(d):
+                """Hook de progresso que não usa asyncio - apenas armazena dados"""
                 if d['status'] == 'downloading':
                     # Calcular percentual
                     if d.get('total_bytes'):
@@ -410,26 +410,13 @@ class AudioDownloadManager:
                     else:
                         progress = 0
                     
-                    # Emitir evento apenas se o progresso mudou significativamente (a cada 5%)
-                    if progress - last_progress >= 5 or progress == 100:
-                        last_progress = progress
-                        if sse_manager:
-                            await sse_manager.download_progress(audio_id, progress, f"Baixando: {progress}%")
-                        
-                        # Atualizar no arquivo JSON também
-                        for i, audio in enumerate(self.audio_data["audios"]):
-                            if audio["id"] == audio_id:
-                                self.audio_data["audios"][i]["download_progress"] = progress
-                                break
-                        self._save_audio_data()
+                    # Armazenar progresso para uso posterior
+                    progress_data['current_progress'] = progress
+                    progress_data['status'] = 'downloading'
                 
                 elif d['status'] == 'finished':
-                    if sse_manager:
-                        await sse_manager.download_progress(audio_id, 95, "Processando áudio...")
-            
-            # Hook síncrono que chama a função assíncrona
-            def sync_progress_hook(d):
-                asyncio.create_task(progress_hook(d))
+                    progress_data['current_progress'] = 95
+                    progress_data['status'] = 'finished'
             
             # Configurações para download apenas de áudio em alta qualidade
             ydl_opts = {
@@ -440,7 +427,7 @@ class AudioDownloadManager:
                     'preferredcodec': 'm4a',
                     'preferredquality': '192',
                 }],
-                'progress_hooks': [sync_progress_hook],  # Adicionar hook de progresso
+                'progress_hooks': [simple_progress_hook],  # Adicionar hook de progresso
                 'socket_timeout': 30,
                 'retries': 10,
                 'fragment_retries': 10,
@@ -456,38 +443,48 @@ class AudioDownloadManager:
                 }
             }
             
-            # Faz o download do áudio
-            with YoutubeDL(ydl_opts) as ydl:
-                try:
-                    info = ydl.extract_info(url, download=True)
-                except Exception as download_error:
-                    error_str = str(download_error)
-                    logger.error(f"Erro durante download assíncrono do yt-dlp: {error_str}")
-                    
-                    # Atualizar status no áudio para erro
-                    for i, audio in enumerate(self.audio_data["audios"]):
-                        if audio["id"] == audio_id:
-                            self.audio_data["audios"][i].update({
-                                "download_status": "error",
-                                "download_error": error_str[:500],  # Limitar tamanho do erro
-                                "modified_date": datetime.datetime.now().isoformat()
-                            })
-                            break
-                    self._save_audio_data()
-                    
-                    # Notificar erro via SSE
-                    if sse_manager:
-                        await sse_manager.download_error(audio_id, f"Erro: {error_str}")
-                    
-                    # Se houver erro de conectividade, relançar com informações específicas
-                    if "Failed to extract any player response" in error_str or "getaddrinfo failed" in error_str:
-                        raise Exception("Problemas de conectividade. Tente novamente mais tarde.")
-                    else:
-                        raise
+            # Faz o download do áudio de forma assíncrona
+            try:
+                # Executar o download em thread separada para não bloquear
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    None,
+                    lambda: self._execute_ydl_download(url, ydl_opts, progress_data, audio_id, sse_manager)
+                )
                 
                 # O arquivo será m4a após o processamento
-                original_filename = ydl.prepare_filename(info)
-                filename = Path(original_filename).with_suffix('.m4a')
+                info = result['info']
+                original_filename = result['filename']
+            except Exception as download_error:
+                error_str = str(download_error)
+                logger.error(f"Erro durante download assíncrono do yt-dlp: {error_str}")
+                
+                # Atualizar status no áudio para erro
+                for i, audio in enumerate(self.audio_data["audios"]):
+                    if audio["id"] == audio_id:
+                        self.audio_data["audios"][i].update({
+                            "download_status": "error",
+                            "download_error": error_str[:500],  # Limitar tamanho do erro
+                            "modified_date": datetime.datetime.now().isoformat()
+                        })
+                        break
+                self._save_audio_data()
+                
+                # Notificar erro via SSE
+                if sse_manager:
+                    await sse_manager.download_error(audio_id, f"Erro: {error_str}")
+                
+                # Se houver erro de conectividade, relançar com informações específicas
+                if "Failed to extract any player response" in error_str or "getaddrinfo failed" in error_str:
+                    raise Exception("Problemas de conectividade. Tente novamente mais tarde.")
+                else:
+                    raise
+            
+            filename = Path(original_filename).with_suffix('.m4a')
+            
+            # Notificar progresso final via SSE
+            if sse_manager:
+                await sse_manager.download_progress(audio_id, 100, "Download concluído!")
             
             # Atualizar o áudio existente com os dados completos
             for i, audio in enumerate(self.audio_data["audios"]):
@@ -732,3 +729,44 @@ class AudioDownloadManager:
                 logger.info("Nenhuma alteração necessária durante a migração.")
         except Exception as e:
             logger.error(f"Erro durante a migração de dados: {str(e)}")
+    
+    def _execute_ydl_download(self, url: str, ydl_opts: dict, progress_data: dict, audio_id: str, sse_manager) -> dict:
+        """Executa o download do yt-dlp em thread separada (método síncrono)"""
+        import threading
+        import time
+        
+        # Thread para monitorar progresso e enviar atualizações
+        stop_monitoring = threading.Event()
+        
+        def monitor_progress():
+            last_progress = 0
+            while not stop_monitoring.is_set():
+                current_progress = progress_data.get('current_progress', 0)
+                if current_progress != last_progress and current_progress > 0:
+                    # Atualizar no arquivo JSON
+                    for i, audio in enumerate(self.audio_data["audios"]):
+                        if audio["id"] == audio_id:
+                            self.audio_data["audios"][i]["download_progress"] = current_progress
+                            break
+                    self._save_audio_data()
+                    last_progress = current_progress
+                
+                time.sleep(1)  # Check a cada segundo
+        
+        # Iniciar thread de monitoramento
+        monitor_thread = threading.Thread(target=monitor_progress, daemon=True)
+        monitor_thread.start()
+        
+        try:
+            with YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                # Preparar nome do arquivo para retorno
+                original_filename = ydl.prepare_filename(info)
+                return {
+                    'info': info,
+                    'filename': original_filename
+                }
+        finally:
+            # Parar thread de monitoramento
+            stop_monitoring.set()
+            monitor_thread.join(timeout=1)

@@ -101,6 +101,17 @@ def generate_video_stream(video_path: Path):
         raise HTTPException(status_code=500, detail=f"Erro ao ler o arquivo: {str(e)}")
 
 
+def generate_audio_stream(audio_path: Path):
+    """Gera o stream de áudio em chunks"""
+    CHUNK_SIZE = 1024 * 1024  # 1MB por chunk
+    try:
+        with open(audio_path, "rb") as audio_file:
+            while chunk := audio_file.read(CHUNK_SIZE):
+                yield chunk
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao ler o arquivo de áudio: {str(e)}")
+
+
 def load_json_audios() -> Dict:
     """
     Carrega os dados de áudio do arquivo JSON

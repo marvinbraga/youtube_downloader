@@ -15,7 +15,7 @@ import uuid
 from app.models.video import TokenData, ClientAuth, SortOption
 from app.models.audio import AudioDownloadRequest, TranscriptionRequest, TranscriptionResponse, TranscriptionProvider
 from app.services.configs import video_mapping, AUDIO_DIR, audio_mapping
-from app.services.files import scan_video_directory, generate_video_stream, scan_audio_directory
+from app.services.files import scan_video_directory, generate_video_stream, scan_audio_directory, generate_audio_stream
 from app.services.managers import VideoStreamManager, AudioDownloadManager
 from app.services.securities import AUTHORIZED_CLIENTS, create_access_token, verify_token, verify_token_sync, ACCESS_TOKEN_EXPIRE_MINUTES
 from app.services.transcription.service import TranscriptionService
@@ -142,6 +142,57 @@ async def stream_video(
         generate_video_stream(video_path),
         media_type=content_type
     )
+
+
+@app.get("/audios/{audio_id}/stream/")
+async def stream_audio(
+        audio_id: str,
+        token_data: dict = Depends(verify_token)
+):
+    """
+    Endpoint para streaming de áudio (requer autenticação)
+    """
+    try:
+        logger.debug(f"Solicitado streaming do áudio: {audio_id}")
+        
+        # Busca o áudio no mapeamento
+        if audio_id not in audio_mapping:
+            logger.warning(f"Áudio não encontrado no mapeamento: {audio_id}")
+            raise HTTPException(status_code=404, detail="Áudio não encontrado")
+        
+        audio_path = audio_mapping[audio_id]
+        
+        # Verifica se o arquivo existe
+        if not audio_path.exists():
+            logger.warning(f"Arquivo de áudio não encontrado: {audio_path}")
+            raise HTTPException(status_code=404, detail="Arquivo de áudio não encontrado")
+        
+        # Determina o tipo de mídia baseado na extensão
+        content_type = "audio/mp4"
+        if audio_path.suffix.lower() == '.m4a':
+            content_type = "audio/mp4"
+        elif audio_path.suffix.lower() == '.mp3':
+            content_type = "audio/mpeg"
+        elif audio_path.suffix.lower() == '.wav':
+            content_type = "audio/wav"
+        elif audio_path.suffix.lower() == '.ogg':
+            content_type = "audio/ogg"
+        
+        logger.info(f"Streaming áudio {audio_id}: {audio_path} ({content_type})")
+        
+        return StreamingResponse(
+            generate_audio_stream(audio_path),
+            media_type=content_type
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao fazer streaming do áudio {audio_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro interno ao fazer streaming do áudio: {str(e)}"
+        )
 
 
 # Novo endpoint para verificar se um áudio já existe

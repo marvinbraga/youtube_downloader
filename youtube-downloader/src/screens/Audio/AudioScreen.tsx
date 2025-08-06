@@ -30,6 +30,7 @@ const AudioScreen: React.FC = () => {
   const [filteredAudios, setFilteredAudios] = useState<Audio[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentAudioId, setCurrentAudioId] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{
@@ -307,25 +308,75 @@ const AudioScreen: React.FC = () => {
     }
   };
   
-  // Função para reproduzir áudio
+  // Função para reproduzir/pausar áudio
   const playAudio = async (audio: Audio) => {
     try {
       if (!authState.isAuthenticated) {
         await login();
       }
       
-      // Parar áudio atual se estiver tocando
+      // Se é o mesmo áudio e está tocando, pausar
+      if (currentAudioId === audio.id && isPlaying && soundRef.current) {
+        await soundRef.current.pauseAsync();
+        setIsPlaying(false);
+        setStatusMessage({
+          message: `${audio.name} pausado`,
+          type: 'info'
+        });
+        return;
+      }
+      
+      // Se é o mesmo áudio e está pausado, retomar
+      if (currentAudioId === audio.id && !isPlaying && soundRef.current) {
+        await soundRef.current.playAsync();
+        setIsPlaying(true);
+        setStatusMessage({
+          message: `Reproduzindo ${audio.name}`,
+          type: 'success'
+        });
+        return;
+      }
+      
+      // Parar áudio atual se estiver tocando outro
       await stopAudio();
       
       setCurrentAudioId(audio.id);
+      setIsPlaying(true);
       
-      // Em um cenário real, isso seria implementado para reproduzir o áudio
-      // usando o endpoint correto para streaming
+      setStatusMessage({
+        message: `Carregando ${audio.name}...`,
+        type: 'info'
+      });
       
-      // Como é uma simulação, apenas mostramos uma mensagem
+      // Criar URL do arquivo de áudio
+      const audioUrl = `http://localhost:8000/audios/${audio.id}/stream/`;
+      
+      console.log('Tentando reproduzir áudio:', audioUrl);
+      
+      // Criar nova instância do Sound
+      const { sound } = await ExpoAudio.Sound.createAsync(
+        { uri: audioUrl },
+        { shouldPlay: true, isLooping: false },
+        null
+      );
+      
+      soundRef.current = sound;
+      
+      // Configurar callback para quando o áudio terminar
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (status.isLoaded && status.didJustFinish) {
+          setCurrentAudioId(null);
+          setIsPlaying(false);
+          setStatusMessage({
+            message: 'Reprodução finalizada',
+            type: 'success'
+          });
+        }
+      });
+      
       setStatusMessage({
         message: `Reproduzindo ${audio.name}`,
-        type: 'info'
+        type: 'success'
       });
       
       // Atualizar a UI
@@ -334,8 +385,10 @@ const AudioScreen: React.FC = () => {
       );
     } catch (error) {
       console.error('Erro ao reproduzir áudio:', error);
+      setCurrentAudioId(null);
+      setIsPlaying(false);
       setStatusMessage({
-        message: 'Erro ao reproduzir áudio. Tente novamente.',
+        message: 'Erro ao reproduzir áudio. Verifique se o arquivo existe.',
         type: 'error'
       });
     }
@@ -354,6 +407,8 @@ const AudioScreen: React.FC = () => {
       }
       soundRef.current = null;
     }
+    setCurrentAudioId(null);
+    setIsPlaying(false);
   };
   
   // Função para transcrever áudio - Ponto de entrada principal da lógica de transcrição
@@ -677,7 +732,7 @@ const AudioScreen: React.FC = () => {
                 <AudioItem
                   key={audio.id}
                   audio={enrichedAudio}
-                  isActive={currentAudioId === audio.id}
+                  isActive={currentAudioId === audio.id && isPlaying}
                   onPress={() => setCurrentAudioId(audio.id)}
                   onPlay={playAudio}
                   onTranscribe={transcribeAudioFile}

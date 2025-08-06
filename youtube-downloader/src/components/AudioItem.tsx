@@ -271,17 +271,26 @@ const AudioItem: React.FC<AudioItemProps> = ({
             style={[
               styles.actionButton,
               { 
-                backgroundColor: colors.background.primary,
-                borderColor: colors.border 
+                backgroundColor: isActive ? colors.primary : colors.background.primary,
+                borderColor: isActive ? colors.primary : colors.border 
               },
               isNotReady && styles.disabledButton
             ]}
             onPress={() => onPlay(audio)}
             disabled={isNotReady}
           >
-            <Feather name="play" size={16} color={isNotReady ? colors.text.secondary : colors.secondary} />
-            <Text style={[styles.actionButtonText, { color: isNotReady ? colors.text.secondary : colors.secondary }]}>
-              Reproduzir
+            <Feather 
+              name={isActive ? "pause" : "play"} 
+              size={16} 
+              color={isNotReady ? colors.text.secondary : isActive ? 'white' : colors.secondary} 
+            />
+            <Text style={[
+              styles.actionButtonText, 
+              { 
+                color: isNotReady ? colors.text.secondary : isActive ? 'white' : colors.secondary 
+              }
+            ]}>
+              {isActive ? 'Pausar' : 'Reproduzir'}
             </Text>
           </TouchableOpacity>
           

@@ -589,6 +589,71 @@ async def get_transcription(
         )
 
 
+@app.get("/audio/stream/{audio_id}")
+async def stream_audio_file(
+        audio_id: str,
+        token: str = Query(None)
+):
+    """
+    Endpoint para servir arquivos de áudio com autenticação opcional via token
+    """
+    try:
+        # Verificar token se fornecido
+        if token:
+            try:
+                verify_token_sync(token)
+            except Exception as e:
+                logger.warning(f"Token inválido fornecido: {str(e)}")
+                raise HTTPException(status_code=403, detail="Token inválido")
+        logger.debug(f"Solicitado stream do áudio: {audio_id}")
+        
+        # Busca o áudio nos dados
+        audio_data = scan_audio_directory()
+        audio = None
+        for a in audio_data:
+            if a["id"] == audio_id:
+                audio = a
+                break
+        
+        if not audio:
+            logger.warning(f"Áudio não encontrado: {audio_id}")
+            raise HTTPException(status_code=404, detail="Áudio não encontrado")
+        
+        # Constrói o caminho completo do arquivo
+        from app.services.configs import AUDIO_DIR
+        audio_file_path = AUDIO_DIR.parent / audio["path"]
+        
+        if not audio_file_path.exists():
+            logger.warning(f"Arquivo não encontrado: {audio_file_path}")
+            raise HTTPException(status_code=404, detail="Arquivo de áudio não encontrado")
+        
+        # Determina o tipo MIME
+        content_type = "audio/mp4"
+        if audio_file_path.suffix.lower() == '.m4a':
+            content_type = "audio/mp4"
+        elif audio_file_path.suffix.lower() == '.mp3':
+            content_type = "audio/mpeg"
+        elif audio_file_path.suffix.lower() == '.wav':
+            content_type = "audio/wav"
+        
+        logger.info(f"Servindo áudio {audio_id}: {audio_file_path} ({content_type})")
+        
+        return FileResponse(
+            path=str(audio_file_path),
+            media_type=content_type,
+            filename=f"{audio['name']}.{audio.get('format', 'm4a')}"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao servir áudio {audio_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao servir áudio: {str(e)}"
+        )
+
+
 @app.get("/audio/transcription_status/{file_id}")
 async def get_transcription_status(
         file_id: str,

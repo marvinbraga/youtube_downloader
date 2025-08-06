@@ -19,6 +19,7 @@
     "expo": "~52.0.43",
     "expo-av": "^15.0.2",
     "expo-clipboard": "^7.1.5",
+    "expo-file-system": "^18.1.11",
     "expo-linear-gradient": "^14.0.2",
     "expo-splash-screen": "^0.29.22",
     "expo-status-bar": "~2.0.1",

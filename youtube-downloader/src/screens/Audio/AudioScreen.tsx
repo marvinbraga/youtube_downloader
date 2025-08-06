@@ -12,8 +12,8 @@ import {
 } from 'react-native';
 import { Audio as ExpoAudio } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { fetchAudios, transcribeAudio, checkTranscriptionStatus, fetchTranscription, ensureTranscriptionStatus } from '../../services/api';
-import { Audio } from '../../types';
+import { fetchAudios, transcribeAudio, checkTranscriptionStatus, fetchTranscription, ensureTranscriptionStatus, api } from '../../services/api';
+import { Audio as AudioType } from '../../types';
 import AudioItem from '../../components/AudioItem';
 import TranscriptionModal from '../../components/TranscriptionModal';
 import StatusMessage from '../../components/StatusMessage';
@@ -21,13 +21,15 @@ import { Feather } from '@expo/vector-icons';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useDownloads } from '../../context/DownloadContext';
+import { Platform } from 'react-native';
+import * as FileSystem from 'expo-file-system';
 
 const AudioScreen: React.FC = () => {
   const { authState, login } = useAuth();
   const { colors, theme } = useTheme();
   const { downloads, isConnected, getDownloadProgress, cancelDownload, retryDownload } = useDownloads();
-  const [audios, setAudios] = useState<Audio[]>([]);
-  const [filteredAudios, setFilteredAudios] = useState<Audio[]>([]);
+  const [audios, setAudios] = useState<AudioType[]>([]);
+  const [filteredAudios, setFilteredAudios] = useState<AudioType[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentAudioId, setCurrentAudioId] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -38,8 +40,9 @@ const AudioScreen: React.FC = () => {
     type: 'error' | 'success' | 'info';
   } | null>(null);
   
-  // Referência para o player de áudio
+  // Referências para o player de áudio
   const soundRef = useRef<ExpoAudio.Sound | null>(null);
+  const htmlAudioRef = useRef<HTMLAudioElement | null>(null);
   const transcriptionCheckTimerRef = useRef<NodeJS.Timeout | null>(null);
   
   // Estado para o modal de transcrição
@@ -123,7 +126,7 @@ const AudioScreen: React.FC = () => {
   }, [downloads, loadAudios]);
   
   // Função para verificar o status de transcrição para todos os áudios
-  const checkTranscriptionStatusForAllItems = (items: Audio[]): Audio[] => {
+  const checkTranscriptionStatusForAllItems = (items: AudioType[]): AudioType[] => {
     return items.map(item => {
       // Migra has_transcription antigo para transcription_status
       if (item.has_transcription === true && !item.transcription_status) {
@@ -150,7 +153,7 @@ const AudioScreen: React.FC = () => {
   const AUDIO_CACHE_KEY = '@audio_list_cache';
   const CACHE_DURATION = 5 * 60 * 1000; // 5 minutos
   
-  const cacheAudios = async (data: Audio[]) => {
+  const cacheAudios = async (data: AudioType[]) => {
     const cache = {
       timestamp: Date.now(),
       data
@@ -173,7 +176,7 @@ const AudioScreen: React.FC = () => {
   };
   
   // Função para filtrar áudios
-  const filterAudios = (audioList: Audio[], query: string) => {
+  const filterAudios = (audioList: AudioType[], query: string) => {
     if (!query.trim()) {
       setFilteredAudios(audioList);
       return;
@@ -194,7 +197,7 @@ const AudioScreen: React.FC = () => {
   }, [searchQuery, audios]);
   
   // Iniciar verificação periódica de transcrições em andamento
-  const startTranscriptionStatusCheck = (audiosList: Audio[]) => {
+  const startTranscriptionStatusCheck = (audiosList: AudioType[]) => {
     // Limpar temporizador existente
     if (transcriptionCheckTimerRef.current) {
       clearInterval(transcriptionCheckTimerRef.current);
@@ -308,33 +311,181 @@ const AudioScreen: React.FC = () => {
     }
   };
   
+  // Função para reproduzir áudio no web usando HTML5
+  const playWebAudio = async (audio: AudioType) => {
+    try {
+      // Parar áudio atual se estiver tocando
+      if (htmlAudioRef.current) {
+        htmlAudioRef.current.pause();
+        htmlAudioRef.current = null;
+      }
+
+      setStatusMessage({
+        message: `Carregando ${audio.name}...`,
+        type: 'info'
+      });
+
+      // Criar elemento HTML5 Audio
+      const audioElement = new Audio();
+      htmlAudioRef.current = audioElement;
+
+      // Configurar eventos
+      audioElement.addEventListener('loadstart', () => {
+        console.log('Carregamento iniciado');
+      });
+
+      audioElement.addEventListener('canplay', () => {
+        setStatusMessage({
+          message: `Reproduzindo ${audio.name}`,
+          type: 'success'
+        });
+      });
+
+      audioElement.addEventListener('ended', () => {
+        setCurrentAudioId(null);
+        setIsPlaying(false);
+        setStatusMessage({
+          message: 'Reprodução finalizada',
+          type: 'success'
+        });
+      });
+
+      audioElement.addEventListener('error', (e) => {
+        console.error('Erro no player HTML5:', e);
+        setCurrentAudioId(null);
+        setIsPlaying(false);
+        setStatusMessage({
+          message: 'Erro ao reproduzir áudio',
+          type: 'error'
+        });
+      });
+
+      // Como o servidor atual não tem endpoint de streaming implementado,
+      // vamos mostrar uma mensagem informativa ao usuário
+      setCurrentAudioId(null);
+      setIsPlaying(false);
+      setStatusMessage({
+        message: 'Reprodução de áudio não disponível na versão web atual. Use um dispositivo móvel ou aguarde implementação do endpoint de streaming.',
+        type: 'error'
+      });
+      
+      // Tentar de qualquer forma (caso o servidor seja atualizado)
+      const physicalAudioUrl = `http://localhost:8000/audio/stream/${audio.id}`;
+      console.log('Tentando reproduzir via URL:', physicalAudioUrl);
+      
+      audioElement.src = physicalAudioUrl;
+      await audioElement.play();
+      
+    } catch (error) {
+      console.error('Erro na reprodução web:', error);
+      setCurrentAudioId(null);
+      setIsPlaying(false);
+      setStatusMessage({
+        message: 'Erro ao reproduzir áudio. Servidor pode não ter endpoint de streaming.',
+        type: 'error'
+      });
+    }
+  };
+
+  // Função para baixar arquivo de áudio via API (apenas mobile)
+  const downloadAudioFile = async (audio: AudioType): Promise<string> => {
+    try {
+      const cacheDir = `${FileSystem.cacheDirectory}audio/`;
+      const audioFilePath = `${cacheDir}${audio.id}.m4a`;
+      
+      // Verificar se o arquivo já existe no cache
+      const fileInfo = await FileSystem.getInfoAsync(audioFilePath);
+      if (fileInfo.exists) {
+        console.log('Arquivo já existe no cache:', audioFilePath);
+        return audioFilePath;
+      }
+      
+      // Criar diretório se não existir
+      await FileSystem.makeDirectoryAsync(cacheDir, { intermediates: true });
+      
+      // Baixar arquivo via API
+      setStatusMessage({
+        message: `Baixando ${audio.name}...`,
+        type: 'info'
+      });
+      
+      const downloadResult = await FileSystem.downloadAsync(
+        `http://localhost:8000/audio/stream/${audio.id}`,
+        audioFilePath,
+        {
+          headers: {
+            Authorization: `Bearer ${await AsyncStorage.getItem('@auth_token')}`
+          }
+        }
+      );
+      
+      if (downloadResult.status === 200) {
+        console.log('Arquivo baixado com sucesso:', audioFilePath);
+        return audioFilePath;
+      } else {
+        throw new Error(`Erro no download: status ${downloadResult.status}`);
+      }
+    } catch (error) {
+      console.error('Erro ao baixar arquivo:', error);
+      throw error;
+    }
+  };
+
   // Função para reproduzir/pausar áudio
-  const playAudio = async (audio: Audio) => {
+  const playAudio = async (audio: AudioType) => {
     try {
       if (!authState.isAuthenticated) {
         await login();
       }
       
-      // Se é o mesmo áudio e está tocando, pausar
-      if (currentAudioId === audio.id && isPlaying && soundRef.current) {
-        await soundRef.current.pauseAsync();
-        setIsPlaying(false);
-        setStatusMessage({
-          message: `${audio.name} pausado`,
-          type: 'info'
-        });
-        return;
+      // Verificar se é para pausar/retomar (funciona tanto para web quanto mobile)
+      if (currentAudioId === audio.id && isPlaying) {
+        if (Platform.OS === 'web') {
+          if (htmlAudioRef.current) {
+            htmlAudioRef.current.pause();
+            setIsPlaying(false);
+            setStatusMessage({
+              message: `${audio.name} pausado`,
+              type: 'info'
+            });
+            return;
+          }
+        } else {
+          if (soundRef.current) {
+            await soundRef.current.pauseAsync();
+            setIsPlaying(false);
+            setStatusMessage({
+              message: `${audio.name} pausado`,
+              type: 'info'
+            });
+            return;
+          }
+        }
       }
       
-      // Se é o mesmo áudio e está pausado, retomar
-      if (currentAudioId === audio.id && !isPlaying && soundRef.current) {
-        await soundRef.current.playAsync();
-        setIsPlaying(true);
-        setStatusMessage({
-          message: `Reproduzindo ${audio.name}`,
-          type: 'success'
-        });
-        return;
+      // Verificar se é para retomar (funciona tanto para web quanto mobile)
+      if (currentAudioId === audio.id && !isPlaying) {
+        if (Platform.OS === 'web') {
+          if (htmlAudioRef.current) {
+            await htmlAudioRef.current.play();
+            setIsPlaying(true);
+            setStatusMessage({
+              message: `Reproduzindo ${audio.name}`,
+              type: 'success'
+            });
+            return;
+          }
+        } else {
+          if (soundRef.current) {
+            await soundRef.current.playAsync();
+            setIsPlaying(true);
+            setStatusMessage({
+              message: `Reproduzindo ${audio.name}`,
+              type: 'success'
+            });
+            return;
+          }
+        }
       }
       
       // Parar áudio atual se estiver tocando outro
@@ -343,15 +494,35 @@ const AudioScreen: React.FC = () => {
       setCurrentAudioId(audio.id);
       setIsPlaying(true);
       
+      // Usar abordagem baseada na plataforma
+      if (Platform.OS === 'web') {
+        await playWebAudio(audio);
+      } else {
+        await playMobileAudio(audio);
+      }
+      
+    } catch (error) {
+      console.error('Erro ao reproduzir áudio:', error);
+      setCurrentAudioId(null);
+      setIsPlaying(false);
       setStatusMessage({
-        message: `Carregando ${audio.name}...`,
+        message: 'Erro ao reproduzir áudio. Verifique a conexão.',
+        type: 'error'
+      });
+    }
+  };
+
+  // Função para reproduzir áudio no mobile usando expo-av
+  const playMobileAudio = async (audio: AudioType) => {
+    try {
+      setStatusMessage({
+        message: `Preparando ${audio.name}...`,
         type: 'info'
       });
       
-      // Criar URL do arquivo de áudio
-      const audioUrl = `http://localhost:8000/audios/${audio.id}/stream/`;
-      
-      console.log('Tentando reproduzir áudio:', audioUrl);
+      // Obter URL/caminho do áudio
+      const audioUrl = await downloadAudioFile(audio);
+      console.log('Reproduzindo áudio mobile:', audioUrl);
       
       // Criar nova instância do Sound
       const { sound } = await ExpoAudio.Sound.createAsync(
@@ -384,18 +555,23 @@ const AudioScreen: React.FC = () => {
         prev.map(a => ({...a})) // Forçar atualização da lista
       );
     } catch (error) {
-      console.error('Erro ao reproduzir áudio:', error);
-      setCurrentAudioId(null);
-      setIsPlaying(false);
-      setStatusMessage({
-        message: 'Erro ao reproduzir áudio. Verifique se o arquivo existe.',
-        type: 'error'
-      });
+      throw error;
     }
   };
   
   // Função para parar a reprodução do áudio
   const stopAudio = async () => {
+    // Parar HTML5 Audio (web)
+    if (htmlAudioRef.current) {
+      try {
+        htmlAudioRef.current.pause();
+        htmlAudioRef.current = null;
+      } catch (error) {
+        console.error('Erro ao parar áudio HTML5:', error);
+      }
+    }
+    
+    // Parar expo-av (mobile)
     if (soundRef.current) {
       try {
         const status = await soundRef.current.getStatusAsync();
@@ -403,16 +579,17 @@ const AudioScreen: React.FC = () => {
           await soundRef.current.unloadAsync();
         }
       } catch (error) {
-        console.error('Erro ao parar áudio:', error);
+        console.error('Erro ao parar áudio expo-av:', error);
       }
       soundRef.current = null;
     }
+    
     setCurrentAudioId(null);
     setIsPlaying(false);
   };
   
   // Função para transcrever áudio - Ponto de entrada principal da lógica de transcrição
-  const transcribeAudioFile = async (audio: Audio) => {
+  const transcribeAudioFile = async (audio: AudioType) => {
     // Verifica o status atual da transcrição
     const transcriptionStatus = audio.transcription_status || 'none';
     
@@ -460,7 +637,7 @@ const AudioScreen: React.FC = () => {
   };
   
   // Iniciar processo de transcrição
-  const startTranscription = async (audio: Audio) => {
+  const startTranscription = async (audio: AudioType) => {
     try {
       if (!authState.isAuthenticated) {
         await login();
@@ -529,7 +706,7 @@ const AudioScreen: React.FC = () => {
   };
   
   // Função para visualizar transcrição
-  const viewTranscription = async (audio: Audio) => {
+  const viewTranscription = async (audio: AudioType) => {
     try {
       if (!authState.isAuthenticated) {
         await login();
@@ -582,7 +759,7 @@ const AudioScreen: React.FC = () => {
   }, [loadAudios]);
 
   // Função para cancelar download
-  const handleCancelDownload = useCallback(async (audio: Audio) => {
+  const handleCancelDownload = useCallback(async (audio: AudioType) => {
     try {
       setStatusMessage({
         message: 'Cancelando download...',
@@ -615,7 +792,7 @@ const AudioScreen: React.FC = () => {
   }, [cancelDownload, loadAudios]);
 
   // Função para retry de download
-  const handleRetryDownload = useCallback(async (audio: Audio) => {
+  const handleRetryDownload = useCallback(async (audio: AudioType) => {
     try {
       setStatusMessage({
         message: 'Tentando novamente...',

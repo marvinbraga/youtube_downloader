@@ -26,13 +26,13 @@ const StatusMessage: React.FC<StatusMessageProps> = ({
       Animated.timing(fadeAnim, {
         toValue: 1,
         duration: 300,
-        useNativeDriver: true,
+        useNativeDriver: false,
       }),
       Animated.delay(duration - 600),
       Animated.timing(fadeAnim, {
         toValue: 0,
         duration: 300,
-        useNativeDriver: true,
+        useNativeDriver: false,
       })
     ]).start(() => {
       if (onClose) onClose();

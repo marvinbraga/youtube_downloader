@@ -360,28 +360,35 @@ const AudioScreen: React.FC = () => {
         });
       });
 
-      // Como o servidor atual não tem endpoint de streaming implementado,
-      // vamos mostrar uma mensagem informativa ao usuário
-      setCurrentAudioId(null);
-      setIsPlaying(false);
-      setStatusMessage({
-        message: 'Reprodução de áudio não disponível na versão web atual. Use um dispositivo móvel ou aguarde implementação do endpoint de streaming.',
-        type: 'error'
-      });
-      
-      // Tentar de qualquer forma (caso o servidor seja atualizado)
+      // Configurar URL do áudio
       const physicalAudioUrl = `http://localhost:8000/audio/stream/${audio.id}`;
       console.log('Tentando reproduzir via URL:', physicalAudioUrl);
       
       audioElement.src = physicalAudioUrl;
-      await audioElement.play();
+      
+      // Tentar reproduzir
+      try {
+        await audioElement.play();
+        // Se chegou aqui, a reprodução iniciou com sucesso
+        setCurrentAudioId(audio.id);
+        setIsPlaying(true);
+      } catch (playError) {
+        // Se falhar, mostrar erro apropriado
+        console.error('Erro ao iniciar reprodução:', playError);
+        setCurrentAudioId(null);
+        setIsPlaying(false);
+        setStatusMessage({
+          message: 'Erro ao reproduzir áudio. Verifique se o servidor tem endpoint de streaming.',
+          type: 'error'
+        });
+      }
       
     } catch (error) {
       console.error('Erro na reprodução web:', error);
       setCurrentAudioId(null);
       setIsPlaying(false);
       setStatusMessage({
-        message: 'Erro ao reproduzir áudio. Servidor pode não ter endpoint de streaming.',
+        message: 'Erro ao reproduzir áudio.',
         type: 'error'
       });
     }
@@ -438,51 +445,48 @@ const AudioScreen: React.FC = () => {
         await login();
       }
       
-      // Verificar se é para pausar/retomar (funciona tanto para web quanto mobile)
-      if (currentAudioId === audio.id && isPlaying) {
+      // Verificar se é o mesmo áudio - toggle play/pause
+      if (currentAudioId === audio.id) {
         if (Platform.OS === 'web') {
           if (htmlAudioRef.current) {
-            htmlAudioRef.current.pause();
-            setIsPlaying(false);
-            setStatusMessage({
-              message: `${audio.name} pausado`,
-              type: 'info'
-            });
+            if (isPlaying) {
+              // Pausar
+              htmlAudioRef.current.pause();
+              setIsPlaying(false);
+              setStatusMessage({
+                message: `${audio.name} pausado`,
+                type: 'info'
+              });
+            } else {
+              // Retomar
+              await htmlAudioRef.current.play();
+              setIsPlaying(true);
+              setStatusMessage({
+                message: `Reproduzindo ${audio.name}`,
+                type: 'success'
+              });
+            }
             return;
           }
         } else {
           if (soundRef.current) {
-            await soundRef.current.pauseAsync();
-            setIsPlaying(false);
-            setStatusMessage({
-              message: `${audio.name} pausado`,
-              type: 'info'
-            });
-            return;
-          }
-        }
-      }
-      
-      // Verificar se é para retomar (funciona tanto para web quanto mobile)
-      if (currentAudioId === audio.id && !isPlaying) {
-        if (Platform.OS === 'web') {
-          if (htmlAudioRef.current) {
-            await htmlAudioRef.current.play();
-            setIsPlaying(true);
-            setStatusMessage({
-              message: `Reproduzindo ${audio.name}`,
-              type: 'success'
-            });
-            return;
-          }
-        } else {
-          if (soundRef.current) {
-            await soundRef.current.playAsync();
-            setIsPlaying(true);
-            setStatusMessage({
-              message: `Reproduzindo ${audio.name}`,
-              type: 'success'
-            });
+            if (isPlaying) {
+              // Pausar
+              await soundRef.current.pauseAsync();
+              setIsPlaying(false);
+              setStatusMessage({
+                message: `${audio.name} pausado`,
+                type: 'info'
+              });
+            } else {
+              // Retomar
+              await soundRef.current.playAsync();
+              setIsPlaying(true);
+              setStatusMessage({
+                message: `Reproduzindo ${audio.name}`,
+                type: 'success'
+              });
+            }
             return;
           }
         }
@@ -491,13 +495,13 @@ const AudioScreen: React.FC = () => {
       // Parar áudio atual se estiver tocando outro
       await stopAudio();
       
-      setCurrentAudioId(audio.id);
-      setIsPlaying(true);
-      
       // Usar abordagem baseada na plataforma
       if (Platform.OS === 'web') {
         await playWebAudio(audio);
+        // Estado é definido dentro de playWebAudio
       } else {
+        setCurrentAudioId(audio.id);
+        setIsPlaying(true);
         await playMobileAudio(audio);
       }
       

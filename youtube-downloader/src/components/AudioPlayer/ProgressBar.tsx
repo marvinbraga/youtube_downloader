@@ -53,7 +53,33 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
       return;
     }
 
-    const touchX = event.nativeEvent.locationX;
+    // Compatibilidade React Native Web - usar diferentes métodos para obter posição X
+    let touchX = event.nativeEvent.locationX;
+    
+    // Fallback para React Native Web
+    if (touchX === undefined && event.nativeEvent.changedTouches) {
+      // Touch events
+      const touch = event.nativeEvent.changedTouches[0];
+      const target = event.target;
+      const rect = target.getBoundingClientRect();
+      touchX = touch.clientX - rect.left;
+    } else if (touchX === undefined && event.nativeEvent.clientX !== undefined) {
+      // Mouse events
+      const target = event.target;
+      const rect = target.getBoundingClientRect();
+      touchX = event.nativeEvent.clientX - rect.left;
+    }
+
+    // Verificar se conseguimos obter uma posição válida
+    if (touchX === undefined || isNaN(touchX)) {
+      console.log('🚨 Cannot determine touch position:', { 
+        locationX: event.nativeEvent.locationX,
+        clientX: event.nativeEvent.clientX,
+        changedTouches: event.nativeEvent.changedTouches 
+      });
+      return;
+    }
+
     const percentage = Math.max(0, Math.min(1, touchX / barWidth));
     const newTime = percentage * duration;
     
@@ -65,7 +91,20 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
   const handleMouseMove = (event: any) => {
     if (disabled || !showTooltip || barWidth === 0 || duration === 0) return;
     
-    const touchX = event.nativeEvent.locationX;
+    // Compatibilidade React Native Web - usar diferentes métodos para obter posição X
+    let touchX = event.nativeEvent.locationX;
+    
+    // Fallback para React Native Web
+    if (touchX === undefined && event.nativeEvent.clientX !== undefined) {
+      // Mouse events
+      const target = event.target;
+      const rect = target.getBoundingClientRect();
+      touchX = event.nativeEvent.clientX - rect.left;
+    }
+
+    // Verificar se conseguimos obter uma posição válida
+    if (touchX === undefined || isNaN(touchX)) return;
+
     const percentage = Math.max(0, Math.min(1, touchX / barWidth));
     const previewTime = percentage * duration;
     

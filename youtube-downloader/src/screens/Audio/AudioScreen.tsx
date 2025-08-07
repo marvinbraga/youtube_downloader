@@ -8,7 +8,8 @@ import {
   ScrollView, 
   ActivityIndicator,
   RefreshControl,
-  Alert
+  Alert,
+  TouchableOpacity
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Audio as ExpoAudio } from 'expo-av';
@@ -883,12 +884,37 @@ const AudioScreen: React.FC = () => {
       ]}>
         <View style={styles.listHeader}>
           <Text style={[styles.listTitle, { color: colors.text.primary }]}>Áudios Disponíveis</Text>
-          {isConnected && (
-            <View style={styles.connectionIndicator}>
-              <View style={[styles.connectionDot, { backgroundColor: colors.success }]} />
-              <Text style={[styles.connectionText, { color: colors.text.secondary }]}>Tempo real</Text>
-            </View>
-          )}
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              style={[
+                styles.refreshButton,
+                { 
+                  backgroundColor: colors.background.secondary,
+                  borderColor: colors.border
+                }
+              ]}
+              onPress={onRefresh}
+              disabled={refreshing}
+            >
+              <Feather 
+                name="refresh-cw" 
+                size={16} 
+                color={refreshing ? colors.text.secondary : colors.primary} 
+              />
+              <Text style={[
+                styles.refreshButtonText,
+                { color: refreshing ? colors.text.secondary : colors.primary }
+              ]}>
+                {refreshing ? 'Atualizando...' : 'Atualizar'}
+              </Text>
+            </TouchableOpacity>
+            {isConnected && (
+              <View style={styles.connectionIndicator}>
+                <View style={[styles.connectionDot, { backgroundColor: colors.success }]} />
+                <Text style={[styles.connectionText, { color: colors.text.secondary }]}>Tempo real</Text>
+              </View>
+            )}
+          </View>
         </View>
         
         {isLoading && !refreshing ? (
@@ -987,6 +1013,24 @@ const styles = StyleSheet.create({
   listTitle: {
     fontSize: 18,
     fontWeight: '600',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  refreshButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  refreshButtonText: {
+    marginLeft: 6,
+    fontSize: 14,
+    fontWeight: '500',
   },
   connectionIndicator: {
     flexDirection: 'row',

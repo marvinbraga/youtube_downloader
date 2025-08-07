@@ -56,10 +56,10 @@ export const TimeDisplay: React.FC<TimeDisplayProps> = ({
       style={{
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: 8,
-        paddingHorizontal: 16,
+        paddingVertical: compact ? 4 : 6,
+        paddingHorizontal: compact ? 10 : 14,
         backgroundColor: theme.colors.outline + '08',
-        borderRadius: 12,
+        borderRadius: compact ? 8 : 10,
         borderWidth: 1,
         borderColor: theme.colors.outline + '20',
       }}
@@ -75,10 +75,10 @@ export const TimeDisplay: React.FC<TimeDisplayProps> = ({
         <Text
           style={{
             color: theme.colors.onSurface,
-            fontSize: 16,
+            fontSize: compact ? 13 : 15,
             fontWeight: '700',
             fontVariant: ['tabular-nums'], // Monospace numbers for consistent width
-            letterSpacing: 0.5,
+            letterSpacing: 0.3,
           }}
         >
           {showRemaining && duration > 0 ? `-${remainingTimeFormatted}` : currentTimeFormatted}
@@ -89,9 +89,9 @@ export const TimeDisplay: React.FC<TimeDisplayProps> = ({
             <Text
               style={{
                 color: theme.colors.outline,
-                fontSize: 14,
+                fontSize: compact ? 12 : 13,
                 fontWeight: '400',
-                marginHorizontal: 6,
+                marginHorizontal: compact ? 4 : 5,
               }}
             >
               •
@@ -100,7 +100,7 @@ export const TimeDisplay: React.FC<TimeDisplayProps> = ({
             <Text
               style={{
                 color: theme.colors.outline,
-                fontSize: 14,
+                fontSize: compact ? 12 : 13,
                 fontWeight: '500',
                 fontVariant: ['tabular-nums'], // Monospace numbers for consistent width
               }}

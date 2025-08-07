@@ -154,28 +154,28 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     <Animated.View
       style={{
         backgroundColor: playerColors.surface,
-        borderRadius: 16,
-        padding: 20,
-        marginVertical: compact ? 4 : 8,
-        shadowColor: isDarkMode ? 'rgba(0, 0, 0, 0.6)' : 'rgba(0, 0, 0, 0.15)',
-        shadowOffset: { width: 0, height: 8 },
+        borderRadius: 12,
+        padding: 16,
+        marginVertical: compact ? 2 : 4,
+        shadowColor: isDarkMode ? 'rgba(0, 0, 0, 0.4)' : 'rgba(0, 0, 0, 0.1)',
+        shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 1,
-        shadowRadius: 24,
-        elevation: 8,
+        shadowRadius: 12,
+        elevation: 6,
         opacity: fadeAnim,
         borderWidth: 1,
-        borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)',
+        borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.04)',
         transform: [
           {
             scale: fadeAnim.interpolate({
               inputRange: [0, 1],
-              outputRange: [0.96, 1],
+              outputRange: [0.98, 1],
             }),
           },
           {
             translateY: fadeAnim.interpolate({
               inputRange: [0, 1],
-              outputRange: [8, 0],
+              outputRange: [4, 0],
             }),
           },
         ],
@@ -205,7 +205,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       <View
         style={{
           alignItems: 'center',
-          marginBottom: 24,
+          marginBottom: 16,
         }}
       >
         {/* Primary Controls */}
@@ -214,7 +214,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             flexDirection: 'row',
             alignItems: 'center',
             justifyContent: 'center',
-            marginBottom: 20,
+            marginBottom: 12,
           }}
         >
           <PlayerControls
@@ -223,8 +223,11 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             onPlay={handlePlay}
             onPause={handlePause}
             onStop={handleStop}
+            onSeek={handleSeek}
+            currentTime={state.currentTime}
+            duration={state.duration}
             theme={theme}
-            compact={compact}
+            compact={true}
             disabled={disabled}
           />
         </View>
@@ -236,7 +239,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             alignItems: 'center', 
             justifyContent: 'space-between',
             width: '100%',
-            paddingHorizontal: 4,
+            paddingHorizontal: 8,
           }}
         >
           {/* Left Side - Volume */}
@@ -253,7 +256,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             currentTime={state.currentTime}
             duration={state.duration}
             theme={theme}
-            compact={false}
+            compact={true}
             showProgress={showProgress}
           />
           
@@ -283,8 +286,8 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'center',
-          marginTop: 8,
-          minHeight: 20,
+          marginTop: 6,
+          minHeight: 16,
         }}
       >
         {/* Status Indicator */}
@@ -293,27 +296,27 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             style={{
               flexDirection: 'row',
               alignItems: 'center',
-              paddingHorizontal: 12,
-              paddingVertical: 4,
+              paddingHorizontal: 8,
+              paddingVertical: 3,
               backgroundColor: state.isPlaying ? theme.colors.primary + '20' : theme.colors.outline + '20',
-              borderRadius: 8,
+              borderRadius: 6,
               borderWidth: 1,
               borderColor: state.isPlaying ? theme.colors.primary + '40' : theme.colors.outline + '40',
             }}
           >
             <View
               style={{
-                width: 6,
-                height: 6,
-                borderRadius: 3,
+                width: 4,
+                height: 4,
+                borderRadius: 2,
                 backgroundColor: state.isPlaying ? theme.colors.primary : theme.colors.outline,
-                marginRight: 6,
+                marginRight: 4,
               }}
             />
             <Text
               style={{
                 color: state.isPlaying ? theme.colors.primary : theme.colors.outline,
-                fontSize: 11,
+                fontSize: 10,
                 fontWeight: '600',
               }}
             >

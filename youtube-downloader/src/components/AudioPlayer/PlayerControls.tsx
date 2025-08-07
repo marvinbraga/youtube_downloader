@@ -19,6 +19,9 @@ interface PlayerControlsProps {
   onPlay: () => void;
   onPause: () => void;
   onStop: () => void;
+  onSeek?: (time: number) => void;
+  currentTime?: number;
+  duration?: number;
   theme: Theme;
   disabled?: boolean;
   compact?: boolean;
@@ -30,6 +33,9 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
   onPlay,
   onPause,
   onStop,
+  onSeek,
+  currentTime = 0,
+  duration = 0,
   theme,
   disabled = false,
   compact = false,
@@ -105,12 +111,20 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
     setTimeout(() => setPlayPressed(false), animations.fast);
   };
 
+  const handleForwardPress = () => {
+    if (disabled || isLoading || !onSeek) return;
+    
+    // Avançar 10 segundos
+    const newTime = Math.min(currentTime + 10, duration);
+    onSeek(newTime);
+  };
+
   return (
     <View
       style={{
         flexDirection: 'row',
         alignItems: 'center',
-        gap: compact ? 16 : 20,
+        gap: compact ? 12 : 16,
         opacity: disabled ? 0.5 : 1,
       }}
     >
@@ -124,25 +138,25 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           onPress={handleStopPress}
           disabled={disabled || isLoading}
           style={{
-            width: 40,
-            height: 40,
-            borderRadius: 20,
+            width: compact ? 32 : 36,
+            height: compact ? 32 : 36,
+            borderRadius: compact ? 16 : 18,
             backgroundColor: stopPressed ? theme.colors.outline + '30' : theme.colors.outline + '15',
             alignItems: 'center',
             justifyContent: 'center',
             borderWidth: 1,
             borderColor: theme.colors.outline + '30',
             shadowColor: 'rgba(0, 0, 0, 0.1)',
-            shadowOffset: { width: 0, height: 2 },
+            shadowOffset: { width: 0, height: 1 },
             shadowOpacity: 1,
-            shadowRadius: 4,
-            elevation: 2,
+            shadowRadius: 2,
+            elevation: 1,
           }}
           activeOpacity={0.8}
         >
           <Ionicons
             name="stop"
-            size={18}
+            size={compact ? 14 : 16}
             color={(disabled || isLoading) ? theme.colors.outline : iconColor}
           />
         </TouchableOpacity>
@@ -158,19 +172,19 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           onPress={handlePlayPausePress}
           disabled={disabled || isLoading}
           style={{
-            width: 64,
-            height: 64,
-            borderRadius: 32,
+            width: compact ? 48 : 56,
+            height: compact ? 48 : 56,
+            borderRadius: compact ? 24 : 28,
             backgroundColor: isLoading ? theme.colors.outline : theme.colors.primary,
             alignItems: 'center',
             justifyContent: 'center',
             shadowColor: theme.colors.primary,
-            shadowOffset: { width: 0, height: 4 },
+            shadowOffset: { width: 0, height: 3 },
             shadowOpacity: 0.3,
-            shadowRadius: 12,
-            elevation: 8,
-            borderWidth: 3,
-            borderColor: 'rgba(255, 255, 255, 0.2)',
+            shadowRadius: 8,
+            elevation: 6,
+            borderWidth: 2,
+            borderColor: 'rgba(255, 255, 255, 0.15)',
           }}
           activeOpacity={0.85}
         >
@@ -182,10 +196,10 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         ) : (
           <Ionicons
             name={isPlaying ? "pause" : "play"}
-            size={28}
+            size={compact ? 20 : 24}
             color={theme.colors.onPrimary}
             style={{
-              marginLeft: isPlaying ? 0 : 3, // Visual balance for play icon
+              marginLeft: isPlaying ? 0 : 2, // Visual balance for play icon
             }}
           />
         )}
@@ -199,29 +213,29 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
         }}
       >
         <TouchableOpacity
-          onPress={handleStopPress}
-          disabled={disabled || isLoading}
+          onPress={handleForwardPress}
+          disabled={disabled || isLoading || !onSeek}
           style={{
-            width: 40,
-            height: 40,
-            borderRadius: 20,
+            width: compact ? 32 : 36,
+            height: compact ? 32 : 36,
+            borderRadius: compact ? 16 : 18,
             backgroundColor: theme.colors.outline + '15',
             alignItems: 'center',
             justifyContent: 'center',
             borderWidth: 1,
             borderColor: theme.colors.outline + '30',
             shadowColor: 'rgba(0, 0, 0, 0.1)',
-            shadowOffset: { width: 0, height: 2 },
+            shadowOffset: { width: 0, height: 1 },
             shadowOpacity: 1,
-            shadowRadius: 4,
-            elevation: 2,
+            shadowRadius: 2,
+            elevation: 1,
           }}
           activeOpacity={0.8}
         >
           <Ionicons
             name="play-forward"
-            size={18}
-            color={(disabled || isLoading) ? theme.colors.outline : iconColor}
+            size={compact ? 14 : 16}
+            color={(disabled || isLoading || !onSeek) ? theme.colors.outline : iconColor}
           />
         </TouchableOpacity>
       </Animated.View>
@@ -233,7 +247,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
             position: 'absolute',
             left: '50%',
             marginLeft: -2,
-            top: -8,
+            top: compact ? -6 : -8,
             width: 4,
             height: 4,
             borderRadius: 2,

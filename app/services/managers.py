@@ -13,6 +13,7 @@ from yt_dlp import YoutubeDL
 
 from app.services.configs import AUDIO_DIR, audio_mapping, AUDIO_CONFIG_PATH
 from app.services.files import load_json_audios
+from app.services.locks import audio_file_lock
 
 
 class VideoStreamManager:
@@ -82,23 +83,38 @@ class AudioDownloadManager:
     
     def _load_audio_data(self) -> Dict[str, Any]:
         """
-        Carrega os dados de áudio do arquivo JSON utilizando a função load_json_audios
+        Carrega os dados de áudio do arquivo JSON utilizando a função load_json_audios de forma thread-safe
         
         Returns:
             Dicionário com os dados de áudio
         """
-        return load_json_audios()
+        with audio_file_lock:
+            return load_json_audios()
     
     def _save_audio_data(self) -> None:
         """
-        Salva os dados de áudio no arquivo JSON
+        Salva os dados de áudio no arquivo JSON de forma thread-safe
         """
-        try:
-            with open(AUDIO_CONFIG_PATH, 'w', encoding='utf-8') as f:
-                json.dump(self.audio_data, f, ensure_ascii=False, indent=2)
-            logger.debug(f"Dados de áudio salvos em: {AUDIO_CONFIG_PATH}")
-        except Exception as e:
-            logger.error(f"Erro ao salvar arquivo de configuração de áudio: {str(e)}")
+        with audio_file_lock:
+            try:
+                # Escrever primeiro para arquivo temporário para operação atômica
+                temp_path = Path(str(AUDIO_CONFIG_PATH) + '.tmp')
+                with open(temp_path, 'w', encoding='utf-8') as f:
+                    json.dump(self.audio_data, f, ensure_ascii=False, indent=2)
+                
+                # Renomear arquivo temporário para o arquivo final (operação atômica)
+                temp_path.replace(AUDIO_CONFIG_PATH)
+                
+                logger.debug(f"Dados de áudio salvos em: {AUDIO_CONFIG_PATH}")
+            except Exception as e:
+                logger.error(f"Erro ao salvar arquivo de configuração de áudio: {str(e)}")
+                # Remover arquivo temporário em caso de erro
+                temp_path = Path(str(AUDIO_CONFIG_PATH) + '.tmp')
+                if temp_path.exists():
+                    try:
+                        temp_path.unlink()
+                    except:
+                        pass
     
     def extract_youtube_id(self, url: str) -> Optional[str]:
         """

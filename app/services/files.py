@@ -10,6 +10,7 @@ from loguru import logger
 from app.models.video import VideoSource, SortOption
 from app.models.audio import AudioSource
 from app.services.configs import VIDEO_DIR, JSON_CONFIG_PATH, video_mapping, AUDIO_DIR, AUDIO_CONFIG_PATH, audio_mapping
+from app.services.locks import audio_file_lock
 
 
 def get_clean_filename(file_path: Path) -> str:
@@ -114,35 +115,36 @@ def generate_audio_stream(audio_path: Path):
 
 def load_json_audios() -> Dict:
     """
-    Carrega os dados de áudio do arquivo JSON
+    Carrega os dados de áudio do arquivo JSON de forma thread-safe
     
     Returns:
         Dicionário com os dados de áudio (contendo 'audios' e 'mappings')
     """
-    try:
-        if AUDIO_CONFIG_PATH.exists():
-            with open(AUDIO_CONFIG_PATH, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            
-            # Atualiza o mapeamento em memória com os dados do arquivo
-            for audio in data.get("audios", []):
-                audio_id = audio.get("id", "")
-                if audio_id and "path" in audio:
-                    audio_mapping[audio_id] = AUDIO_DIR.parent / audio["path"]
-                    
-                    # Adiciona mapeamentos por palavras-chave
-                    for keyword in audio.get("keywords", []):
-                        audio_mapping[keyword] = AUDIO_DIR.parent / audio["path"]
-            
-            # Adiciona mapeamentos específicos se estiverem no arquivo
-            for key, path in data.get("mappings", {}).items():
-                audio_mapping[key] = AUDIO_DIR.parent / path
+    with audio_file_lock:
+        try:
+            if AUDIO_CONFIG_PATH.exists():
+                with open(AUDIO_CONFIG_PATH, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
                 
-            return data
-        return {"audios": [], "mappings": {}}
-    except Exception as e:
-        logger.error(f"Erro ao carregar arquivo de áudios JSON: {str(e)}")
-        return {"audios": [], "mappings": {}}
+                # Atualiza o mapeamento em memória com os dados do arquivo
+                for audio in data.get("audios", []):
+                    audio_id = audio.get("id", "")
+                    if audio_id and "path" in audio:
+                        audio_mapping[audio_id] = AUDIO_DIR.parent / audio["path"]
+                        
+                        # Adiciona mapeamentos por palavras-chave
+                        for keyword in audio.get("keywords", []):
+                            audio_mapping[keyword] = AUDIO_DIR.parent / audio["path"]
+                
+                # Adiciona mapeamentos específicos se estiverem no arquivo
+                for key, path in data.get("mappings", {}).items():
+                    audio_mapping[key] = AUDIO_DIR.parent / path
+                    
+                return data
+            return {"audios": [], "mappings": {}}
+        except Exception as e:
+            logger.error(f"Erro ao carregar arquivo de áudios JSON: {str(e)}")
+            return {"audios": [], "mappings": {}}
 
 
 def scan_audio_directory() -> List[Dict]:
@@ -222,9 +224,15 @@ def scan_audio_directory() -> List[Dict]:
                         a["modified_date"] = datetime.now().isoformat()
                         break
                 
-                # Salva as alterações no JSON
-                with open(AUDIO_CONFIG_PATH, 'w', encoding='utf-8') as f:
-                    json.dump(audio_data, f, ensure_ascii=False, indent=2)
+                # Salva as alterações no JSON de forma thread-safe
+                with audio_file_lock:
+                    # Escrever primeiro para arquivo temporário para operação atômica
+                    temp_path = Path(str(AUDIO_CONFIG_PATH) + '.tmp')
+                    with open(temp_path, 'w', encoding='utf-8') as f:
+                        json.dump(audio_data, f, ensure_ascii=False, indent=2)
+                    
+                    # Renomear arquivo temporário para o arquivo final (operação atômica)
+                    temp_path.replace(AUDIO_CONFIG_PATH)
                 logger.info(f"Atualizado status de transcrição para áudio {audio['id']}: {has_transcription}")
                 
         except Exception as e:

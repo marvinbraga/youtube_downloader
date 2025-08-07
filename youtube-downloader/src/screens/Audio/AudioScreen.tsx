@@ -10,6 +10,7 @@ import {
   RefreshControl,
   Alert
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { Audio as ExpoAudio } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { fetchAudios, transcribeAudio, checkTranscriptionStatus, fetchTranscription, ensureTranscriptionStatus, api } from '../../services/api';
@@ -112,18 +113,32 @@ const AudioScreen: React.FC = () => {
   // Recarregar lista quando downloads mudam (via SSE)
   useEffect(() => {
     if (downloads.size > 0) {
-      // Se há downloads ativos, recarregar dados para manter sincronizado
+      // Verificar se há downloads concluídos recentemente ou mudanças recentes
+      const hasCompletedDownloads = Array.from(downloads.values()).some(download => 
+        download.status === 'ready'
+      );
+      
       const hasRecentChanges = Array.from(downloads.values()).some(download => {
         const timeDiff = Date.now() - new Date(download.timestamp).getTime();
-        return timeDiff < 10000; // Mudanças nos últimos 10 segundos
+        return timeDiff < 15000; // Mudanças nos últimos 15 segundos
       });
       
-      if (hasRecentChanges) {
-        console.log('Recarregando áudios devido a mudanças nos downloads');
+      if (hasCompletedDownloads || hasRecentChanges) {
+        console.log('Recarregando áudios devido a mudanças nos downloads (completed:', hasCompletedDownloads, 'recent:', hasRecentChanges, ')');
         loadAudios();
       }
     }
   }, [downloads, loadAudios]);
+  
+  // Recarregar lista quando a tela recebe foco (para garantir dados atualizados)
+  useFocusEffect(
+    useCallback(() => {
+      if (authState.isAuthenticated) {
+        console.log('Tela de áudio recebeu foco, recarregando lista');
+        loadAudios();
+      }
+    }, [authState.isAuthenticated, loadAudios])
+  );
   
   // Função para verificar o status de transcrição para todos os áudios
   const checkTranscriptionStatusForAllItems = (items: AudioType[]): AudioType[] => {
@@ -262,6 +277,10 @@ const AudioScreen: React.FC = () => {
             message: 'Transcrição concluída com sucesso!',
             type: 'success'
           });
+          
+          // Forçar recarregamento da lista para mostrar o novo status
+          await AsyncStorage.removeItem(AUDIO_CACHE_KEY);
+          loadAudios();
           
           // Pergunta se o usuário quer visualizar a transcrição
           Alert.alert(

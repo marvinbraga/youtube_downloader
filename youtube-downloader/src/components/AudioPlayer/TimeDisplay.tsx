@@ -56,8 +56,8 @@ export const TimeDisplay: React.FC<TimeDisplayProps> = ({
       style={{
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: compact ? 4 : 6,
-        paddingHorizontal: compact ? 10 : 14,
+        paddingVertical: compact ? 2 : 6,
+        paddingHorizontal: compact ? 6 : 14,
         backgroundColor: theme.colors.outline + '08',
         borderRadius: compact ? 8 : 10,
         borderWidth: 1,
@@ -75,7 +75,7 @@ export const TimeDisplay: React.FC<TimeDisplayProps> = ({
         <Text
           style={{
             color: theme.colors.onSurface,
-            fontSize: compact ? 13 : 15,
+            fontSize: compact ? 11 : 15,
             fontWeight: '700',
             fontVariant: ['tabular-nums'], // Monospace numbers for consistent width
             letterSpacing: 0.3,
@@ -89,7 +89,7 @@ export const TimeDisplay: React.FC<TimeDisplayProps> = ({
             <Text
               style={{
                 color: theme.colors.outline,
-                fontSize: compact ? 12 : 13,
+                fontSize: compact ? 10 : 13,
                 fontWeight: '400',
                 marginHorizontal: compact ? 4 : 5,
               }}
@@ -100,7 +100,7 @@ export const TimeDisplay: React.FC<TimeDisplayProps> = ({
             <Text
               style={{
                 color: theme.colors.outline,
-                fontSize: compact ? 12 : 13,
+                fontSize: compact ? 10 : 13,
                 fontWeight: '500',
                 fontVariant: ['tabular-nums'], // Monospace numbers for consistent width
               }}

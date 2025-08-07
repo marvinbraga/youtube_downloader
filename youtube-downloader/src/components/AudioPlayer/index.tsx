@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, Animated } from 'react-native';
+import { View, Text, Animated, TouchableOpacity, ActivityIndicator } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
 import { Audio } from '../../types';
 import { useAudioPlayer } from './useAudioPlayer';
 import { PlayerControls } from './PlayerControls';
@@ -98,21 +99,17 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
   const handlePlay = useCallback(async () => {
     try {
-      await play();
-      onPlay?.(audio);
+      if (state.isPlaying) {
+        await pause();
+        onPause?.(audio);
+      } else {
+        await play();
+        onPlay?.(audio);
+      }
     } catch (error) {
       onError?.(error as Error, audio);
     }
-  }, [play, audio, onPlay, onError]);
-
-  const handlePause = useCallback(async () => {
-    try {
-      await pause();
-      onPause?.(audio);
-    } catch (error) {
-      onError?.(error as Error, audio);
-    }
-  }, [pause, audio, onPause, onError]);
+  }, [play, pause, state.isPlaying, audio, onPlay, onPause, onError]);
 
   const handleStop = useCallback(async () => {
     try {
@@ -130,6 +127,12 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       onError?.(error as Error, audio);
     }
   }, [seek, audio, onError]);
+
+  const handleForwardPress = useCallback(() => {
+    if (disabled || state.isLoading || !handleSeek) return;
+    const newTime = Math.min(state.currentTime + 10, state.duration);
+    handleSeek(newTime);
+  }, [disabled, state.isLoading, state.currentTime, state.duration, handleSeek]);
 
   const handleSpeedChange = useCallback(async (speed: number) => {
     try {
@@ -155,8 +158,8 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       style={{
         backgroundColor: playerColors.surface,
         borderRadius: 12,
-        padding: 16,
-        marginVertical: compact ? 2 : 4,
+        padding: compact ? 8 : 16,
+        marginVertical: compact ? 1 : 4,
         shadowColor: isDarkMode ? 'rgba(0, 0, 0, 0.4)' : 'rgba(0, 0, 0, 0.1)',
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 1,
@@ -181,10 +184,20 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         ],
       }}
     >
+      {/* Progress Bar - Moved to top */}
+      <ProgressBar
+        currentTime={state.currentTime}
+        duration={state.duration}
+        buffered={state.buffered}
+        onSeek={disabled ? () => {} : handleSeek}
+        theme={theme}
+      />
+
       {/* Title Row */}
       {showTitle && (
         <View
           style={{
+            marginTop: 8,
             marginBottom: 8,
           }}
         >
@@ -201,57 +214,164 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         </View>
       )}
 
-      {/* Main Controls Layout */}
+      {/* Horizontal Controls Row - Grouped */}
       <View
         style={{
+          flexDirection: 'row',
           alignItems: 'center',
-          marginBottom: 16,
+          justifyContent: 'space-between',
+          marginTop: compact ? 8 : 12,
+          paddingHorizontal: compact ? 2 : 4,
         }}
       >
-        {/* Primary Controls */}
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: 12,
-          }}
-        >
-          <PlayerControls
-            isPlaying={state.isPlaying}
-            isLoading={state.isLoading}
-            onPlay={handlePlay}
-            onPause={handlePause}
-            onStop={handleStop}
-            onSeek={handleSeek}
-            currentTime={state.currentTime}
-            duration={state.duration}
-            theme={theme}
-            compact={true}
-            disabled={disabled}
-          />
+        {/* Left Group - Main Playback Controls (Stop, Play, Forward) */}
+        <View style={{ 
+          flexDirection: 'row', 
+          alignItems: 'center', 
+          gap: compact ? 6 : 8,
+          backgroundColor: theme.colors.surface,
+          borderRadius: compact ? 20 : 24,
+          paddingHorizontal: compact ? 8 : 12,
+          paddingVertical: compact ? 4 : 6,
+          borderWidth: 1,
+          borderColor: theme.colors.outline + '20',
+          shadowColor: 'rgba(0, 0, 0, 0.08)',
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 1,
+          shadowRadius: 4,
+          elevation: 2,
+        }}>
+          {/* Stop Button */}
+          <TouchableOpacity
+            onPress={handleStop}
+            disabled={disabled || state.isLoading}
+            style={{
+              width: compact ? 28 : 36,
+              height: compact ? 28 : 36,
+              borderRadius: compact ? 14 : 18,
+              backgroundColor: theme.colors.outline + '15',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderWidth: 1,
+              borderColor: theme.colors.outline + '30',
+              opacity: disabled ? 0.5 : 1,
+            }}
+            activeOpacity={0.8}
+          >
+            <Ionicons
+              name="stop"
+              size={compact ? 12 : 16}
+              color={(disabled || state.isLoading) ? theme.colors.outline : theme.colors.onSurface}
+            />
+          </TouchableOpacity>
+
+          {/* Play/Pause Button */}
+          <TouchableOpacity
+            onPress={handlePlay}
+            disabled={disabled || state.isLoading}
+            style={{
+              width: compact ? 40 : 56,
+              height: compact ? 40 : 56,
+              borderRadius: compact ? 20 : 28,
+              backgroundColor: state.isLoading ? theme.colors.outline : theme.colors.primary,
+              alignItems: 'center',
+              justifyContent: 'center',
+              shadowColor: theme.colors.primary,
+              shadowOffset: { width: 0, height: 3 },
+              shadowOpacity: 0.3,
+              shadowRadius: 8,
+              elevation: 6,
+              borderWidth: 2,
+              borderColor: 'rgba(255, 255, 255, 0.15)',
+              opacity: disabled ? 0.5 : 1,
+            }}
+            activeOpacity={0.85}
+          >
+            {state.isLoading ? (
+              <ActivityIndicator
+                size="small"
+                color={theme.colors.onPrimary}
+              />
+            ) : (
+              <Ionicons
+                name={state.isPlaying ? "pause" : "play"}
+                size={compact ? 18 : 24}
+                color={theme.colors.onPrimary}
+                style={{
+                  marginLeft: state.isPlaying ? 0 : 2,
+                }}
+              />
+            )}
+          </TouchableOpacity>
+
+          {/* Forward Button */}
+          <TouchableOpacity
+            onPress={handleForwardPress}
+            disabled={disabled || state.isLoading || !handleSeek}
+            style={{
+              width: compact ? 28 : 36,
+              height: compact ? 28 : 36,
+              borderRadius: compact ? 14 : 18,
+              backgroundColor: theme.colors.outline + '15',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderWidth: 1,
+              borderColor: theme.colors.outline + '30',
+              opacity: (disabled || state.isLoading || !handleSeek) ? 0.5 : 1,
+            }}
+            activeOpacity={0.8}
+          >
+            <Ionicons
+              name="play-forward"
+              size={compact ? 12 : 16}
+              color={(disabled || state.isLoading || !handleSeek) ? theme.colors.outline : theme.colors.onSurface}
+            />
+          </TouchableOpacity>
         </View>
-        
-        {/* Secondary Controls Row */}
-        <View 
-          style={{ 
+
+        {/* Right Group - Secondary Controls (Speed, Volume) and Time */}
+        <View style={{ 
+          flexDirection: 'row', 
+          alignItems: 'center', 
+          gap: compact ? 8 : 12 
+        }}>
+          {/* Secondary Controls Group */}
+          <View style={{ 
             flexDirection: 'row', 
             alignItems: 'center', 
-            justifyContent: 'space-between',
-            width: '100%',
-            paddingHorizontal: 8,
-          }}
-        >
-          {/* Left Side - Volume */}
-          <VolumeControl
-            volume={state.volume}
-            onVolumeChange={handleVolumeChange}
-            theme={theme}
-            compact={true}
-            disabled={disabled}
-          />
+            gap: compact ? 4 : 6,
+            backgroundColor: theme.colors.surface,
+            borderRadius: compact ? 16 : 20,
+            paddingHorizontal: compact ? 6 : 8,
+            paddingVertical: compact ? 4 : 6,
+            borderWidth: 1,
+            borderColor: theme.colors.outline + '20',
+            shadowColor: 'rgba(0, 0, 0, 0.08)',
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 1,
+            shadowRadius: 4,
+            elevation: 2,
+          }}>
+            {/* Speed Control */}
+            <PlaybackSpeedControl
+              currentSpeed={state.playbackRate}
+              onSpeedChange={handleSpeedChange}
+              theme={theme}
+              compact={true}
+              disabled={disabled}
+            />
+            
+            {/* Volume Control */}
+            <VolumeControl
+              volume={state.volume}
+              onVolumeChange={handleVolumeChange}
+              theme={theme}
+              compact={true}
+              disabled={disabled}
+            />
+          </View>
           
-          {/* Center - Time Display */}
+          {/* Time Display - Separate */}
           <TimeDisplay
             currentTime={state.currentTime}
             duration={state.duration}
@@ -259,26 +379,8 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             compact={true}
             showProgress={showProgress}
           />
-          
-          {/* Right Side - Speed */}
-          <PlaybackSpeedControl
-            currentSpeed={state.playbackRate}
-            onSpeedChange={handleSpeedChange}
-            theme={theme}
-            compact={true}
-            disabled={disabled}
-          />
         </View>
       </View>
-
-      {/* Progress Bar */}
-      <ProgressBar
-        currentTime={state.currentTime}
-        duration={state.duration}
-        buffered={state.buffered}
-        onSeek={disabled ? () => {} : handleSeek}
-        theme={theme}
-      />
 
       {/* Status Row */}
       <View
@@ -286,8 +388,8 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'center',
-          marginTop: 6,
-          minHeight: 16,
+          marginTop: compact ? 3 : 6,
+          minHeight: compact ? 12 : 16,
         }}
       >
         {/* Status Indicator */}

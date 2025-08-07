@@ -85,9 +85,9 @@ export const VolumeControl: React.FC<VolumeControlProps> = ({
       {/* Volume Button */}
       <TouchableOpacity
         style={{
-          width: compact ? 28 : 32,
-          height: compact ? 28 : 32,
-          borderRadius: compact ? 14 : 16,
+          width: compact ? 24 : 32,
+          height: compact ? 24 : 32,
+          borderRadius: compact ? 12 : 16,
           backgroundColor: showSlider ? theme.colors.primary + '20' : theme.colors.surface,
           borderWidth: 1,
           borderColor: showSlider ? theme.colors.primary : theme.colors.outline + '40',
@@ -115,7 +115,7 @@ export const VolumeControl: React.FC<VolumeControlProps> = ({
       >
         <Feather
           name={getVolumeIcon() as any}
-          size={compact ? 14 : 16}
+          size={compact ? 12 : 16}
           color={showSlider ? theme.colors.primary : (disabled ? theme.colors.outline : theme.colors.onSurface)}
         />
       </TouchableOpacity>

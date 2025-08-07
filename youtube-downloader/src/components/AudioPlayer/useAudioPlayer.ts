@@ -9,6 +9,7 @@ export interface AudioPlayerState {
   duration: number;
   buffered: number;
   volume: number;
+  playbackRate: number;
   isLoading: boolean;
   error: string | null;
 }
@@ -20,6 +21,7 @@ interface UseAudioPlayerReturn {
   stop: () => Promise<void>;
   seek: (time: number) => Promise<void>;
   setVolume: (volume: number) => Promise<void>;
+  setPlaybackRate: (rate: number) => Promise<void>;
 }
 
 export const useAudioPlayer = (audioUrl: string): UseAudioPlayerReturn => {
@@ -29,6 +31,7 @@ export const useAudioPlayer = (audioUrl: string): UseAudioPlayerReturn => {
     duration: 0,
     buffered: 0,
     volume: 1.0,
+    playbackRate: 1.0,
     isLoading: false,
     error: null,
   });
@@ -387,6 +390,28 @@ export const useAudioPlayer = (audioUrl: string): UseAudioPlayerReturn => {
     }
   }, [isWeb]);
 
+  const setPlaybackRate = useCallback(async (rate: number) => {
+    try {
+      const clampedRate = Math.max(0.25, Math.min(4.0, rate));
+      
+      if (isWeb && htmlAudioRef.current) {
+        htmlAudioRef.current.playbackRate = clampedRate;
+        console.log('🎵 Web: Playback rate set to', clampedRate);
+      } else if (!isWeb && soundRef.current) {
+        await soundRef.current.setRateAsync(clampedRate, true);
+        console.log('🎵 Mobile: Playback rate set to', clampedRate);
+      }
+      
+      setState(prev => ({ ...prev, playbackRate: clampedRate }));
+    } catch (error) {
+      console.error('🚨 Failed to set playback rate:', error);
+      setState(prev => ({
+        ...prev,
+        error: `Failed to set playback rate: ${error}`,
+      }));
+    }
+  }, [isWeb]);
+
   return {
     state,
     play,
@@ -394,5 +419,6 @@ export const useAudioPlayer = (audioUrl: string): UseAudioPlayerReturn => {
     stop,
     seek,
     setVolume,
+    setPlaybackRate,
   };
 };

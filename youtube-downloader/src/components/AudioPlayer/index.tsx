@@ -6,6 +6,7 @@ import { useAudioPlayer } from './useAudioPlayer';
 import { PlayerControls } from './PlayerControls';
 import { ProgressBar } from './ProgressBar';
 import { TimeDisplay } from './TimeDisplay';
+import { PlaybackSpeedControl } from './PlaybackSpeedControl';
 import { getPlayerTheme, getResponsiveSizes, animations } from './themes';
 
 // Adaptação de tipos para compatibilidade com o sistema de temas existente
@@ -92,7 +93,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     }).start();
   }, []);
 
-  const { state, play, pause, stop, seek } = useAudioPlayer(authenticatedUrl || '');
+  const { state, play, pause, stop, seek, setPlaybackRate } = useAudioPlayer(authenticatedUrl || '');
 
   const handlePlay = useCallback(async () => {
     try {
@@ -128,6 +129,14 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       onError?.(error as Error, audio);
     }
   }, [seek, audio, onError]);
+
+  const handleSpeedChange = useCallback(async (speed: number) => {
+    try {
+      await setPlaybackRate(speed);
+    } catch (error) {
+      onError?.(error as Error, audio);
+    }
+  }, [setPlaybackRate, audio, onError]);
 
   const containerPadding = compact ? responsiveSizes.padding - 4 : responsiveSizes.padding;
   const borderRadius = compact ? responsiveSizes.borderRadius - 2 : responsiveSizes.borderRadius;
@@ -195,13 +204,23 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           disabled={disabled}
         />
         
-        <TimeDisplay
-          currentTime={state.currentTime}
-          duration={state.duration}
-          theme={theme}
-          compact={compact}
-          showProgress={showProgress}
-        />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <PlaybackSpeedControl
+            currentSpeed={state.playbackRate}
+            onSpeedChange={handleSpeedChange}
+            theme={theme}
+            compact={compact}
+            disabled={disabled}
+          />
+          
+          <TimeDisplay
+            currentTime={state.currentTime}
+            duration={state.duration}
+            theme={theme}
+            compact={compact}
+            showProgress={showProgress}
+          />
+        </View>
       </View>
 
       {/* Progress Bar */}

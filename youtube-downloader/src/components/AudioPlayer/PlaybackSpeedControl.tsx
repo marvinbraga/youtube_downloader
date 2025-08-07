@@ -51,27 +51,30 @@ export const PlaybackSpeedControl: React.FC<PlaybackSpeedControlProps> = ({
     <>
       <TouchableOpacity
         style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          paddingVertical: compact ? 4 : 6,
-          paddingHorizontal: compact ? 6 : 8,
-          borderRadius: 4,
+          width: 40,
+          height: 36,
+          borderRadius: 18,
           backgroundColor: theme.colors.surface,
           borderWidth: 1,
-          borderColor: theme.colors.outline,
-          opacity: disabled ? 0.5 : 1,
-          minWidth: compact ? 40 : 45,
+          borderColor: theme.colors.outline + '40',
+          alignItems: 'center',
           justifyContent: 'center',
+          opacity: disabled ? 0.5 : 1,
+          shadowColor: 'rgba(0, 0, 0, 0.1)',
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 1,
+          shadowRadius: 4,
+          elevation: 2,
         }}
         onPress={() => !disabled && setShowModal(true)}
         disabled={disabled}
-        activeOpacity={disabled ? 1 : 0.7}
+        activeOpacity={disabled ? 1 : 0.8}
       >
         <Text
           style={{
             color: theme.colors.onSurface,
-            fontSize: compact ? 12 : 13,
-            fontWeight: '600',
+            fontSize: 11,
+            fontWeight: '700',
             fontVariant: ['tabular-nums'],
           }}
         >

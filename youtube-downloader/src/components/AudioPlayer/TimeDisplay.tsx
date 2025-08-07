@@ -55,7 +55,13 @@ export const TimeDisplay: React.FC<TimeDisplayProps> = ({
     <View
       style={{
         alignItems: 'center',
-        minWidth,
+        justifyContent: 'center',
+        paddingVertical: 8,
+        paddingHorizontal: 16,
+        backgroundColor: theme.colors.outline + '08',
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: theme.colors.outline + '20',
       }}
     >
       {/* Main Time Display */}
@@ -63,14 +69,16 @@ export const TimeDisplay: React.FC<TimeDisplayProps> = ({
         style={{
           flexDirection: 'row',
           alignItems: 'center',
+          justifyContent: 'center',
         }}
       >
         <Text
           style={{
             color: theme.colors.onSurface,
-            fontSize,
-            fontWeight: '500',
+            fontSize: 16,
+            fontWeight: '700',
             fontVariant: ['tabular-nums'], // Monospace numbers for consistent width
+            letterSpacing: 0.5,
           }}
         >
           {showRemaining && duration > 0 ? `-${remainingTimeFormatted}` : currentTimeFormatted}
@@ -81,19 +89,19 @@ export const TimeDisplay: React.FC<TimeDisplayProps> = ({
             <Text
               style={{
                 color: theme.colors.outline,
-                fontSize,
+                fontSize: 14,
                 fontWeight: '400',
-                marginHorizontal: 4,
+                marginHorizontal: 6,
               }}
             >
-              /
+              •
             </Text>
             
             <Text
               style={{
                 color: theme.colors.outline,
-                fontSize,
-                fontWeight: '400',
+                fontSize: 14,
+                fontWeight: '500',
                 fontVariant: ['tabular-nums'], // Monospace numbers for consistent width
               }}
             >
@@ -105,17 +113,26 @@ export const TimeDisplay: React.FC<TimeDisplayProps> = ({
 
       {/* Progress Percentage */}
       {showProgress && duration > 0 && (
-        <Text
+        <View
           style={{
-            color: theme.colors.outline,
-            fontSize: compact ? 10 : 11,
-            fontWeight: '400',
-            marginTop: 2,
-            fontVariant: ['tabular-nums'],
+            marginTop: 4,
+            paddingHorizontal: 8,
+            paddingVertical: 2,
+            backgroundColor: theme.colors.outline + '10',
+            borderRadius: 6,
           }}
         >
-          {progressPercentage}%
-        </Text>
+          <Text
+            style={{
+              color: theme.colors.outline,
+              fontSize: 10,
+              fontWeight: '600',
+              fontVariant: ['tabular-nums'],
+            }}
+          >
+            {progressPercentage}%
+          </Text>
+        </View>
       )}
     </View>
   );

@@ -110,7 +110,7 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
       style={{
         flexDirection: 'row',
         alignItems: 'center',
-        gap: compact ? 8 : 12,
+        gap: compact ? 16 : 20,
         opacity: disabled ? 0.5 : 1,
       }}
     >
@@ -124,21 +124,31 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           onPress={handleStopPress}
           disabled={disabled || isLoading}
           style={{
-            padding: compact ? 6 : 8,
-            borderRadius: compact ? 16 : 20,
-            backgroundColor: stopPressed ? theme.colors.outline + '20' : 'transparent',
+            width: 40,
+            height: 40,
+            borderRadius: 20,
+            backgroundColor: stopPressed ? theme.colors.outline + '30' : theme.colors.outline + '15',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderWidth: 1,
+            borderColor: theme.colors.outline + '30',
+            shadowColor: 'rgba(0, 0, 0, 0.1)',
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 1,
+            shadowRadius: 4,
+            elevation: 2,
           }}
-          activeOpacity={0.7}
+          activeOpacity={0.8}
         >
           <Ionicons
             name="stop"
-            size={iconSize}
+            size={18}
             color={(disabled || isLoading) ? theme.colors.outline : iconColor}
           />
         </TouchableOpacity>
       </Animated.View>
 
-      {/* Play/Pause Button */}
+      {/* Play/Pause Button - Main Control */}
       <Animated.View
         style={{
           transform: [{ scale: playButtonScale }],
@@ -148,47 +158,86 @@ export const PlayerControls: React.FC<PlayerControlsProps> = ({
           onPress={handlePlayPausePress}
           disabled={disabled || isLoading}
           style={{
-            width: buttonSize,
-            height: buttonSize,
-            borderRadius: buttonSize / 2,
+            width: 64,
+            height: 64,
+            borderRadius: 32,
             backgroundColor: isLoading ? theme.colors.outline : theme.colors.primary,
             alignItems: 'center',
             justifyContent: 'center',
-            shadowColor: theme.colors.shadow,
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.15,
-            shadowRadius: 3,
-            elevation: 3,
+            shadowColor: theme.colors.primary,
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.3,
+            shadowRadius: 12,
+            elevation: 8,
+            borderWidth: 3,
+            borderColor: 'rgba(255, 255, 255, 0.2)',
           }}
-          activeOpacity={0.8}
+          activeOpacity={0.85}
         >
         {isLoading ? (
           <ActivityIndicator
-            size={compact ? "small" : "small"}
+            size="small"
             color={theme.colors.onPrimary}
           />
         ) : (
           <Ionicons
             name={isPlaying ? "pause" : "play"}
-            size={iconSize}
+            size={28}
             color={theme.colors.onPrimary}
             style={{
-              marginLeft: isPlaying ? 0 : 2, // Slight offset for play icon visual balance
+              marginLeft: isPlaying ? 0 : 3, // Visual balance for play icon
             }}
           />
         )}
         </TouchableOpacity>
       </Animated.View>
 
-      {/* Status Indicator */}
+      {/* Forward 10s Button */}
+      <Animated.View
+        style={{
+          transform: [{ scale: stopButtonScale }],
+        }}
+      >
+        <TouchableOpacity
+          onPress={handleStopPress}
+          disabled={disabled || isLoading}
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 20,
+            backgroundColor: theme.colors.outline + '15',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderWidth: 1,
+            borderColor: theme.colors.outline + '30',
+            shadowColor: 'rgba(0, 0, 0, 0.1)',
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 1,
+            shadowRadius: 4,
+            elevation: 2,
+          }}
+          activeOpacity={0.8}
+        >
+          <Ionicons
+            name="play-forward"
+            size={18}
+            color={(disabled || isLoading) ? theme.colors.outline : iconColor}
+          />
+        </TouchableOpacity>
+      </Animated.View>
+
+      {/* Status Indicator - Pulse animation when playing */}
       {isPlaying && (
         <View
           style={{
+            position: 'absolute',
+            left: '50%',
+            marginLeft: -2,
+            top: -8,
             width: 4,
             height: 4,
             borderRadius: 2,
             backgroundColor: theme.colors.primary,
-            marginLeft: -4,
           }}
         />
       )}

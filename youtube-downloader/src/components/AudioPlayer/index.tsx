@@ -154,20 +154,28 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     <Animated.View
       style={{
         backgroundColor: playerColors.surface,
-        borderRadius,
-        padding: containerPadding,
-        marginVertical: compact ? 2 : 4,
-        shadowColor: playerColors.shadowDark,
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: isDarkMode ? 0.3 : 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        borderRadius: 16,
+        padding: 20,
+        marginVertical: compact ? 4 : 8,
+        shadowColor: isDarkMode ? 'rgba(0, 0, 0, 0.6)' : 'rgba(0, 0, 0, 0.15)',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 1,
+        shadowRadius: 24,
+        elevation: 8,
         opacity: fadeAnim,
+        borderWidth: 1,
+        borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)',
         transform: [
           {
             scale: fadeAnim.interpolate({
               inputRange: [0, 1],
-              outputRange: [0.95, 1],
+              outputRange: [0.96, 1],
+            }),
+          },
+          {
+            translateY: fadeAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [8, 0],
             }),
           },
         ],
@@ -193,49 +201,69 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         </View>
       )}
 
-      {/* Header Row - Controls and Time */}
+      {/* Main Controls Layout */}
       <View
         style={{
-          flexDirection: 'row',
           alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: compact ? 8 : 12,
+          marginBottom: 24,
         }}
       >
-        <PlayerControls
-          isPlaying={state.isPlaying}
-          isLoading={state.isLoading}
-          onPlay={handlePlay}
-          onPause={handlePause}
-          onStop={handleStop}
-          theme={theme}
-          compact={compact}
-          disabled={disabled}
-        />
+        {/* Primary Controls */}
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: 20,
+          }}
+        >
+          <PlayerControls
+            isPlaying={state.isPlaying}
+            isLoading={state.isLoading}
+            onPlay={handlePlay}
+            onPause={handlePause}
+            onStop={handleStop}
+            theme={theme}
+            compact={compact}
+            disabled={disabled}
+          />
+        </View>
         
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        {/* Secondary Controls Row */}
+        <View 
+          style={{ 
+            flexDirection: 'row', 
+            alignItems: 'center', 
+            justifyContent: 'space-between',
+            width: '100%',
+            paddingHorizontal: 4,
+          }}
+        >
+          {/* Left Side - Volume */}
           <VolumeControl
             volume={state.volume}
             onVolumeChange={handleVolumeChange}
             theme={theme}
-            compact={compact}
+            compact={true}
             disabled={disabled}
           />
           
-          <PlaybackSpeedControl
-            currentSpeed={state.playbackRate}
-            onSpeedChange={handleSpeedChange}
-            theme={theme}
-            compact={compact}
-            disabled={disabled}
-          />
-          
+          {/* Center - Time Display */}
           <TimeDisplay
             currentTime={state.currentTime}
             duration={state.duration}
             theme={theme}
-            compact={compact}
+            compact={false}
             showProgress={showProgress}
+          />
+          
+          {/* Right Side - Speed */}
+          <PlaybackSpeedControl
+            currentSpeed={state.playbackRate}
+            onSpeedChange={handleSpeedChange}
+            theme={theme}
+            compact={true}
+            disabled={disabled}
           />
         </View>
       </View>
@@ -254,37 +282,44 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         style={{
           flexDirection: 'row',
           alignItems: 'center',
-          justifyContent: 'space-between',
-          marginTop: 4,
-          minHeight: 16,
+          justifyContent: 'center',
+          marginTop: 8,
+          minHeight: 20,
         }}
       >
-        {/* Loading/Playing Status */}
+        {/* Status Indicator */}
         {(state.isLoading || state.isPlaying) && (
-          <Text
+          <View
             style={{
-              color: theme.colors.outline,
-              fontSize: compact ? 10 : 11,
-              fontWeight: '400',
+              flexDirection: 'row',
+              alignItems: 'center',
+              paddingHorizontal: 12,
+              paddingVertical: 4,
+              backgroundColor: state.isPlaying ? theme.colors.primary + '20' : theme.colors.outline + '20',
+              borderRadius: 8,
+              borderWidth: 1,
+              borderColor: state.isPlaying ? theme.colors.primary + '40' : theme.colors.outline + '40',
             }}
           >
-            {state.isLoading ? 'Carregando...' : state.isPlaying ? 'Reproduzindo' : ''}
-          </Text>
-        )}
-        
-        <View style={{ flex: 1 }} />
-        
-        {/* Audio Format/Quality Info */}
-        {!state.error && (
-          <Text
-            style={{
-              color: theme.colors.outline,
-              fontSize: compact ? 10 : 11,
-              fontWeight: '400',
-            }}
-          >
-            Audio
-          </Text>
+            <View
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: 3,
+                backgroundColor: state.isPlaying ? theme.colors.primary : theme.colors.outline,
+                marginRight: 6,
+              }}
+            />
+            <Text
+              style={{
+                color: state.isPlaying ? theme.colors.primary : theme.colors.outline,
+                fontSize: 11,
+                fontWeight: '600',
+              }}
+            >
+              {state.isLoading ? 'Carregando...' : state.isPlaying ? 'Reproduzindo' : ''}
+            </Text>
+          </View>
         )}
       </View>
 

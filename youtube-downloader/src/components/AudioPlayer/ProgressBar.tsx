@@ -120,27 +120,32 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
   return (
     <View style={{
       width: '100%',
-      paddingVertical: 8,
+      paddingVertical: 12,
     }}>
       <TouchableOpacity
         onPress={handlePress}
         onLayout={handleLayout}
         disabled={disabled}
         style={{
-          height: 20,
+          height: 32,
           justifyContent: 'center',
-          paddingVertical: 8,
+          paddingVertical: 12,
         }}
-        activeOpacity={disabled ? 1 : 0.7}
+        activeOpacity={disabled ? 1 : 0.9}
       >
         {/* Background Track */}
         <View
           style={{
-            height: isHovering ? height + 1 : height,
-            backgroundColor: theme.colors.outline + '40', // outline com 25% de opacidade
-            borderRadius: height / 2,
+            height: 6,
+            backgroundColor: theme.colors.outline + '20',
+            borderRadius: 3,
             position: 'relative',
-            opacity: disabled ? 0.5 : 1,
+            opacity: disabled ? 0.4 : 1,
+            shadowColor: 'rgba(0, 0, 0, 0.1)',
+            shadowOffset: { width: 0, height: 1 },
+            shadowOpacity: 1,
+            shadowRadius: 2,
+            elevation: 1,
           }}
         >
           {/* Buffered Track */}
@@ -151,8 +156,8 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
               top: 0,
               height: '100%',
               width: `${Math.min(bufferedProgress, 100)}%`,
-              backgroundColor: theme.colors.outline + '60',
-              borderRadius: height / 2,
+              backgroundColor: theme.colors.outline + '40',
+              borderRadius: 3,
             }}
           />
           
@@ -165,29 +170,34 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
               height: '100%',
               width: `${Math.min(progress, 100)}%`,
               backgroundColor: theme.colors.primary,
-              borderRadius: height / 2,
+              borderRadius: 3,
+              shadowColor: theme.colors.primary,
+              shadowOffset: { width: 0, height: 0 },
+              shadowOpacity: 0.4,
+              shadowRadius: 4,
+              elevation: 2,
             }}
           />
           
           {/* Progress Handle */}
-          {(duration > 0 || isHovering) && (
+          {duration > 0 && (
             <View
               style={{
                 position: 'absolute',
                 left: `${Math.min(progress, 100)}%`,
-                top: -(height + 2) / 2,
-                width: isHovering ? height + 6 : height + 2,
-                height: isHovering ? height + 6 : height + 2,
+                top: -6,
+                width: 18,
+                height: 18,
                 backgroundColor: theme.colors.primary,
-                borderRadius: (isHovering ? height + 6 : height + 2) / 2,
-                marginLeft: -(isHovering ? height + 6 : height + 2) / 2,
-                borderWidth: 2,
+                borderRadius: 9,
+                marginLeft: -9,
+                borderWidth: 3,
                 borderColor: theme.colors.background,
-                shadowColor: theme.colors.shadow,
-                shadowOffset: { width: 0, height: 1 },
-                shadowOpacity: 0.2,
-                shadowRadius: 2,
-                elevation: 2,
+                shadowColor: 'rgba(0, 0, 0, 0.3)',
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 1,
+                shadowRadius: 4,
+                elevation: 4,
                 opacity: disabled ? 0.5 : 1,
               }}
             />
@@ -200,24 +210,26 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
         <View
           style={{
             position: 'absolute',
-            top: -35,
+            top: -45,
             backgroundColor: theme.colors.inverseSurface,
-            paddingHorizontal: 8,
-            paddingVertical: 4,
-            borderRadius: 6,
+            paddingHorizontal: 12,
+            paddingVertical: 6,
+            borderRadius: 8,
             alignSelf: 'center',
-            shadowColor: theme.colors.shadow,
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.15,
-            shadowRadius: 4,
-            elevation: 4,
+            shadowColor: 'rgba(0, 0, 0, 0.4)',
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 1,
+            shadowRadius: 8,
+            elevation: 8,
+            borderWidth: 1,
+            borderColor: 'rgba(255, 255, 255, 0.1)',
           }}
         >
           <Text
             style={{
               color: theme.colors.inverseOnSurface,
-              fontSize: 11,
-              fontWeight: '500',
+              fontSize: 12,
+              fontWeight: '600',
               fontVariant: ['tabular-nums'],
             }}
           >

@@ -85,15 +85,20 @@ export const VolumeControl: React.FC<VolumeControlProps> = ({
       {/* Volume Button */}
       <TouchableOpacity
         style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          paddingVertical: compact ? 4 : 6,
-          paddingHorizontal: compact ? 6 : 8,
-          borderRadius: 4,
+          width: 36,
+          height: 36,
+          borderRadius: 18,
           backgroundColor: showSlider ? theme.colors.primary + '20' : theme.colors.surface,
           borderWidth: 1,
-          borderColor: showSlider ? theme.colors.primary : theme.colors.outline,
+          borderColor: showSlider ? theme.colors.primary : theme.colors.outline + '40',
+          alignItems: 'center',
+          justifyContent: 'center',
           opacity: disabled ? 0.5 : 1,
+          shadowColor: 'rgba(0, 0, 0, 0.1)',
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: showSlider ? 1 : 0,
+          shadowRadius: 4,
+          elevation: showSlider ? 3 : 0,
         }}
         onPress={() => {
           if (!disabled) {
@@ -106,12 +111,12 @@ export const VolumeControl: React.FC<VolumeControlProps> = ({
         }}
         onLongPress={() => !disabled && handleMuteToggle()}
         disabled={disabled}
-        activeOpacity={disabled ? 1 : 0.7}
+        activeOpacity={disabled ? 1 : 0.8}
       >
         <Feather
           name={getVolumeIcon() as any}
-          size={iconSize}
-          color={disabled ? theme.colors.outline : theme.colors.onSurface}
+          size={16}
+          color={showSlider ? theme.colors.primary : (disabled ? theme.colors.outline : theme.colors.onSurface)}
         />
       </TouchableOpacity>
 
@@ -120,20 +125,22 @@ export const VolumeControl: React.FC<VolumeControlProps> = ({
         <View
           style={{
             position: 'absolute',
-            top: compact ? -45 : -50,
+            top: -60,
             left: '50%',
-            marginLeft: -60, // half of slider width
-            width: 120,
+            marginLeft: -65, // half of slider width
+            width: 130,
             backgroundColor: theme.colors.inverseSurface,
-            borderRadius: 8,
-            paddingVertical: 12,
-            paddingHorizontal: 16,
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.25,
-            shadowRadius: 8,
-            elevation: 8,
+            borderRadius: 12,
+            paddingVertical: 16,
+            paddingHorizontal: 20,
+            shadowColor: 'rgba(0, 0, 0, 0.3)',
+            shadowOffset: { width: 0, height: 8 },
+            shadowOpacity: 1,
+            shadowRadius: 16,
+            elevation: 12,
             zIndex: 1000,
+            borderWidth: 1,
+            borderColor: 'rgba(255, 255, 255, 0.1)',
           }}
         >
           {/* Seta para baixo */}

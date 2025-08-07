@@ -7,6 +7,7 @@ import { PlayerControls } from './PlayerControls';
 import { ProgressBar } from './ProgressBar';
 import { TimeDisplay } from './TimeDisplay';
 import { PlaybackSpeedControl } from './PlaybackSpeedControl';
+import { VolumeControl } from './VolumeControl';
 import { getPlayerTheme, getResponsiveSizes, animations } from './themes';
 
 // Adaptação de tipos para compatibilidade com o sistema de temas existente
@@ -93,7 +94,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     }).start();
   }, []);
 
-  const { state, play, pause, stop, seek, setPlaybackRate } = useAudioPlayer(authenticatedUrl || '');
+  const { state, play, pause, stop, seek, setPlaybackRate, setVolume } = useAudioPlayer(authenticatedUrl || '');
 
   const handlePlay = useCallback(async () => {
     try {
@@ -137,6 +138,14 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
       onError?.(error as Error, audio);
     }
   }, [setPlaybackRate, audio, onError]);
+
+  const handleVolumeChange = useCallback(async (volume: number) => {
+    try {
+      await setVolume(volume);
+    } catch (error) {
+      onError?.(error as Error, audio);
+    }
+  }, [setVolume, audio, onError]);
 
   const containerPadding = compact ? responsiveSizes.padding - 4 : responsiveSizes.padding;
   const borderRadius = compact ? responsiveSizes.borderRadius - 2 : responsiveSizes.borderRadius;
@@ -205,6 +214,14 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         />
         
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <VolumeControl
+            volume={state.volume}
+            onVolumeChange={handleVolumeChange}
+            theme={theme}
+            compact={compact}
+            disabled={disabled}
+          />
+          
           <PlaybackSpeedControl
             currentSpeed={state.playbackRate}
             onSpeedChange={handleSpeedChange}

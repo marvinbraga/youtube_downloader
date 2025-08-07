@@ -10,7 +10,19 @@
       "Bash(yarn add:*)",
       "Bash(findstr:*)",
       "Bash(powershell:*)",
-      "Bash(npx expo start:*)"
+      "Bash(npx expo start:*)",
+      "Bash(mkdir:*)",
+      "Bash(yarn config get:*)",
+      "Bash(ping:*)",
+      "Bash(yarn cache:*)",
+      "Bash(yarn config list)",
+      "Bash(yarn install:*)",
+      "Bash(del package-lock.json)",
+      "Bash(rm:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(pkill:*)",
+      "Bash(true)"
     ],
     "deny": []
   }

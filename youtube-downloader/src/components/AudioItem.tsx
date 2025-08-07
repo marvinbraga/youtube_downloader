@@ -4,6 +4,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Animated }
 import { Feather } from '@expo/vector-icons';
 import { Audio } from '../types';
 import { useTheme } from '../context/ThemeContext';
+import { AudioPlayerAdapter } from './AudioPlayer/AudioPlayerAdapter';
 
 interface AudioItemProps {
   audio: Audio;
@@ -14,6 +15,7 @@ interface AudioItemProps {
   onTranscribe: (audio: Audio) => void;
   onCancel?: (audio: Audio) => void;
   onRetry?: (audio: Audio) => void;
+  showAudioPlayer?: boolean;
 }
 
 interface TranscriptionStatusConfig {
@@ -34,7 +36,8 @@ const AudioItem: React.FC<AudioItemProps> = ({
   onPlay,
   onTranscribe,
   onCancel,
-  onRetry
+  onRetry,
+  showAudioPlayer = false
 }) => {
   const { colors, theme } = useTheme();
   const spinValue = useRef(new Animated.Value(0)).current;
@@ -267,35 +270,52 @@ const AudioItem: React.FC<AudioItemProps> = ({
           </Text>
         </View>
         
-        <View style={styles.actions}>
-          <TouchableOpacity 
-            style={[
-              styles.actionButton,
-              { 
-                backgroundColor: isActive ? colors.primary : colors.background.primary,
-                borderColor: isActive ? colors.primary : colors.border 
-              },
-              isNotReady && styles.disabledButton
-            ]}
-            onPress={() => onPlay(audio)}
-            disabled={isNotReady}
-          >
-            <Feather 
-              name={isActive ? "pause" : "play"} 
-              size={16} 
-              color={isNotReady ? colors.text.secondary : isActive ? 'white' : colors.secondary} 
+        {/* Audio Player ou Botão de Reproduzir */}
+        {showAudioPlayer && !isNotReady ? (
+          <View style={styles.audioPlayerContainer}>
+            <AudioPlayerAdapter
+              audio={audio}
+              onPlay={() => console.log('Advanced player started:', audio.name)}
+              onPause={() => console.log('Advanced player paused:', audio.name)}
+              onStop={() => console.log('Advanced player stopped:', audio.name)}
+              onError={(error) => console.error('Audio player error:', error)}
+              onEnded={() => console.log('Audio ended:', audio.name)}
+              showTitle={false}
+              compact={false}
+              showProgress={true}
+              disabled={isNotReady}
             />
-            <Text style={[
-              styles.actionButtonText, 
-              { 
-                color: isNotReady ? colors.text.secondary : isActive ? 'white' : colors.secondary 
-              }
-            ]}>
-              {isActive ? 'Pausar' : 'Reproduzir'}
-            </Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
+          </View>
+        ) : (
+          <View style={styles.actions}>
+            <TouchableOpacity 
+              style={[
+                styles.actionButton,
+                { 
+                  backgroundColor: isActive ? colors.primary : colors.background.primary,
+                  borderColor: isActive ? colors.primary : colors.border 
+                },
+                isNotReady && styles.disabledButton
+              ]}
+              onPress={() => onPlay(audio)}
+              disabled={isNotReady}
+            >
+              <Feather 
+                name={isActive ? "pause" : "play"} 
+                size={16} 
+                color={isNotReady ? colors.text.secondary : isActive ? 'white' : colors.secondary} 
+              />
+              <Text style={[
+                styles.actionButtonText, 
+                { 
+                  color: isNotReady ? colors.text.secondary : isActive ? 'white' : colors.secondary 
+                }
+              ]}>
+                {isActive ? 'Pausar' : 'Reproduzir'}
+              </Text>
+              </TouchableOpacity>
+            
+            <TouchableOpacity 
             style={[
               styles.actionButton, 
               { 
@@ -360,7 +380,8 @@ const AudioItem: React.FC<AudioItemProps> = ({
               <Text style={[styles.actionButtonText, { color: 'white' }]}>Tentar Novamente</Text>
             </TouchableOpacity>
           )}
-        </View>
+          </View>
+        )}
       </View>
     </TouchableOpacity>
   );
@@ -497,6 +518,9 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     opacity: 0.5,
+  },
+  audioPlayerContainer: {
+    marginTop: 8,
   }
 });
 

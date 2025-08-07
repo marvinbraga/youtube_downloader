@@ -5,6 +5,7 @@ import AudioItem from './AudioItem';
 import TranscriptionModal from './TranscriptionModal';
 import Button from './Button';
 import ThemeToggle from './ThemeToggle';
+import { AudioPlayer } from './AudioPlayer';
 
 export {
   StatusMessage,
@@ -12,5 +13,6 @@ export {
   AudioItem,
   TranscriptionModal,
   Button,
-  ThemeToggle
+  ThemeToggle,
+  AudioPlayer
 };

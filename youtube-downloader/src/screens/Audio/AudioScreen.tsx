@@ -14,7 +14,7 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { Audio as ExpoAudio } from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { fetchAudios, transcribeAudio, checkTranscriptionStatus, fetchTranscription, ensureTranscriptionStatus, api } from '../../services/api';
+import { fetchAudios, transcribeAudio, checkTranscriptionStatus, fetchTranscription, ensureTranscriptionStatus } from '../../services/api';
 import { Audio as AudioType } from '../../types';
 import AudioItem from '../../components/AudioItem';
 import TranscriptionModal from '../../components/TranscriptionModal';
@@ -23,6 +23,7 @@ import { Feather } from '@expo/vector-icons';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useDownloads } from '../../context/DownloadContext';
+import { useGlobalAudioPlayer } from '../../context/AudioPlayerContext';
 import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 
@@ -30,6 +31,7 @@ const AudioScreen: React.FC = () => {
   const { authState, login } = useAuth();
   const { colors, theme } = useTheme();
   const { downloads, isConnected, getDownloadProgress, cancelDownload, retryDownload } = useDownloads();
+  const { registerPlayer, unregisterPlayer, stopAllOtherPlayers } = useGlobalAudioPlayer();
   const [audios, setAudios] = useState<AudioType[]>([]);
   const [filteredAudios, setFilteredAudios] = useState<AudioType[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -42,10 +44,14 @@ const AudioScreen: React.FC = () => {
     type: 'error' | 'success' | 'info';
   } | null>(null);
   
+  // Estado para controlar o uso do novo AudioPlayer
+  const [useNewAudioPlayer, setUseNewAudioPlayer] = useState(true);
+  
   // Referências para o player de áudio
   const soundRef = useRef<ExpoAudio.Sound | null>(null);
   const htmlAudioRef = useRef<HTMLAudioElement | null>(null);
   const transcriptionCheckTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const simplePlayerIdRef = useRef<string>('simple-audio-screen-player');
   
   // Estado para o modal de transcrição
   const [transcriptionModal, setTranscriptionModal] = useState({
@@ -94,8 +100,17 @@ const AudioScreen: React.FC = () => {
     }
   }, [authState.isAuthenticated, searchQuery]);
   
+  // Função para parar o player simples (para uso pelo contexto global)
+  const stopSimplePlayer = useCallback(async () => {
+    console.log('🎵 Simple player stopped by global context');
+    await stopAudio();
+  }, []);
+  
   // Carregar áudios no início
   useEffect(() => {
+    // Registrar player simples no contexto global
+    registerPlayer(simplePlayerIdRef.current, stopSimplePlayer);
+
     if (authState.isAuthenticated) {
       loadAudios();
     } else if (!authState.isLoading) {
@@ -104,12 +119,13 @@ const AudioScreen: React.FC = () => {
     
     // Limpeza: parar o player e os temporizadores
     return () => {
+      unregisterPlayer(simplePlayerIdRef.current);
       stopAudio();
       if (transcriptionCheckTimerRef.current) {
         clearInterval(transcriptionCheckTimerRef.current);
       }
     };
-  }, [authState.isAuthenticated, authState.isLoading, login, loadAudios]);
+  }, [authState.isAuthenticated, authState.isLoading, login, loadAudios, registerPlayer, unregisterPlayer, stopSimplePlayer]);
   
   // Recarregar lista quando downloads mudam (via SSE)
   useEffect(() => {
@@ -234,7 +250,7 @@ const AudioScreen: React.FC = () => {
   };
   
   // Verificar status da transcrição
-  const checkAudioTranscriptionStatus = async (audio: Audio, showMessages = true) => {
+  const checkAudioTranscriptionStatus = async (audio: AudioType, showMessages = true) => {
     if (!authState.isAuthenticated) {
       if (showMessages) {
         setStatusMessage({
@@ -478,7 +494,8 @@ const AudioScreen: React.FC = () => {
                 type: 'info'
               });
             } else {
-              // Retomar
+              // Retomar - parar outros players primeiro
+              stopAllOtherPlayers(simplePlayerIdRef.current);
               await htmlAudioRef.current.play();
               setIsPlaying(true);
               setStatusMessage({
@@ -499,7 +516,8 @@ const AudioScreen: React.FC = () => {
                 type: 'info'
               });
             } else {
-              // Retomar
+              // Retomar - parar outros players primeiro
+              stopAllOtherPlayers(simplePlayerIdRef.current);
               await soundRef.current.playAsync();
               setIsPlaying(true);
               setStatusMessage({
@@ -511,6 +529,9 @@ const AudioScreen: React.FC = () => {
           }
         }
       }
+      
+      // Parar todos os outros players antes de iniciar novo áudio
+      stopAllOtherPlayers(simplePlayerIdRef.current);
       
       // Parar áudio atual se estiver tocando outro
       await stopAudio();
@@ -681,19 +702,19 @@ const AudioScreen: React.FC = () => {
         });
         
         // Atualiza o status na interface
-        const updatedAudios = audios.map(a => {
+        const updatedAudios: AudioType[] = audios.map(a => {
           if (a.id === audio.id) {
-            return { ...a, transcription_status: 'started' };
+            return { ...a, transcription_status: 'started' as const };
           }
           return a;
         });
         
-        setAudios(updatedAudios as Audio[]);
-        filterAudios(updatedAudios as Audio[], searchQuery);
-        cacheAudios(updatedAudios as Audio[]);
+        setAudios(updatedAudios);
+        filterAudios(updatedAudios, searchQuery);
+        cacheAudios(updatedAudios);
         
         // Inicia verificação periódica do status
-        startTranscriptionStatusCheck(updatedAudios as Audio[]);
+        startTranscriptionStatusCheck(updatedAudios);
       } else if (response.status === 'ended') {
         setStatusMessage({
           message: 'Transcrição já existe! Carregando visualização...',
@@ -701,16 +722,16 @@ const AudioScreen: React.FC = () => {
         });
         
         // Atualiza o status na interface
-        const updatedAudios = audios.map(a => {
+        const updatedAudios: AudioType[] = audios.map(a => {
           if (a.id === audio.id) {
-            return { ...a, transcription_status: 'ended' };
+            return { ...a, transcription_status: 'ended' as const };
           }
           return a;
         });
         
-        setAudios(updatedAudios as Audio[]);
-        filterAudios(updatedAudios as Audio[], searchQuery);
-        cacheAudios(updatedAudios as Audio[]);
+        setAudios(updatedAudios);
+        filterAudios(updatedAudios, searchQuery);
+        cacheAudios(updatedAudios);
         
         // Mostrar a transcrição existente
         viewTranscription({ ...audio, transcription_status: 'ended' });
@@ -887,6 +908,29 @@ const AudioScreen: React.FC = () => {
           <View style={styles.headerActions}>
             <TouchableOpacity
               style={[
+                styles.toggleButton,
+                { 
+                  backgroundColor: useNewAudioPlayer ? colors.primary : colors.background.secondary,
+                  borderColor: colors.border
+                }
+              ]}
+              onPress={() => setUseNewAudioPlayer(!useNewAudioPlayer)}
+            >
+              <Feather 
+                name={useNewAudioPlayer ? "music" : "play"} 
+                size={16} 
+                color={useNewAudioPlayer ? 'white' : colors.text.primary} 
+              />
+              <Text style={[
+                styles.toggleButtonText, 
+                { color: useNewAudioPlayer ? 'white' : colors.text.primary }
+              ]}>
+                {useNewAudioPlayer ? 'Player Avançado' : 'Player Simples'}
+              </Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[
                 styles.refreshButton,
                 { 
                   backgroundColor: colors.background.secondary,
@@ -964,6 +1008,7 @@ const AudioScreen: React.FC = () => {
                   onTranscribe={transcribeAudioFile}
                   onCancel={handleCancelDownload}
                   onRetry={handleRetryDownload}
+                  showAudioPlayer={useNewAudioPlayer}
                 />
               );
             })}
@@ -1018,6 +1063,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+  },
+  toggleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  toggleButtonText: {
+    marginLeft: 6,
+    fontSize: 14,
+    fontWeight: '500',
   },
   refreshButton: {
     flexDirection: 'row',

@@ -12,7 +12,7 @@ import {
 import { Feather } from '@expo/vector-icons';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
-import { useDownloads } from '../../context/DownloadContext';
+import { useDownloads, QueueTask } from '../../context/DownloadContext';
 import StatusMessage from '../../components/StatusMessage';
 import { getQueueStatus, cleanupQueue } from '../../services/api';
 
@@ -28,19 +28,6 @@ interface QueueStatus {
   max_concurrent: number;
 }
 
-interface QueueTask {
-  id: string;
-  audio_id: string;
-  url: string;
-  status: string;
-  progress: number;
-  error_message?: string;
-  retry_count: number;
-  max_retries: number;
-  created_at: string;
-  started_at?: string;
-  completed_at?: string;
-}
 
 const QueueScreen: React.FC = () => {
   const { colors, theme } = useTheme();

@@ -22,7 +22,8 @@
       "Bash(grep:*)",
       "Bash(find:*)",
       "Bash(pkill:*)",
-      "Bash(true)"
+      "Bash(true)",
+      "Bash(timeout 10s npx expo start --port 8088)"
     ],
     "deny": []
   }

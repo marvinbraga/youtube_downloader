@@ -8,7 +8,8 @@
       "Bash(poetry update:*)",
       "Bash(yt-dlp:*)",
       "Bash(curl:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(test:*)"
     ],
     "deny": []
   }

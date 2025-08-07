@@ -14,15 +14,18 @@ interface DownloadProgress {
   taskId?: string; // ID da task na fila
 }
 
-interface QueueTask {
+export interface QueueTask {
   id: string;
-  audioId: string;
+  audio_id: string;
   url: string;
   status: 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled' | 'retrying';
   progress: number;
-  errorMessage?: string;
-  retryCount: number;
-  maxRetries: number;
+  error_message?: string;
+  retry_count: number;
+  max_retries: number;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
 }
 
 interface DownloadContextType {

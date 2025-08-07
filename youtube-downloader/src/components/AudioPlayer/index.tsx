@@ -156,18 +156,20 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   return (
     <Animated.View
       style={{
-        backgroundColor: playerColors.surface,
+        backgroundColor: isDarkMode ? 'rgba(15, 23, 42, 0.95)' : 'rgba(248, 250, 252, 0.95)',
         borderRadius: 12,
-        padding: compact ? 8 : 16,
-        marginVertical: compact ? 1 : 4,
-        shadowColor: isDarkMode ? 'rgba(0, 0, 0, 0.4)' : 'rgba(0, 0, 0, 0.1)',
-        shadowOffset: { width: 0, height: 4 },
+        padding: 12,
+        marginVertical: 4,
+        shadowColor: isDarkMode ? 'rgba(79, 70, 229, 0.3)' : 'rgba(59, 130, 246, 0.2)',
+        shadowOffset: { width: 0, height: 3 },
         shadowOpacity: 1,
-        shadowRadius: 12,
-        elevation: 6,
+        shadowRadius: 8,
+        elevation: 4,
         opacity: fadeAnim,
         borderWidth: 1,
-        borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.04)',
+        borderColor: isDarkMode 
+          ? 'rgba(79, 70, 229, 0.2)' 
+          : 'rgba(59, 130, 246, 0.15)',
         transform: [
           {
             scale: fadeAnim.interpolate({
@@ -175,93 +177,91 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
               outputRange: [0.98, 1],
             }),
           },
-          {
-            translateY: fadeAnim.interpolate({
-              inputRange: [0, 1],
-              outputRange: [4, 0],
-            }),
-          },
         ],
+        overflow: 'hidden',
       }}
     >
-      {/* Progress Bar - Moved to top */}
-      <ProgressBar
-        currentTime={state.currentTime}
-        duration={state.duration}
-        buffered={state.buffered}
-        onSeek={disabled ? () => {} : handleSeek}
-        theme={theme}
-      />
+      {/* Progress Bar - Compact */}
+      <View style={{ marginBottom: 10 }}>
+        <ProgressBar
+          currentTime={state.currentTime}
+          duration={state.duration}
+          buffered={state.buffered}
+          onSeek={disabled ? () => {} : handleSeek}
+          theme={theme}
+        />
+      </View>
 
-      {/* Title Row */}
-      {showTitle && (
+      {/* Status Indicator - Compact */}
+      {(state.isLoading || state.isPlaying) && (
         <View
           style={{
-            marginTop: 8,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'flex-start',
             marginBottom: 8,
           }}
         >
-          <Text
-            numberOfLines={1}
+          <View
             style={{
-              color: playerColors.textPrimary,
-              fontSize: compact ? responsiveSizes.fontSize - 2 : responsiveSizes.fontSize,
+              width: 4,
+              height: 4,
+              borderRadius: 2,
+              backgroundColor: state.isPlaying 
+                ? (isDarkMode ? '#4F46E5' : '#3b82f6')
+                : (isDarkMode ? '#94a3b8' : '#64748b'),
+              marginRight: 4,
+            }}
+          />
+          <Text
+            style={{
+              color: state.isPlaying 
+                ? (isDarkMode ? '#4F46E5' : '#3b82f6')
+                : (isDarkMode ? '#94a3b8' : '#64748b'),
+              fontSize: 10,
               fontWeight: '600',
             }}
           >
-            {audio.name}
+            {state.isLoading ? 'Carregando...' : state.isPlaying ? 'Reproduzindo' : ''}
           </Text>
         </View>
       )}
 
-      {/* Horizontal Controls Row - Grouped */}
+      {/* Compact Controls Row */}
       <View
         style={{
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'space-between',
-          marginTop: compact ? 8 : 12,
-          paddingHorizontal: compact ? 2 : 4,
+          gap: 4,
         }}
       >
-        {/* Left Group - Main Playback Controls (Stop, Play, Forward) */}
-        <View style={{ 
-          flexDirection: 'row', 
-          alignItems: 'center', 
-          gap: compact ? 6 : 8,
-          backgroundColor: theme.colors.surface,
-          borderRadius: compact ? 20 : 24,
-          paddingHorizontal: compact ? 8 : 12,
-          paddingVertical: compact ? 4 : 6,
-          borderWidth: 1,
-          borderColor: theme.colors.outline + '20',
-          shadowColor: 'rgba(0, 0, 0, 0.08)',
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 1,
-          shadowRadius: 4,
-          elevation: 2,
-        }}>
+        {/* Left Controls Group */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           {/* Stop Button */}
           <TouchableOpacity
             onPress={handleStop}
             disabled={disabled || state.isLoading}
             style={{
-              width: compact ? 28 : 36,
-              height: compact ? 28 : 36,
-              borderRadius: compact ? 14 : 18,
-              backgroundColor: theme.colors.outline + '15',
+              width: 24,
+              height: 24,
+              borderRadius: 3,
+              backgroundColor: isDarkMode 
+                ? 'rgba(148, 163, 184, 0.2)' 
+                : 'rgba(100, 116, 139, 0.15)',
               alignItems: 'center',
               justifyContent: 'center',
-              borderWidth: 1,
-              borderColor: theme.colors.outline + '30',
               opacity: disabled ? 0.5 : 1,
             }}
-            activeOpacity={0.8}
+            activeOpacity={0.7}
           >
             <Ionicons
               name="stop"
-              size={compact ? 12 : 16}
-              color={(disabled || state.isLoading) ? theme.colors.outline : theme.colors.onSurface}
+              size={10}
+              color={(disabled || state.isLoading) 
+                ? (isDarkMode ? 'rgba(148, 163, 184, 0.6)' : 'rgba(100, 116, 139, 0.6)')
+                : (isDarkMode ? '#94a3b8' : '#475569')
+              }
             />
           </TouchableOpacity>
 
@@ -270,35 +270,30 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             onPress={handlePlay}
             disabled={disabled || state.isLoading}
             style={{
-              width: compact ? 40 : 56,
-              height: compact ? 40 : 56,
-              borderRadius: compact ? 20 : 28,
-              backgroundColor: state.isLoading ? theme.colors.outline : theme.colors.primary,
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              backgroundColor: state.isLoading 
+                ? (isDarkMode ? 'rgba(148, 163, 184, 0.3)' : 'rgba(100, 116, 139, 0.2)')
+                : (isDarkMode ? '#4F46E5' : '#3b82f6'),
               alignItems: 'center',
               justifyContent: 'center',
-              shadowColor: theme.colors.primary,
-              shadowOffset: { width: 0, height: 3 },
-              shadowOpacity: 0.3,
-              shadowRadius: 8,
-              elevation: 6,
-              borderWidth: 2,
-              borderColor: 'rgba(255, 255, 255, 0.15)',
               opacity: disabled ? 0.5 : 1,
             }}
-            activeOpacity={0.85}
+            activeOpacity={0.8}
           >
             {state.isLoading ? (
               <ActivityIndicator
                 size="small"
-                color={theme.colors.onPrimary}
+                color="#ffffff"
               />
             ) : (
               <Ionicons
                 name={state.isPlaying ? "pause" : "play"}
-                size={compact ? 18 : 24}
-                color={theme.colors.onPrimary}
+                size={16}
+                color="#ffffff"
                 style={{
-                  marginLeft: state.isPlaying ? 0 : 2,
+                  marginLeft: state.isPlaying ? 0 : 1,
                 }}
               />
             )}
@@ -309,140 +304,93 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
             onPress={handleForwardPress}
             disabled={disabled || state.isLoading || !handleSeek}
             style={{
-              width: compact ? 28 : 36,
-              height: compact ? 28 : 36,
-              borderRadius: compact ? 14 : 18,
-              backgroundColor: theme.colors.outline + '15',
+              width: 28,
+              height: 28,
+              borderRadius: 14,
+              backgroundColor: isDarkMode 
+                ? 'rgba(148, 163, 184, 0.2)' 
+                : 'rgba(100, 116, 139, 0.15)',
               alignItems: 'center',
               justifyContent: 'center',
-              borderWidth: 1,
-              borderColor: theme.colors.outline + '30',
               opacity: (disabled || state.isLoading || !handleSeek) ? 0.5 : 1,
             }}
-            activeOpacity={0.8}
+            activeOpacity={0.7}
           >
             <Ionicons
               name="play-forward"
-              size={compact ? 12 : 16}
-              color={(disabled || state.isLoading || !handleSeek) ? theme.colors.outline : theme.colors.onSurface}
+              size={12}
+              color={(disabled || state.isLoading || !handleSeek) 
+                ? (isDarkMode ? 'rgba(148, 163, 184, 0.6)' : 'rgba(100, 116, 139, 0.6)')
+                : (isDarkMode ? '#94a3b8' : '#475569')
+              }
             />
           </TouchableOpacity>
         </View>
 
-        {/* Right Group - Secondary Controls (Speed, Volume) and Time */}
+        {/* Center Controls Group */}
         <View style={{ 
           flexDirection: 'row', 
           alignItems: 'center', 
-          gap: compact ? 8 : 12 
+          gap: 4,
         }}>
-          {/* Secondary Controls Group */}
-          <View style={{ 
-            flexDirection: 'row', 
-            alignItems: 'center', 
-            gap: compact ? 4 : 6,
-            backgroundColor: theme.colors.surface,
-            borderRadius: compact ? 16 : 20,
-            paddingHorizontal: compact ? 6 : 8,
-            paddingVertical: compact ? 4 : 6,
-            borderWidth: 1,
-            borderColor: theme.colors.outline + '20',
-            shadowColor: 'rgba(0, 0, 0, 0.08)',
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 1,
-            shadowRadius: 4,
-            elevation: 2,
-          }}>
-            {/* Speed Control */}
-            <PlaybackSpeedControl
-              currentSpeed={state.playbackRate}
-              onSpeedChange={handleSpeedChange}
-              theme={theme}
-              compact={true}
-              disabled={disabled}
-            />
-            
-            {/* Volume Control */}
-            <VolumeControl
-              volume={state.volume}
-              onVolumeChange={handleVolumeChange}
-              theme={theme}
-              compact={true}
-              disabled={disabled}
-            />
-          </View>
-          
-          {/* Time Display - Separate */}
-          <TimeDisplay
-            currentTime={state.currentTime}
-            duration={state.duration}
+          {/* Speed Control */}
+          <PlaybackSpeedControl
+            currentSpeed={state.playbackRate}
+            onSpeedChange={handleSpeedChange}
             theme={theme}
             compact={true}
-            showProgress={showProgress}
+            disabled={disabled}
+          />
+          
+          {/* Volume Control */}
+          <VolumeControl
+            volume={state.volume}
+            onVolumeChange={handleVolumeChange}
+            theme={theme}
+            compact={true}
+            disabled={disabled}
           />
         </View>
+        
+        {/* Right Time Display */}
+        <TimeDisplay
+          currentTime={state.currentTime}
+          duration={state.duration}
+          theme={theme}
+          compact={true}
+          showProgress={showProgress}
+        />
       </View>
 
-      {/* Status Row */}
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'center',
-          marginTop: compact ? 3 : 6,
-          minHeight: compact ? 12 : 16,
-        }}
-      >
-        {/* Status Indicator */}
-        {(state.isLoading || state.isPlaying) && (
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              paddingHorizontal: 8,
-              paddingVertical: 3,
-              backgroundColor: state.isPlaying ? theme.colors.primary + '20' : theme.colors.outline + '20',
-              borderRadius: 6,
-              borderWidth: 1,
-              borderColor: state.isPlaying ? theme.colors.primary + '40' : theme.colors.outline + '40',
-            }}
-          >
-            <View
-              style={{
-                width: 4,
-                height: 4,
-                borderRadius: 2,
-                backgroundColor: state.isPlaying ? theme.colors.primary : theme.colors.outline,
-                marginRight: 4,
-              }}
-            />
-            <Text
-              style={{
-                color: state.isPlaying ? theme.colors.primary : theme.colors.outline,
-                fontSize: 10,
-                fontWeight: '600',
-              }}
-            >
-              {state.isLoading ? 'Carregando...' : state.isPlaying ? 'Reproduzindo' : ''}
-            </Text>
-          </View>
-        )}
-      </View>
 
-      {/* Error Display */}
+      {/* Error Display - Enhanced */}
       {state.error && (
         <View
           style={{
             marginTop: 8,
-            padding: 8,
-            backgroundColor: theme.colors.errorContainer,
-            borderRadius: 6,
+            padding: 12,
+            backgroundColor: isDarkMode 
+              ? 'rgba(239, 68, 68, 0.15)' 
+              : 'rgba(239, 68, 68, 0.08)',
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: isDarkMode 
+              ? 'rgba(239, 68, 68, 0.3)' 
+              : 'rgba(239, 68, 68, 0.2)',
+            shadowColor: 'rgba(239, 68, 68, 0.1)',
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 1,
+            shadowRadius: 4,
+            elevation: 2,
           }}
         >
           <Text
             style={{
-              color: theme.colors.onErrorContainer,
-              fontSize: compact ? 11 : 12,
+              color: isDarkMode ? '#ef4444' : '#dc2626',
+              fontSize: compact ? 12 : 13,
               textAlign: 'center',
+              fontWeight: '600',
+              letterSpacing: 0.1,
             }}
           >
             {state.error}

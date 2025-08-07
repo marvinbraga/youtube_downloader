@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { View, Text, TouchableOpacity, LayoutChangeEvent } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 
@@ -32,6 +32,19 @@ export const VolumeControl: React.FC<VolumeControlProps> = ({
   const [showSlider, setShowSlider] = useState(false);
   const [sliderWidth, setSliderWidth] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
+
+  // Auto-fechar slider após 3 segundos
+  useEffect(() => {
+    let timeout: NodeJS.Timeout;
+    if (showSlider && !isDragging) {
+      timeout = setTimeout(() => {
+        setShowSlider(false);
+      }, 3000);
+    }
+    return () => {
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [showSlider, isDragging]);
 
   // Determinar ícone baseado no volume
   const getVolumeIcon = () => {
@@ -102,11 +115,7 @@ export const VolumeControl: React.FC<VolumeControlProps> = ({
         }}
         onPress={() => {
           if (!disabled) {
-            if (showSlider) {
-              handleMuteToggle();
-            } else {
-              setShowSlider(true);
-            }
+            setShowSlider(!showSlider);
           }
         }}
         onLongPress={() => !disabled && handleMuteToggle()}
@@ -262,21 +271,6 @@ export const VolumeControl: React.FC<VolumeControlProps> = ({
         </View>
       )}
 
-      {/* Overlay para fechar o slider */}
-      {showSlider && (
-        <TouchableOpacity
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            zIndex: 999,
-          }}
-          onPress={() => setShowSlider(false)}
-          activeOpacity={1}
-        />
-      )}
     </View>
   );
 };

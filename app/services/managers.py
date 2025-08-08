@@ -167,6 +167,9 @@ class AudioDownloadManager:
         try:
             logger.info(f"Registrando áudio para download: {url}")
             
+            # Recarregar dados do arquivo para garantir que temos a versão mais atual
+            self.audio_data = self._load_audio_data()
+            
             # Extrair ID e informações básicas do YouTube
             youtube_id = self.extract_youtube_id(url)
             if not youtube_id:
@@ -273,6 +276,9 @@ class AudioDownloadManager:
         """
         try:
             logger.info(f"Iniciando download de áudio: {url}")
+            
+            # Recarregar dados do arquivo para garantir que temos a versão mais atual
+            self.audio_data = self._load_audio_data()
             
             # Primeiro, vamos extrair as informações do vídeo para obter o ID do YouTube
             youtube_id = self.extract_youtube_id(url)
@@ -403,6 +409,9 @@ class AudioDownloadManager:
         """
         try:
             logger.info(f"Iniciando download real do áudio {audio_id}: {url}")
+            
+            # Recarregar dados do arquivo para garantir que temos a versão mais atual
+            self.audio_data = self._load_audio_data()
             
             # Notificar início via SSE
             if sse_manager:
@@ -595,6 +604,9 @@ class AudioDownloadManager:
         Returns:
             True se atualizado com sucesso, False caso contrário
         """
+        # Recarregar dados do arquivo para garantir que temos a versão mais atual
+        self.audio_data = self._load_audio_data()
+        
         for audio in self.audio_data["audios"]:
             if audio["id"] == audio_id:
                 # Verifica se o status é válido
@@ -759,6 +771,8 @@ class AudioDownloadManager:
             while not stop_monitoring.is_set():
                 current_progress = progress_data.get('current_progress', 0)
                 if current_progress != last_progress and current_progress > 0:
+                    # Recarregar dados antes de atualizar para evitar sobrescrever alterações
+                    self.audio_data = self._load_audio_data()
                     # Atualizar no arquivo JSON
                     for i, audio in enumerate(self.audio_data["audios"]):
                         if audio["id"] == audio_id:

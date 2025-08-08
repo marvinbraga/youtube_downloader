@@ -41,6 +41,7 @@ const AudioItem: React.FC<AudioItemProps> = ({
 }) => {
   const { colors, theme } = useTheme();
   const spinValue = useRef(new Animated.Value(0)).current;
+  const animationRef = useRef<Animated.CompositeAnimation | null>(null);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -132,24 +133,36 @@ const AudioItem: React.FC<AudioItemProps> = ({
   // Animação de rotação para o ícone de loading
   useEffect(() => {
     if (isTranscribing) {
-      const spinAnimation = Animated.loop(
-        Animated.timing(spinValue, {
-          toValue: 1,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-        { iterations: -1 } // Loop infinito explícito
-      );
-      spinAnimation.start();
-      
-      return () => {
-        spinAnimation.stop();
-        spinValue.setValue(0);
-      };
+      // Só inicia a animação se ela não estiver rodando
+      if (!animationRef.current) {
+        animationRef.current = Animated.loop(
+          Animated.timing(spinValue, {
+            toValue: 1,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+          { iterations: -1 } // Loop infinito explícito
+        );
+        animationRef.current.start();
+      }
     } else {
-      spinValue.setValue(0);
+      // Para a animação quando não está transcrevendo
+      if (animationRef.current) {
+        animationRef.current.stop();
+        animationRef.current = null;
+        spinValue.setValue(0);
+      }
     }
-  }, [isTranscribing, spinValue]);
+    
+    // Cleanup na desmontagem do componente
+    return () => {
+      if (animationRef.current) {
+        animationRef.current.stop();
+        animationRef.current = null;
+        spinValue.setValue(0);
+      }
+    };
+  }, [isTranscribing]);
 
   const spin = spinValue.interpolate({
     inputRange: [0, 1],

@@ -26,11 +26,79 @@ langchain-community = "^0.3.21"
 groq = "^0.22.0"
 pydub = "^0.25.1"
 sse-starlette = "^2.1.3"
+invoke = "^2.2.0"
 
 
 [tool.poetry.group.dev.dependencies]
 jupyter = "^1.1.1"
+pytest = "^8.0.0"
+pytest-asyncio = "^0.23.0"
+pytest-cov = "^4.1.0"
+pytest-html = "^4.1.0"
+pytest-mock = "^3.12.0"
+fakeredis = "^2.20.0"
+redis = "^5.0.0"
+coverage = "^7.4.0"
+psutil = "^5.9.0"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--cov=app",
+    "--cov-report=term-missing",
+    "--cov-report=html:htmlcov",
+    "--cov-report=xml:coverage.xml",
+    "--html=reports/pytest_report.html",
+    "--self-contained-html",
+    "-v"
+]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests", 
+    "performance: Performance tests",
+    "load: Load tests",
+    "migration: Migration tests",
+    "failover: Failover tests",
+    "slow: Slow running tests"
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning"
+]
+
+[tool.coverage.run]
+source = ["app"]
+omit = [
+    "*/tests/*",
+    "*/venv/*",
+    "*/__pycache__/*",
+    "*/migrations/*"
+]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:"
+]
+ignore_errors = true
+show_missing = true
+skip_covered = false
+precision = 2
+
+[tool.coverage.html]
+directory = "htmlcov"
+title = "Redis YouTube Downloader Coverage Report"

@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Progress Dashboard - Sistema de Monitoramento</title>
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/date-fns@2.29.3/index.min.js"></script>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Header -->
+        <header class="dashboard-header">
+            <div class="header-content">
+                <h1>Progress Dashboard</h1>
+                <div class="connection-status">
+                    <span id="connection-indicator" class="status-indicator disconnected"></span>
+                    <span id="connection-text">Disconnected</span>
+                </div>
+                <div class="header-actions">
+                    <button id="refresh-btn" class="btn btn-secondary">Refresh</button>
+                    <button id="export-btn" class="btn btn-primary">Export</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="dashboard-main">
+            <!-- Summary Cards -->
+            <section class="summary-section">
+                <div class="summary-cards">
+                    <div class="summary-card">
+                        <div class="card-icon">🔄</div>
+                        <div class="card-content">
+                            <h3>Active Tasks</h3>
+                            <span class="card-value" data-summary-stat="active_tasks">0</span>
+                        </div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="card-icon">⏳</div>
+                        <div class="card-content">
+                            <h3>Pending</h3>
+                            <span class="card-value" data-summary-stat="pending_tasks">0</span>
+                        </div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="card-icon">✅</div>
+                        <div class="card-content">
+                            <h3>Completed Today</h3>
+                            <span class="card-value" data-summary-stat="completed_today">0</span>
+                        </div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="card-icon">❌</div>
+                        <div class="card-content">
+                            <h3>Failed Today</h3>
+                            <span class="card-value" data-summary-stat="failed_today">0</span>
+                        </div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="card-icon">⚡</div>
+                        <div class="card-content">
+                            <h3>System Load</h3>
+                            <span class="card-value" data-summary-stat="system_load">Normal</span>
+                        </div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="card-icon">🔗</div>
+                        <div class="card-content">
+                            <h3>Redis Status</h3>
+                            <span class="card-value" data-summary-stat="redis_status">Unknown</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Main Grid -->
+            <section class="dashboard-grid">
+                <!-- Active Tasks -->
+                <div class="dashboard-panel">
+                    <div class="panel-header">
+                        <h2>Active Tasks</h2>
+                        <div class="panel-actions">
+                            <button class="btn-icon" id="collapse-active-tasks" title="Collapse">▼</button>
+                        </div>
+                    </div>
+                    <div class="panel-content" id="active-tasks-panel">
+                        <div class="active-tasks-list" id="active-tasks-list">
+                            <!-- Active tasks will be populated here -->
+                        </div>
+                        <div class="empty-state" id="active-tasks-empty">
+                            <p>No active tasks</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- System Metrics -->
+                <div class="dashboard-panel">
+                    <div class="panel-header">
+                        <h2>System Metrics</h2>
+                        <div class="panel-actions">
+                            <button class="btn-icon" id="collapse-metrics" title="Collapse">▼</button>
+                        </div>
+                    </div>
+                    <div class="panel-content" id="metrics-panel">
+                        <div class="metrics-grid">
+                            <div class="metric-item" data-metric="websocket_latency">
+                                <div class="metric-label">WebSocket Latency</div>
+                                <div class="metric-value">0</div>
+                                <div class="metric-unit">ms</div>
+                            </div>
+                            <div class="metric-item" data-metric="active_connections">
+                                <div class="metric-label">Connections</div>
+                                <div class="metric-value">0</div>
+                                <div class="metric-unit">count</div>
+                            </div>
+                            <div class="metric-item" data-metric="download_speed">
+                                <div class="metric-label">Avg Speed</div>
+                                <div class="metric-value">0</div>
+                                <div class="metric-unit">MB/s</div>
+                            </div>
+                            <div class="metric-item" data-metric="error_rate">
+                                <div class="metric-label">Error Rate</div>
+                                <div class="metric-value">0</div>
+                                <div class="metric-unit">%</div>
+                            </div>
+                            <div class="metric-item" data-metric="cpu_usage">
+                                <div class="metric-label">CPU Usage</div>
+                                <div class="metric-value">0</div>
+                                <div class="metric-unit">%</div>
+                            </div>
+                            <div class="metric-item" data-metric="memory_usage">
+                                <div class="metric-label">Memory Usage</div>
+                                <div class="metric-value">0</div>
+                                <div class="metric-unit">MB</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Performance Chart -->
+                <div class="dashboard-panel chart-panel">
+                    <div class="panel-header">
+                        <h2>Performance Trends</h2>
+                        <div class="panel-actions">
+                            <select id="chart-metric-selector">
+                                <option value="websocket_latency">Latency</option>
+                                <option value="download_speed">Download Speed</option>
+                                <option value="active_connections">Connections</option>
+                                <option value="cpu_usage">CPU Usage</option>
+                                <option value="memory_usage">Memory Usage</option>
+                            </select>
+                            <select id="chart-timerange-selector">
+                                <option value="1">Last Hour</option>
+                                <option value="6">Last 6 Hours</option>
+                                <option value="24">Last 24 Hours</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="panel-content">
+                        <canvas id="performance-chart" width="400" height="200"></canvas>
+                    </div>
+                </div>
+
+                <!-- System Alerts -->
+                <div class="dashboard-panel">
+                    <div class="panel-header">
+                        <h2>System Alerts</h2>
+                        <div class="panel-actions">
+                            <span class="alert-count" id="alert-count">0</span>
+                            <button class="btn-icon" id="clear-alerts" title="Clear All">🗑️</button>
+                        </div>
+                    </div>
+                    <div class="panel-content" id="alerts-panel">
+                        <div class="alerts-list" id="alerts-list">
+                            <!-- Alerts will be populated here -->
+                        </div>
+                        <div class="empty-state" id="alerts-empty">
+                            <p>No alerts</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Completed Tasks -->
+                <div class="dashboard-panel">
+                    <div class="panel-header">
+                        <h2>Recent Completed</h2>
+                        <div class="panel-actions">
+                            <button class="btn-icon" id="collapse-recent" title="Collapse">▼</button>
+                        </div>
+                    </div>
+                    <div class="panel-content" id="recent-tasks-panel">
+                        <div class="recent-tasks-list" id="recent-tasks-list">
+                            <!-- Recent tasks will be populated here -->
+                        </div>
+                        <div class="empty-state" id="recent-tasks-empty">
+                            <p>No recent completed tasks</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- System Health -->
+                <div class="dashboard-panel">
+                    <div class="panel-header">
+                        <h2>System Health</h2>
+                        <div class="panel-actions">
+                            <button class="btn-icon" id="refresh-health" title="Refresh Health">🔄</button>
+                        </div>
+                    </div>
+                    <div class="panel-content">
+                        <div class="health-status-grid">
+                            <div class="health-item" id="overall-health">
+                                <div class="health-label">Overall</div>
+                                <div class="health-status unknown">Unknown</div>
+                            </div>
+                            <div class="health-item" id="redis-health">
+                                <div class="health-label">Redis</div>
+                                <div class="health-status unknown">Unknown</div>
+                            </div>
+                            <div class="health-item" id="progress-manager-health">
+                                <div class="health-label">Progress Manager</div>
+                                <div class="health-status unknown">Unknown</div>
+                            </div>
+                            <div class="health-item" id="metrics-collector-health">
+                                <div class="health-label">Metrics Collector</div>
+                                <div class="health-status unknown">Unknown</div>
+                            </div>
+                            <div class="health-item" id="websocket-health">
+                                <div class="health-label">WebSocket</div>
+                                <div class="health-status unknown">Unknown</div>
+                            </div>
+                        </div>
+                        
+                        <div class="uptime-stats" id="uptime-stats">
+                            <div class="uptime-item">
+                                <span class="uptime-label">Uptime:</span>
+                                <span class="uptime-value" id="system-uptime">Unknown</span>
+                            </div>
+                            <div class="uptime-item">
+                                <span class="uptime-label">Requests:</span>
+                                <span class="uptime-value" id="total-requests">0</span>
+                            </div>
+                            <div class="uptime-item">
+                                <span class="uptime-label">Avg Response:</span>
+                                <span class="uptime-value" id="avg-response">0ms</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Progress Modal for Task Details -->
+    <div class="modal" id="task-details-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Task Details</h3>
+                <button class="modal-close" id="close-task-modal">&times;</button>
+            </div>
+            <div class="modal-body" id="task-details-content">
+                <!-- Task details will be populated here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications Container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">Loading dashboard data...</div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="/static/js/progress_client.js"></script>
+    <script src="/static/js/dashboard.js"></script>
+    
+    <script>
+        // Initialize dashboard when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            const dashboard = new ProgressDashboardApp({
+                websocketUrl: `ws://${window.location.host}/ws/progress`,
+                sseUrl: '/api/progress/stream',
+                apiBaseUrl: '/api',
+                debug: true
+            });
+            
+            dashboard.init();
+        });
+    </script>
+</body>
+</html>

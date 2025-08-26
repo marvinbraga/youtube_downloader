@@ -9,7 +9,22 @@
       "Bash(yt-dlp:*)",
       "Bash(curl:*)",
       "Bash(rm:*)",
-      "Bash(test:*)"
+      "Bash(test:*)",
+      "Read(/E:\\e\\python/**)",
+      "Read(/E:\\e\\python/**)",
+      "Read(/E:\\e\\python/**)",
+      "Bash(redis-server:*)",
+      "Bash(redis-cli:*)",
+      "Bash(where redis-server)",
+      "Bash(docker:*)",
+      "Bash(grep:*)",
+      "Bash(poetry show:*)",
+      "Bash(jq:*)",
+      "Bash(echo $REDIS_PORT)",
+      "Bash(sed:*)",
+      "Read(/E:\\E:\\python/**)",
+      "Bash(find:*)",
+      "Bash(timeout 10 python:*)"
     ],
     "deny": []
   }

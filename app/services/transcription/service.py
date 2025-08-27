@@ -121,14 +121,15 @@ class TranscriptionService:
         return len(intersection) / len(union)
     
     @staticmethod
-    def get_audio_manager() -> AudioDownloadManager:
+    def get_audio_manager():
         """
         Obtém uma instância do gerenciador de áudio
         
         Returns:
-            Instância do AudioDownloadManager
+            Instância do RedisAudioDownloadManager
         """
-        return AudioDownloadManager()
+        from app.services.redis_managers_adapter import RedisAudioDownloadManager
+        return RedisAudioDownloadManager()
     
     @staticmethod
     def find_audio_file(file_id: str) -> Path:
@@ -462,6 +463,7 @@ class TranscriptionService:
                             # Atualiza o status da transcrição
                             audio_manager.update_transcription_status(
                                 audio["id"], 
+                                "ended",
                                 str(filepath.relative_to(AUDIO_DIR.parent))
                             )
                             logger.debug(f"Status de transcrição atualizado para áudio: {audio['id']}")

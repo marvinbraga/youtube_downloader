@@ -24,7 +24,12 @@
       "Bash(pkill:*)",
       "Bash(true)",
       "Bash(timeout 10s npx expo start --port 8088)",
-      "Read(E:\\python\\youtube_downloader\\app/**)"
+      "Read(E:\\python\\youtube_downloader\\app/**)",
+      "Read(E:\\python\\youtube_downloader\\app/**)",
+      "Read(E:\\python\\youtube_downloader\\app/**)",
+      "Read(E:\\python\\youtube_downloader\\app\\uwtv/**)",
+      "Read(E:\\python\\youtube_downloader\\app/**)",
+      "Read(E:\\python\\youtube_downloader\\app\\services/**)"
     ],
     "deny": []
   }

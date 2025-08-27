@@ -8,7 +8,7 @@ import json
 import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Callable, Union
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from enum import Enum
 
 import redis.asyncio as redis
@@ -75,7 +75,7 @@ class TaskEvent:
             "task_type": self.task_type.value if hasattr(self.task_type, 'value') else self.task_type,
             "event_type": self.event_type,
             "status": self.status.value if hasattr(self.status, 'value') else self.status,
-            "progress": asdict(self.progress),
+            "progress": self.progress.__dict__ if hasattr(self.progress, '__dict__') else {},
             "message": self.message,
             "error": self.error,
             "metadata": self.metadata,
@@ -108,7 +108,7 @@ class TaskInfo:
             "task_id": self.task_id,
             "task_type": self.task_type.value if hasattr(self.task_type, 'value') else self.task_type,
             "status": self.status.value if hasattr(self.status, 'value') else self.status,
-            "progress": asdict(self.progress),
+            "progress": self.progress.__dict__ if hasattr(self.progress, '__dict__') else {},
             "created_at": self.created_at,
             "started_at": self.started_at,
             "updated_at": self.updated_at,
@@ -396,7 +396,7 @@ class RedisProgressManager:
         # Salvar tarefa atualizada
         task_key = f"{self.TASK_KEY_PREFIX}{task_id}"
         await self._redis.hset(task_key, mapping={
-            "data": json.dumps(asdict(task_info)),
+            "data": json.dumps(task_info.to_dict()),
             "last_update": now
         })
         
@@ -440,7 +440,7 @@ class RedisProgressManager:
         # Salvar tarefa atualizada
         task_key = f"{self.TASK_KEY_PREFIX}{task_id}"
         await self._redis.hset(task_key, mapping={
-            "data": json.dumps(asdict(task_info)),
+            "data": json.dumps(task_info.to_dict()),
             "last_update": now
         })
         

@@ -259,11 +259,11 @@ class DownloadQueue:
             
             # Aqui seria a integração com o AudioDownloadManager
             # Por enquanto, vamos simular um download
-            from app.services.managers import AudioDownloadManager
+            from app.services.redis_managers_adapter import RedisAudioDownloadManager
             from app.services.sse_manager import sse_manager
             
-            # Instanciar o AudioDownloadManager
-            audio_manager = AudioDownloadManager()
+            # Instanciar o RedisAudioDownloadManager
+            audio_manager = RedisAudioDownloadManager()
             
             # Callback para progresso
             async def progress_callback(progress):

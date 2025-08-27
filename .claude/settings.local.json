@@ -24,11 +24,16 @@
       "Bash(sed:*)",
       "Read(/E:\\E:\\python/**)",
       "Bash(find:*)",
-      "Bash(timeout 10 python:*)"
+      "Bash(timeout 10 python:*)",
+      "Bash(timeout:*)",
+      "Bash(del test_redis_audio_integrity.py redis_integrity_test_20250827_002205.json)",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_click"
     ],
     "deny": [],
     "additionalDirectories": [
-      "E:\\E\\python"
+      "E:\\E\\python",
+      "E:\\e\\python"
     ]
   }
 }

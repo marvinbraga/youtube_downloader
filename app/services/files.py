@@ -139,6 +139,10 @@ def load_json_audios() -> Dict:
                 # Adiciona mapeamentos específicos se estiverem no arquivo
                 for key, path in data.get("mappings", {}).items():
                     audio_mapping[key] = AUDIO_DIR.parent / path
+                
+                # Ensure mappings key exists for backward compatibility
+                if "mappings" not in data:
+                    data["mappings"] = {}
                     
                 return data
             return {"audios": [], "mappings": {}}
@@ -163,6 +167,10 @@ def scan_audio_directory() -> List[Dict]:
     # Processa cada áudio do JSON, verificando se o arquivo existe
     for audio in audio_data.get("audios", []):
         try:
+            # Pular entradas especiais como "stats" que não são arquivos de áudio
+            if not audio.get("path") or audio.get("id") == "stats":
+                continue
+                
             # Verificar se o arquivo existe
             audio_path = AUDIO_DIR.parent / audio["path"]
             if not audio_path.exists():

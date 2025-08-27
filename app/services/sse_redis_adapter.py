@@ -68,7 +68,9 @@ class SSERedisAdapter(SSEManager):
                     
                     if notification_type:
                         title = self._generate_notification_title(event)
-                        message = event.message or f"{event.event_type}: {event.progress.percentage:.1f}%"
+                        # Handle progress as dict or object
+                        progress_pct = event.progress.get('percentage', 0) if isinstance(event.progress, dict) else getattr(event.progress, 'percentage', 0)
+                        message = event.message or f"{event.event_type}: {progress_pct:.1f}%"
                         
                         # Determinar prioridade
                         priority = NotificationPriority.NORMAL
@@ -85,9 +87,9 @@ class SSERedisAdapter(SSEManager):
                             priority=priority,
                             data={
                                 "task_id": event.task_id,
-                                "task_type": event.task_type.value if hasattr(event.task_type, 'value') else event.task_type,
-                                "status": event.status.value if hasattr(event.status, 'value') else event.status,
-                                "progress": event.progress.percentage,
+                                "task_type": event.task_type.value if hasattr(event.task_type, 'value') else str(event.task_type),
+                                "status": event.status.value if hasattr(event.status, 'value') else str(event.status),
+                                "progress": event.progress.get('percentage', 0) if isinstance(event.progress, dict) else getattr(event.progress, 'percentage', 0),
                                 "timestamp": event.timestamp
                             }
                         )
@@ -124,7 +126,7 @@ class SSERedisAdapter(SSEManager):
             TaskType.UPLOAD: "Upload"
         }
         
-        task_name = task_type_names.get(event.task_type, event.task_type.value)
+        task_name = task_type_names.get(event.task_type, event.task_type.value if hasattr(event.task_type, 'value') else str(event.task_type))
         
         if event.status == TaskStatus.RUNNING and event.event_type == "started":
             return f"{task_name} Iniciado"

@@ -84,24 +84,58 @@ class RedisAudioDownloadManager:
     
     async def _load_audio_data_redis(self) -> Dict[str, Any]:
         """
-        Carrega dados de áudio do Redis
+        Carrega dados de áudio do Redis e ajusta formato para compatibilidade
         """
         try:
             audios = await self.redis_manager.get_all_audios()
             
-            # Construir mappings para compatibilidade
+            # Processar cada áudio para compatibilidade com o formato esperado
+            processed_audios = []
             mappings = {}
+            
             for audio in audios:
+                # Criar cópia do áudio com campos ajustados
+                processed_audio = dict(audio)
+                
+                # Adicionar campo 'name' baseado no 'title' (compatibilidade com frontend)
+                if 'title' in processed_audio and 'name' not in processed_audio:
+                    processed_audio['name'] = processed_audio['title']
+                
+                # Converter campos numéricos se necessário
+                if 'filesize' in processed_audio and isinstance(processed_audio['filesize'], str):
+                    try:
+                        processed_audio['size'] = int(processed_audio['filesize'])
+                    except ValueError:
+                        processed_audio['size'] = 0
+                
+                # Converter campos boolean
+                if 'has_transcription' in processed_audio:
+                    has_transcription = processed_audio['has_transcription']
+                    if isinstance(has_transcription, str):
+                        processed_audio['has_transcription'] = has_transcription.lower() == 'true'
+                
+                # Adicionar source field (compatibilidade)
+                if 'url' in processed_audio and processed_audio.get('url'):
+                    processed_audio['source'] = 'YOUTUBE'
+                else:
+                    processed_audio['source'] = 'LOCAL'
+                
+                processed_audios.append(processed_audio)
+                
+                # Construir mappings para compatibilidade
                 audio_id = audio.get('id')
                 path = audio.get('path')
                 if audio_id and path:
                     mappings[audio_id] = path
                     # Adicionar keywords também
                     for keyword in audio.get('keywords', []):
-                        mappings[keyword] = path
+                        if keyword:
+                            mappings[keyword] = path
+            
+            logger.debug(f"Processados {len(processed_audios)} áudios do Redis com campos de compatibilidade")
             
             return {
-                "audios": audios,
+                "audios": processed_audios,
                 "mappings": mappings
             }
         except Exception as e:
@@ -409,6 +443,54 @@ class RedisAudioDownloadManager:
                 return audio
         
         return None
+    
+    @property  
+    def audio_data(self) -> Dict[str, Any]:
+        """
+        Propriedade para compatibilidade com código existente.
+        NOTA: Para uso em contextos assíncronos, use get_audio_data_async()
+        
+        Returns:
+            Dict com estrutura {"audios": [...], "mappings": {...}}
+        """
+        if not self.use_redis:
+            # Se não está usando Redis, usar JSON
+            if not hasattr(self, '_audio_data_cache'):
+                self._audio_data_cache = self._load_audio_data_json()
+            return self._audio_data_cache
+        else:
+            # Para Redis, tentar usar dados em cache ou fallback para JSON
+            logger.warning("audio_data property accessed in Redis mode. This is not optimal for performance.")
+            logger.info("Consider using get_audio_data_async() instead for better performance.")
+            
+            # Tentar carregar do JSON como fallback
+            try:
+                return self._load_audio_data_json()
+            except Exception as e:
+                logger.error(f"Error loading JSON fallback data: {e}")
+                return {"audios": [], "mappings": {}}
+    
+    async def get_audio_data_async(self) -> Dict[str, Any]:
+        """
+        Método assíncrono para obter dados de áudio.
+        Funciona tanto com Redis quanto JSON.
+        
+        Returns:
+            Dict com estrutura {"audios": [...], "mappings": {...}}
+        """
+        if self.use_redis:
+            try:
+                return await self._load_audio_data_redis()
+            except Exception as e:
+                logger.error(f"Erro ao carregar dados Redis: {str(e)}")
+                # Fallback para JSON se Redis falhar
+                try:
+                    return self._load_audio_data_json()
+                except Exception as json_error:
+                    logger.error(f"Erro ao carregar dados JSON: {str(json_error)}")
+                    return {"audios": [], "mappings": {}}
+        else:
+            return self._load_audio_data_json()
     
     def update_transcription_status(self, audio_id: str, status: str, transcription_path: str = None) -> bool:
         """

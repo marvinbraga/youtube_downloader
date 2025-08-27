@@ -17,7 +17,8 @@ from app.models.video import TokenData, ClientAuth, SortOption
 from app.models.audio import AudioDownloadRequest, TranscriptionRequest, TranscriptionResponse, TranscriptionProvider
 from app.services.configs import video_mapping, AUDIO_DIR, audio_mapping
 from app.services.files import scan_video_directory, generate_video_stream, scan_audio_directory, generate_audio_stream
-from app.services.managers import VideoStreamManager, AudioDownloadManager
+from app.services.managers import VideoStreamManager
+from app.services.redis_managers_adapter import RedisAudioDownloadManager
 from app.services.securities import AUTHORIZED_CLIENTS, create_access_token, verify_token, verify_token_sync, ACCESS_TOKEN_EXPIRE_MINUTES
 from app.services.transcription.service import TranscriptionService
 from app.services.sse_manager import sse_manager
@@ -48,7 +49,7 @@ app.middleware("http")(redis_fallback_middleware)
 
 # Instâncias globais dos gerenciadores
 stream_manager = VideoStreamManager()
-audio_manager = AudioDownloadManager()
+audio_manager = RedisAudioDownloadManager()
 
 # Executa a migração de has_transcription para transcription_status se necessário
 try:
@@ -245,7 +246,13 @@ async def check_audio_exists(
             return {"exists": False, "message": "URL inválida ou não reconhecida"}
         
         # Verifica se existe algum áudio com este ID do YouTube
-        for audio in audio_manager.audio_data["audios"]:
+        # Usar método apropriado dependendo do backend ativo
+        if redis_integration_success and audio_manager.use_redis:
+            audio_data = await audio_manager.get_audio_data_async()
+        else:
+            audio_data = audio_manager.audio_data
+        
+        for audio in audio_data.get("audios", []):
             if audio.get("youtube_id") == youtube_id:
                 # Verifica se o download foi completado com sucesso
                 download_status = audio.get("download_status", "unknown")
@@ -355,12 +362,19 @@ async def list_audio_files(
 ):
     """
     Lista todos os arquivos de áudio disponíveis (requer autenticação)
-    Usa o arquivo data/audios.json como fonte de dados
+    Usa Redis quando disponível, ou fallback para JSON
     """
     try:
-        
-        # Carrega os dados do arquivo audios.json usando a função scan_audio_directory
-        audio_files = scan_audio_directory()
+        # Verificar se o sistema Redis está ativo
+        if redis_integration_success and audio_manager.use_redis:
+            # Usar dados do Redis através do manager (método assíncrono)
+            audio_data = await audio_manager.get_audio_data_async()
+            audio_files = audio_data.get("audios", [])
+            logger.debug(f"Listando {len(audio_files)} áudios do Redis")
+        else:
+            # Usar função original com JSON
+            audio_files = scan_audio_directory()
+            logger.debug(f"Listando {len(audio_files)} áudios do JSON")
         
         return {"audio_files": audio_files}
     except Exception as e:
@@ -489,27 +503,26 @@ async def transcribe_audio(
             audio_manager.update_transcription_status(audio_info["id"], "started")
             
         # Cria uma tarefa em segundo plano para transcrição
-        def transcribe_task():
-            async def async_transcribe_task():
-                try:
-                    # Iniciar tarefa no Redis (se disponível)
-                    if redis_progress_manager:
-                        await redis_progress_manager.start_task(
-                            request.file_id, 
-                            f"Iniciando transcrição com {request.provider}"
-                        )
-                        
-                        # Atualizar progresso inicial
-                        await redis_progress_manager.update_progress(
-                            request.file_id,
-                            ProgressMetrics(
-                                percentage=0.0,
-                                current_step="Preparando transcrição",
-                                total_steps=3,
-                                step_progress=0.0
-                            ),
-                            "Preparando transcrição do arquivo de áudio"
-                        )
+        async def async_transcribe_task():
+            try:
+                # Iniciar tarefa no Redis (se disponível)
+                if redis_progress_manager:
+                    await redis_progress_manager.start_task(
+                        request.file_id, 
+                        f"Iniciando transcrição com {request.provider}"
+                    )
+                    
+                    # Atualizar progresso inicial
+                    await redis_progress_manager.update_progress(
+                        request.file_id,
+                        ProgressMetrics(
+                            percentage=0.0,
+                            current_step="Preparando transcrição",
+                            total_steps=3,
+                            step_progress=0.0
+                        ),
+                        "Preparando transcrição do arquivo de áudio"
+                    )
                     
                     # Converte o provedor de string para enum
                     provider = TranscriptionProvider(request.provider)
@@ -593,27 +606,24 @@ async def transcribe_audio(
                             
                         logger.error(error_msg)
                         
-                except Exception as e:
-                    error_msg = f"Erro na tarefa de transcrição: {str(e)}"
-                    
-                    # Em caso de erro, atualiza o status para "error"
-                    if audio_info:
-                        audio_manager.update_transcription_status(audio_info["id"], "error")
-                    
-                    if redis_progress_manager:
-                        await redis_progress_manager.fail_task(
-                            request.file_id,
-                            str(e),
-                            "Erro durante a transcrição"
-                        )
-                    
-                    logger.exception(error_msg)
-            
-            # Executar tarefa assíncrona
-            asyncio.run(async_transcribe_task())
+            except Exception as e:
+                error_msg = f"Erro na tarefa de transcrição: {str(e)}"
                 
-        # Adiciona a tarefa em segundo plano
-        background_tasks.add_task(transcribe_task)
+                # Em caso de erro, atualiza o status para "error"
+                if audio_info:
+                    audio_manager.update_transcription_status(audio_info["id"], "error")
+                
+                if redis_progress_manager:
+                    await redis_progress_manager.fail_task(
+                        request.file_id,
+                        str(e),
+                        "Erro durante a transcrição"
+                    )
+                
+                logger.exception(error_msg)
+                
+        # Adiciona a tarefa em segundo plano usando asyncio.create_task
+        asyncio.create_task(async_transcribe_task())
         
         return TranscriptionResponse(
             file_id=request.file_id,

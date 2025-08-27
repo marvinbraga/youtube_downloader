@@ -1,7 +1,8 @@
 import os
 import re
+import asyncio
 from pathlib import Path
-from typing import List, Optional, Union, Dict, Iterable, Any
+from typing import List, Optional, Union, Dict, Iterable, Any, Callable, Awaitable
 
 from loguru import logger
 from langchain_community.document_loaders.blob_loaders import FileSystemBlobLoader
@@ -234,14 +235,92 @@ class TranscriptionService:
         raise FileNotFoundError(f"Arquivo de áudio não encontrado: {file_id}")
     
     @staticmethod
-    def transcribe_audio(
+    async def transcribe_audio(
+        file_path: str, 
+        provider: TranscriptionProvider = TranscriptionProvider.GROQ,
+        language: str = "pt",
+        progress_callback: Optional[Callable[[int, str], Awaitable[None]]] = None,
+        **kwargs
+    ) -> List[Dict]:
+        """
+        Transcreve um arquivo de áudio.
+        
+        Args:
+            file_path: Caminho para o arquivo de áudio
+            provider: Provedor de transcrição a ser usado
+            language: Idioma do áudio
+            progress_callback: Função assíncrona opcional para reportar progresso
+                             Signature: async def callback(percentage: int, message: str) -> None
+            **kwargs: Argumentos adicionais para o provedor de transcrição
+            
+        Returns:
+            Lista de documentos com a transcrição
+        """
+        try:
+            logger.info(f"Iniciando transcrição de áudio com provedor: {provider}")
+            logger.debug(f"Arquivo de áudio: {file_path}")
+            
+            # Helper para chamadas de progresso
+            async def report_progress(percentage: int, message: str):
+                if progress_callback:
+                    try:
+                        await progress_callback(percentage, message)
+                    except Exception as e:
+                        logger.warning(f"Erro no callback de progresso: {e}")
+            
+            # 10%: Após obter parser
+            await report_progress(10, "Configurando provedor de transcrição...")
+            parser = TranscriptionFactory.get_instance(
+                name=provider,
+                lang=language,
+                **kwargs
+            )
+            
+            # 30%: Após carregar arquivo
+            await report_progress(30, "Carregando arquivo de áudio...")
+            loader = GenericLoader(
+                blob_loader=AudioLoader(file_path=file_path),
+                blob_parser=parser,
+            )
+            
+            # 70%: Durante processamento
+            await report_progress(70, "Processando transcrição...")
+            docs = loader.load()
+            
+            if not docs:
+                logger.warning("Nenhum documento foi gerado na transcrição")
+                return []
+            
+            # 90%: Antes de retornar resultado
+            await report_progress(90, "Finalizando transcrição...")
+            
+            # Simula um pequeno delay para permitir que o progresso seja processado
+            await asyncio.sleep(0.1)
+            
+            # 100%: Transcrição completa
+            await report_progress(100, "Transcrição concluída com sucesso")
+            
+            logger.success(f"Transcrição concluída com sucesso: {len(docs)} documentos")
+            return docs
+            
+        except Exception as e:
+            logger.exception(f"Erro na transcrição: {str(e)}")
+            if progress_callback:
+                try:
+                    await progress_callback(0, f"Erro na transcrição: {str(e)}")
+                except:
+                    pass
+            raise
+
+    @staticmethod
+    def transcribe_audio_sync(
         file_path: str, 
         provider: TranscriptionProvider = TranscriptionProvider.GROQ,
         language: str = "pt",
         **kwargs
     ) -> List[Dict]:
         """
-        Transcreve um arquivo de áudio.
+        Versão síncrona da transcrição de áudio para backward compatibility.
         
         Args:
             file_path: Caminho para o arquivo de áudio
@@ -253,7 +332,58 @@ class TranscriptionService:
             Lista de documentos com a transcrição
         """
         try:
-            logger.info(f"Iniciando transcrição de áudio com provedor: {provider}")
+            # Tenta usar asyncio.run se não há loop ativo
+            return asyncio.run(TranscriptionService.transcribe_audio(
+                file_path=file_path,
+                provider=provider,
+                language=language,
+                progress_callback=None,
+                **kwargs
+            ))
+        except RuntimeError as e:
+            if "asyncio.run() cannot be called from a running event loop" in str(e):
+                # Se já há um loop ativo, usa get_event_loop e run_until_complete
+                try:
+                    loop = asyncio.get_event_loop()
+                    return loop.run_until_complete(TranscriptionService.transcribe_audio(
+                        file_path=file_path,
+                        provider=provider,
+                        language=language,
+                        progress_callback=None,
+                        **kwargs
+                    ))
+                except:
+                    # Como última alternativa, implementa versão síncrona diretamente
+                    return TranscriptionService._transcribe_audio_sync_fallback(
+                        file_path=file_path,
+                        provider=provider,
+                        language=language,
+                        **kwargs
+                    )
+            else:
+                raise
+    
+    @staticmethod
+    def _transcribe_audio_sync_fallback(
+        file_path: str, 
+        provider: TranscriptionProvider = TranscriptionProvider.GROQ,
+        language: str = "pt",
+        **kwargs
+    ) -> List[Dict]:
+        """
+        Implementação síncrona de fallback para transcrição de áudio.
+        
+        Args:
+            file_path: Caminho para o arquivo de áudio
+            provider: Provedor de transcrição a ser usado
+            language: Idioma do áudio
+            **kwargs: Argumentos adicionais para o provedor de transcrição
+            
+        Returns:
+            Lista de documentos com a transcrição
+        """
+        try:
+            logger.info(f"Iniciando transcrição de áudio com provedor: {provider} (modo síncrono)")
             logger.debug(f"Arquivo de áudio: {file_path}")
             
             # Obtém o parser apropriado usando a fábrica

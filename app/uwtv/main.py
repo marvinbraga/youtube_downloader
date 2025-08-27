@@ -28,6 +28,7 @@ from app.api.sse_integration import create_progress_stream, redis_sse_manager
 from app.services.hybrid_mode_manager import hybrid_mode_manager
 from app.services.api_performance_monitor import api_performance_monitor
 from app.middleware.redis_fallback import redis_fallback_middleware
+from app.services.redis_progress_manager import RedisProgressManager, TaskType, TaskStatus, ProgressMetrics, get_progress_manager
 
 app = FastAPI(title="Video Streaming API")
 
@@ -455,48 +456,161 @@ async def transcribe_audio(
                 message="Transcrição já existe"
             )
             
+        # Integração Redis para tracking de progresso (se disponível)
+        redis_progress_manager = None
+        if redis_integration_success:
+            try:
+                # Obter instância do Redis Progress Manager
+                redis_progress_manager = await get_progress_manager()
+                
+                # Criar task no Redis
+                task_metadata = {
+                    "file_id": request.file_id,
+                    "provider": request.provider,
+                    "language": request.language,
+                    "audio_path": str(audio_path),
+                    "transcription_path": str(transcription_file)
+                }
+                
+                await redis_progress_manager.create_task(
+                    task_id=request.file_id,
+                    task_type=TaskType.TRANSCRIPTION,
+                    metadata=task_metadata
+                )
+                
+                logger.info(f"Tarefa de transcrição criada no Redis: {request.file_id}")
+                
+            except Exception as e:
+                logger.warning(f"Falha ao criar tarefa Redis para transcrição: {e}")
+                redis_progress_manager = None
+        
         # Atualiza o status para "started" antes de iniciar a transcrição
         if audio_info:
             audio_manager.update_transcription_status(audio_info["id"], "started")
             
         # Cria uma tarefa em segundo plano para transcrição
         def transcribe_task():
-            try:
-                # Converte o provedor de string para enum
-                provider = TranscriptionProvider(request.provider)
-                
-                # Transcreve o áudio
-                docs = TranscriptionService.transcribe_audio(
-                    file_path=str(audio_path),
-                    provider=provider,
-                    language=request.language
-                )
-                
-                # Salva a transcrição
-                if docs:
-                    output_path = str(transcription_file)
-                    transcription_path = TranscriptionService.save_transcription(docs, output_path)
-                    
-                    # Atualiza o status no gerenciador se houver ID
-                    if audio_info:
-                        rel_path = Path(transcription_path).relative_to(AUDIO_DIR.parent)
-                        audio_manager.update_transcription_status(
-                            audio_info["id"], 
-                            "ended",
-                            str(rel_path)
+            async def async_transcribe_task():
+                try:
+                    # Iniciar tarefa no Redis (se disponível)
+                    if redis_progress_manager:
+                        await redis_progress_manager.start_task(
+                            request.file_id, 
+                            f"Iniciando transcrição com {request.provider}"
                         )
                         
-                    logger.success(f"Transcrição concluída: {output_path}")
-                else:
-                    # Se não gerou conteúdo, atualiza para status de erro
+                        # Atualizar progresso inicial
+                        await redis_progress_manager.update_progress(
+                            request.file_id,
+                            ProgressMetrics(
+                                percentage=0.0,
+                                current_step="Preparando transcrição",
+                                total_steps=3,
+                                step_progress=0.0
+                            ),
+                            "Preparando transcrição do arquivo de áudio"
+                        )
+                    
+                    # Converte o provedor de string para enum
+                    provider = TranscriptionProvider(request.provider)
+                    
+                    # Callback de progresso assíncrono para Redis
+                    async def progress_callback(progress: float, message: str = "", step: str = ""):
+                        if redis_progress_manager:
+                            try:
+                                await redis_progress_manager.update_progress(
+                                    request.file_id,
+                                    ProgressMetrics(
+                                        percentage=progress,
+                                        current_step=step or message,
+                                        total_steps=3,
+                                        step_progress=progress % 33.33
+                                    ),
+                                    message
+                                )
+                            except Exception as e:
+                                logger.warning(f"Erro ao atualizar progresso Redis: {e}")
+                    
+                    # Notificar início da transcrição
+                    if redis_progress_manager:
+                        await progress_callback(10.0, "Iniciando processamento do áudio", "Processando áudio")
+                    
+                    # Wrapper para compatibilidade de callback
+                    async def transcription_progress_callback(percentage: int, message: str):
+                        await progress_callback(float(percentage), message, "Processando transcrição")
+                    
+                    # Transcreve o áudio
+                    docs = await TranscriptionService.transcribe_audio(
+                        file_path=str(audio_path),
+                        provider=provider,
+                        language=request.language,
+                        progress_callback=transcription_progress_callback
+                    )
+                    
+                    # Notificar progresso da transcrição
+                    if redis_progress_manager:
+                        await progress_callback(70.0, "Processando transcrição", "Gerando texto")
+                    
+                    # Salva a transcrição
+                    if docs:
+                        output_path = str(transcription_file)
+                        transcription_path = TranscriptionService.save_transcription(docs, output_path)
+                        
+                        # Notificar progresso de salvamento
+                        if redis_progress_manager:
+                            await progress_callback(90.0, "Salvando transcrição", "Finalizando")
+                        
+                        # Atualiza o status no gerenciador se houver ID
+                        if audio_info:
+                            rel_path = Path(transcription_path).relative_to(AUDIO_DIR.parent)
+                            audio_manager.update_transcription_status(
+                                audio_info["id"], 
+                                "ended",
+                                str(rel_path)
+                            )
+                        
+                        # Completar tarefa no Redis
+                        if redis_progress_manager:
+                            await redis_progress_manager.complete_task(
+                                request.file_id,
+                                f"Transcrição concluída com sucesso: {Path(transcription_path).name}"
+                            )
+                            
+                        logger.success(f"Transcrição concluída: {output_path}")
+                    else:
+                        # Se não gerou conteúdo, atualiza para status de erro
+                        error_msg = "Falha na transcrição: nenhum conteúdo gerado"
+                        
+                        if audio_info:
+                            audio_manager.update_transcription_status(audio_info["id"], "error")
+                        
+                        if redis_progress_manager:
+                            await redis_progress_manager.fail_task(
+                                request.file_id,
+                                error_msg,
+                                "Transcrição não gerou conteúdo"
+                            )
+                            
+                        logger.error(error_msg)
+                        
+                except Exception as e:
+                    error_msg = f"Erro na tarefa de transcrição: {str(e)}"
+                    
+                    # Em caso de erro, atualiza o status para "error"
                     if audio_info:
                         audio_manager.update_transcription_status(audio_info["id"], "error")
-                    logger.error(f"Falha na transcrição: nenhum conteúdo gerado")
-            except Exception as e:
-                # Em caso de erro, atualiza o status para "error"
-                if audio_info:
-                    audio_manager.update_transcription_status(audio_info["id"], "error")
-                logger.exception(f"Erro na tarefa de transcrição: {str(e)}")
+                    
+                    if redis_progress_manager:
+                        await redis_progress_manager.fail_task(
+                            request.file_id,
+                            str(e),
+                            "Erro durante a transcrição"
+                        )
+                    
+                    logger.exception(error_msg)
+            
+            # Executar tarefa assíncrona
+            asyncio.run(async_transcribe_task())
                 
         # Adiciona a tarefa em segundo plano
         background_tasks.add_task(transcribe_task)

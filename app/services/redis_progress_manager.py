@@ -67,6 +67,20 @@ class TaskEvent:
             self.timestamp = datetime.now().isoformat()
         if not self.metadata:
             self.metadata = {}
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Converte TaskEvent para dicionário serializável em JSON"""
+        return {
+            "task_id": self.task_id,
+            "task_type": self.task_type.value if hasattr(self.task_type, 'value') else self.task_type,
+            "event_type": self.event_type,
+            "status": self.status.value if hasattr(self.status, 'value') else self.status,
+            "progress": asdict(self.progress),
+            "message": self.message,
+            "error": self.error,
+            "metadata": self.metadata,
+            "timestamp": self.timestamp
+        }
 
 
 @dataclass
@@ -87,6 +101,22 @@ class TaskInfo:
     def __post_init__(self):
         if not self.metadata:
             self.metadata = {}
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Converte TaskInfo para dicionário serializável em JSON"""
+        return {
+            "task_id": self.task_id,
+            "task_type": self.task_type.value if hasattr(self.task_type, 'value') else self.task_type,
+            "status": self.status.value if hasattr(self.status, 'value') else self.status,
+            "progress": asdict(self.progress),
+            "created_at": self.created_at,
+            "started_at": self.started_at,
+            "updated_at": self.updated_at,
+            "completed_at": self.completed_at,
+            "error": self.error,
+            "metadata": self.metadata,
+            "events_count": self.events_count
+        }
 
 
 class RedisProgressManager:
@@ -238,7 +268,7 @@ class RedisProgressManager:
             # Salvar no Redis
             task_key = f"{self.TASK_KEY_PREFIX}{task_id}"
             await self._redis.hset(task_key, mapping={
-                "data": json.dumps(asdict(task_info)),
+                "data": json.dumps(task_info.to_dict()),
                 "created_at": now,
                 "last_update": now
             })
@@ -431,7 +461,7 @@ class RedisProgressManager:
     async def _publish_event(self, event: TaskEvent) -> None:
         """Publica evento no canal pub/sub"""
         try:
-            event_data = json.dumps(asdict(event))
+            event_data = json.dumps(event.to_dict())
             await self._redis.publish(self.PROGRESS_CHANNEL, event_data)
         except Exception as e:
             logger.error(f"Erro ao publicar evento: {e}")
@@ -440,7 +470,7 @@ class RedisProgressManager:
         """Armazena evento na timeline"""
         try:
             events_key = f"{self.EVENTS_KEY_PREFIX}{event.task_id}"
-            event_data = json.dumps(asdict(event))
+            event_data = json.dumps(event.to_dict())
             
             # Adicionar evento à lista
             await self._redis.lpush(events_key, event_data)

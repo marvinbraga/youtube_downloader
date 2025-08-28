@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from './AuthContext';
-import { cancelDownloadTask, getQueueTasks } from '../services/api';
+import { cancelDownloadTask, getQueueTasks, retryDownloadTask } from '../services/api';
 
 interface DownloadProgress {
   audioId: string;
@@ -332,7 +332,7 @@ export const DownloadProvider: React.FC<DownloadProviderProps> = ({ children }) 
       }
 
       // Retry da primeira task falhada
-      const result = await retryDownload(failedTasks[0].id);
+      const result = await retryDownloadTask(failedTasks[0].id);
       console.log('Retry executado:', result);
       return result;
     } catch (error) {

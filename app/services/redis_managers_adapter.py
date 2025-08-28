@@ -707,7 +707,8 @@ class RedisAudioDownloadManager:
             
             # Configurações avançadas do yt-dlp para contornar bloqueios do YouTube
             ydl_opts = {
-                'format': 'ba[ext=m4a]/ba[ext=webm]/ba[ext=mp4]/ba/b[ext=m4a]/b[ext=webm]/b[ext=mp4]/bestaudio/best',
+                # Configuração simples baseada no manager original funcionando
+                'format': 'bestaudio/best',
                 'outtmpl': str(download_dir / '%(title)s.%(ext)s'),
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
@@ -715,51 +716,18 @@ class RedisAudioDownloadManager:
                     'preferredquality': '192',
                 }],
                 'progress_hooks': [simple_progress_hook],
-                
-                # Configurações de timeout e retry robustas
                 'socket_timeout': 30,
-                'retries': 15,
-                'fragment_retries': 15,
-                'retry_sleep': 'linear:1:3',  # Sleep progressivo: 1s, 2s, 3s entre retries
-                'skip_unavailable_fragments': True,
+                'retries': 10,
+                'fragment_retries': 10,
                 'nocheckcertificate': True,
                 'ignoreerrors': False,
                 'verbose': True,
                 'noplaylist': True,
-                
-                # Rate limiting para evitar detecção de bot
-                'sleep_interval': 1,
-                'sleep_interval_requests': 1,
-                'max_sleep_interval': 5,
-                'sleep_interval_subtitles': 0,
-                
-                # Headers HTTP modernizados para Chrome 131
                 'http_headers': {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                    'Accept-Language': 'pt,en;q=0.9,en-US;q=0.8',
-                    'Accept-Encoding': 'gzip, deflate, br, zstd',
-                    'Cache-Control': 'no-cache',
-                    'Pragma': 'no-cache',
-                    'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-                    'Sec-Ch-Ua-Mobile': '?0',
-                    'Sec-Ch-Ua-Platform': '"Windows"',
-                    'Sec-Fetch-Dest': 'document',
-                    'Sec-Fetch-Mode': 'navigate',
-                    'Sec-Fetch-Site': 'none',
-                    'Sec-Fetch-User': '?1',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.5',
                     'DNT': '1',
-                    'Upgrade-Insecure-Requests': '1',
-                },
-                
-                # Configurações avançadas do extrator YouTube
-                'extractor_args': {
-                    'youtube': {
-                        'skip': ['dash', 'hls'],
-                        'player_client': ['android_creator', 'web', 'android', 'ios'],
-                        'player_skip': ['configs'],
-                        'lang': ['pt', 'en'],
-                    }
                 }
             }
             

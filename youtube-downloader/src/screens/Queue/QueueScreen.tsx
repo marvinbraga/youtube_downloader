@@ -80,13 +80,27 @@ const QueueScreen: React.FC = () => {
     }
   }, [authState.isAuthenticated, authState.isLoading, login, loadQueueData]);
 
-  // Auto-refresh a cada 5 segundos
+  // Auto-refresh inteligente - apenas se houver atividade
   useEffect(() => {
     if (authState.isAuthenticated) {
-      const interval = setInterval(loadQueueData, 5000);
-      return () => clearInterval(interval);
+      const hasActiveDownloads = queueStatus && (
+        queueStatus.queued > 0 || 
+        queueStatus.downloading > 0 || 
+        queueStatus.retrying > 0 ||
+        queueStatus.active_slots > 0
+      );
+      
+      if (hasActiveDownloads) {
+        // Polling rápido se há downloads ativos
+        const interval = setInterval(loadQueueData, 2000);
+        return () => clearInterval(interval);
+      } else {
+        // Polling lento se não há atividade
+        const interval = setInterval(loadQueueData, 10000);
+        return () => clearInterval(interval);
+      }
     }
-  }, [authState.isAuthenticated, loadQueueData]);
+  }, [authState.isAuthenticated, loadQueueData, queueStatus]);
 
   // Função para pull-to-refresh
   const onRefresh = useCallback(() => {

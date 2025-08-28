@@ -33,7 +33,10 @@
       "Bash(dir:*)",
       "WebSearch",
       "WebSearch",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(git log:*)",
+      "Bash(git restore:*)",
+      "Bash(echo $USE_REDIS)"
     ],
     "deny": [],
     "additionalDirectories": [

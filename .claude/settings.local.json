@@ -28,7 +28,9 @@
       "Bash(timeout:*)",
       "Bash(del test_redis_audio_integrity.py redis_integrity_test_20250827_002205.json)",
       "mcp__playwright__browser_navigate",
-      "mcp__playwright__browser_click"
+      "mcp__playwright__browser_click",
+      "Bash(where redis-cli)",
+      "Bash(dir:*)"
     ],
     "deny": [],
     "additionalDirectories": [

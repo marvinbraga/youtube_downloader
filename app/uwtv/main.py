@@ -16,19 +16,19 @@ import uuid
 from app.models.video import TokenData, ClientAuth, SortOption
 from app.models.audio import AudioDownloadRequest, TranscriptionRequest, TranscriptionResponse, TranscriptionProvider
 from app.services.configs import video_mapping, AUDIO_DIR, audio_mapping
-from app.services.files import scan_video_directory, generate_video_stream, scan_audio_directory, generate_audio_stream
+from app.services.files import scan_video_directory, generate_video_stream, generate_audio_stream
 from app.services.managers import VideoStreamManager
 from app.services.redis_managers_adapter import RedisAudioDownloadManager
 from app.services.securities import AUTHORIZED_CLIENTS, create_access_token, verify_token, verify_token_sync, ACCESS_TOKEN_EXPIRE_MINUTES
 from app.services.transcription.service import TranscriptionService
 from app.services.sse_manager import sse_manager
 from app.services.download_queue import download_queue, DownloadTask
-from app.services.integration_patch import auto_apply_redis_integration, is_redis_integration_active, get_integration_health
+from app.services.integration_patch import auto_apply_redis_integration, get_integration_health
 from app.api.redis_endpoints import redis_api_endpoints
 from app.api.sse_integration import create_progress_stream, redis_sse_manager
 from app.services.hybrid_mode_manager import hybrid_mode_manager
 from app.services.api_performance_monitor import api_performance_monitor
-from app.middleware.redis_fallback import redis_fallback_middleware
+# Redis fallback middleware removido - Redis obrigatório
 from app.services.redis_progress_manager import RedisProgressManager, TaskType, TaskStatus, ProgressMetrics, get_progress_manager
 
 app = FastAPI(title="Video Streaming API")
@@ -44,8 +44,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Adiciona middleware de fallback Redis
-app.middleware("http")(redis_fallback_middleware)
+# Middleware de fallback Redis removido - Redis obrigatório
 
 # Instâncias globais dos gerenciadores
 stream_manager = VideoStreamManager()
@@ -80,30 +79,57 @@ download_queue.on_download_completed = on_download_completed_callback
 download_queue.on_download_failed = on_download_failed_callback
 download_queue.on_download_cancelled = on_download_cancelled_callback
 
-# Iniciar processamento da fila
-download_queue.start_processing()
+# Processamento da fila será iniciado no startup event
 
 @app.on_event("startup")
 async def startup_event():
-    """Evento de startup da aplicação"""
+    """Evento de startup da aplicação - Redis obrigatório"""
     global redis_integration_success
     
+    logger.info("Iniciando aplicação - Redis obrigatório...")
+    
     try:
-        # Aplicar integração Redis
+        # Aplicar integração Redis (obrigatório)
         redis_integration_success = await auto_apply_redis_integration()
         
-        if redis_integration_success:
-            logger.warning("Sistema Redis integrado com sucesso!")
-            
-            # Inicializar componentes FASE 3 apenas se Redis estiver ativo
+        if not redis_integration_success:
+            logger.error("❌ ERRO CRÍTICO: Redis não disponível - Servidor não pode iniciar!")
+            logger.error("❌ Configure e inicie o Redis antes de executar o servidor")
+            raise RuntimeError("Redis obrigatório não disponível")
+        
+        logger.success("✅ Sistema Redis integrado com sucesso!")
+        
+        # Inicializar componentes avançados Redis
+        try:
             await redis_sse_manager.initialize_redis()
             await api_performance_monitor.initialize_redis()
+            logger.info("✅ Componentes avançados Redis inicializados")
+        except Exception as advanced_error:
+            logger.warning(f"⚠️ Erro ao inicializar componentes avançados: {advanced_error}")
+            logger.warning("⚠️ Redis básico funciona, componentes avançados indisponíveis")
+        
+        # Sincronização Redis-Filesystem obrigatória
+        logger.info("Iniciando sincronização Redis-Filesystem...")
+        from sync_redis_filesystem import RedisFilesystemSync
+        syncer = RedisFilesystemSync()
+        sync_result = syncer.run_sync()
+        
+        if 'error' not in sync_result:
+            logger.info(f"✅ Sincronização concluída - {sync_result['physical_files_found']} arquivos processados")
         else:
-            logger.warning("Sistema Redis não disponível - usando sistema original")
+            logger.error(f"❌ ERRO na sincronização: {sync_result['error']}")
+            raise RuntimeError(f"Erro na sincronização Redis-Filesystem: {sync_result['error']}")
             
+        # Iniciar processamento da fila de downloads
+        download_queue.start_processing()
+        logger.info("✅ Fila de downloads iniciada")
+        
+        logger.info("✅ Sistema iniciado com Redis - Pronto para uso!")
+        
     except Exception as e:
-        logger.error(f"Erro na integração Redis: {e}")
-        redis_integration_success = False
+        logger.error(f"❌ ERRO CRÍTICO na inicialização: {e}")
+        logger.error("❌ Servidor não pode continuar sem Redis")
+        raise RuntimeError(f"Falha crítica na inicialização: {e}")
 
 
 @app.post("/auth/token", response_model=TokenData)
@@ -325,7 +351,7 @@ async def download_audio(
         
         # Primeiro, registra o áudio com status 'downloading'
         try:
-            audio_id = audio_manager.register_audio_for_download(str(request.url))
+            audio_id = await audio_manager.register_audio_for_download_async(str(request.url))
         except Exception as e:
             logger.error(f"Erro ao registrar áudio: {str(e)}")
             raise HTTPException(
@@ -362,23 +388,17 @@ async def list_audio_files(
 ):
     """
     Lista todos os arquivos de áudio disponíveis (requer autenticação)
-    Usa Redis quando disponível, ou fallback para JSON
+    Usa Redis obrigatoriamente
     """
     try:
-        # Verificar se o sistema Redis está ativo
-        if redis_integration_success and audio_manager.use_redis:
-            # Usar dados do Redis através do manager (método assíncrono)
-            audio_data = await audio_manager.get_audio_data_async()
-            audio_files = audio_data.get("audios", [])
-            logger.debug(f"Listando {len(audio_files)} áudios do Redis")
-        else:
-            # Usar função original com JSON
-            audio_files = scan_audio_directory()
-            logger.debug(f"Listando {len(audio_files)} áudios do JSON")
-        
+        logger.debug("🚀 Listando áudios do Redis...")
+        audio_data = await audio_manager.get_audio_data_async()
+        audio_files = audio_data.get("audios", [])
+        logger.success(f"✅ Listando {len(audio_files)} áudios do Redis")
         return {"audio_files": audio_files}
+        
     except Exception as e:
-        logger.exception(f"Erro ao listar arquivos de áudio: {str(e)}")
+        logger.error(f"❌ Erro ao listar arquivos de áudio do Redis: {str(e)}")
         raise HTTPException(
             status_code=500, 
             detail=f"Erro ao listar arquivos de áudio: {str(e)}"
@@ -742,10 +762,14 @@ async def stream_audio_file(
                 logger.warning(f"Token inválido fornecido: {str(e)}")
                 raise HTTPException(status_code=403, detail="Token inválido")
         
-        # Busca o áudio nos dados
-        audio_data = scan_audio_directory()
+        # Busca o áudio nos dados do Redis
+        
+        # Usar Redis obrigatoriamente
+        audio_info = await audio_manager.get_audio_data_async()
+        audio_list = audio_info.get("audios", [])
+        
         audio = None
-        for a in audio_data:
+        for a in audio_list:
             if a["id"] == audio_id:
                 audio = a
                 break
@@ -756,7 +780,16 @@ async def stream_audio_file(
         
         # Constrói o caminho completo do arquivo
         from app.services.configs import AUDIO_DIR
-        audio_file_path = AUDIO_DIR.parent / audio["path"]
+        from pathlib import Path
+        
+        # Corrigir caminhos que podem ter duplicação de "downloads"
+        audio_path = audio["path"]
+        if isinstance(audio_path, str) and audio_path.startswith("E:\\"):
+            # Caminho absoluto - usar diretamente
+            audio_file_path = Path(audio_path)
+        else:
+            # Caminho relativo - construir a partir de AUDIO_DIR
+            audio_file_path = AUDIO_DIR.parent / audio_path
         
         if not audio_file_path.exists():
             logger.warning(f"Arquivo não encontrado: {audio_file_path}")
@@ -1243,9 +1276,8 @@ async def get_system_health(
         hybrid_health = await hybrid_mode_manager.health_check()
         health_data["hybrid_mode"] = hybrid_health
         
-        # Adiciona informações do middleware
-        middleware_stats = redis_fallback_middleware.get_middleware_stats()
-        health_data["fallback_middleware"] = middleware_stats
+        # Middleware de fallback removido - Redis obrigatório
+        health_data["redis_mandatory"] = True
         
         return health_data
     except Exception as e:

@@ -154,11 +154,21 @@ def load_json_audios() -> Dict:
 def scan_audio_directory() -> List[Dict]:
     """
     Escaneia o diretório de áudios e retorna informações dos arquivos baseando-se no audios.json
+    IMPORTANTE: Esta função é síncrona e usa dados JSON apenas.
+    Para sistemas com Redis, considere usar diretamente o RedisAudioDownloadManager.get_audio_data_async()
     
     Returns:
         Lista de dicionários com informações dos áudios
     """
     audio_mapping.clear()
+    
+    # Verificar se há integração Redis ativa
+    try:
+        from app.services.integration_patch import is_redis_integration_active
+        if is_redis_integration_active():
+            logger.warning("scan_audio_directory called with Redis integration active. Consider using async methods.")
+    except ImportError:
+        pass  # Integration patch not available, proceed with JSON
     
     # Carrega os dados do JSON
     audio_data = load_json_audios()

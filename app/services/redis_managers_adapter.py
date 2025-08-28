@@ -200,8 +200,31 @@ class RedisAudioDownloadManager:
         Returns:
             ID do áudio registrado
         """
+        # Para compatibilidade temporária, usar versão síncrona simples
+        return self._register_audio_for_download_json_simple(url)
+    
+    def _register_audio_for_download_json_simple(self, url: str) -> str:
+        """Versão simplificada para registro rápido"""
+        # Extrair ID do YouTube
+        youtube_id = self.extract_youtube_id(url)
+        if not youtube_id:
+            youtube_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        logger.info(f"Registro simples de áudio: {youtube_id}")
+        return youtube_id
+    
+    async def register_audio_for_download_async(self, url: str) -> str:
+        """
+        Versão assíncrona de register_audio_for_download
+        
+        Args:
+            url: URL do vídeo do YouTube
+            
+        Returns:
+            ID do áudio registrado
+        """
         if self.use_redis:
-            return asyncio.run(self._register_audio_for_download_redis(url))
+            return await self._register_audio_for_download_redis(url)
         else:
             return self._register_audio_for_download_json(url)
     
@@ -215,20 +238,8 @@ class RedisAudioDownloadManager:
             if not youtube_id:
                 youtube_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             
-            # Obter informações básicas sem baixar
-            ydl_opts = {
-                'quiet': True,
-                'no_warnings': True,
-                'skip_download': True,
-            }
-            
-            with YoutubeDL(ydl_opts) as ydl:
-                try:
-                    info = ydl.extract_info(url, download=False)
-                    title = info.get('title', 'Unknown')
-                except Exception as extract_error:
-                    logger.warning(f"Erro ao extrair informações do vídeo: {str(extract_error)}")
-                    title = f"Video_{youtube_id}"
+            # Usar título temporário - será atualizado durante o download
+            title = f"Download_{youtube_id}"
             
             # Criar entrada no Redis com status downloading
             created_date = datetime.datetime.now().isoformat()
@@ -694,9 +705,9 @@ class RedisAudioDownloadManager:
                     progress_data['current_progress'] = 95
                     progress_data['status'] = 'finished'
             
-            # Configurações do yt-dlp
+            # Configurações do yt-dlp com estratégia robusta para YouTube
             ydl_opts = {
-                'format': 'bestaudio/best',
+                'format': 'ba[ext=m4a]/ba[ext=webm]/ba[ext=mp4]/ba/b[ext=m4a]/b[ext=webm]/b[ext=mp4]/bestaudio/best',
                 'outtmpl': str(download_dir / '%(title)s.%(ext)s'),
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
@@ -707,15 +718,27 @@ class RedisAudioDownloadManager:
                 'socket_timeout': 30,
                 'retries': 10,
                 'fragment_retries': 10,
+                'skip_unavailable_fragments': True,
                 'nocheckcertificate': True,
                 'ignoreerrors': False,
                 'verbose': True,
                 'noplaylist': True,
                 'http_headers': {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.5',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'none',
+                    'Sec-Fetch-User': '?1',
                     'DNT': '1',
+                    'Upgrade-Insecure-Requests': '1',
+                },
+                'extractor_args': {
+                    'youtube': {
+                        'skip': ['dash', 'hls']  # Pula formatos que podem requerer PO token
+                    }
                 }
             }
             

@@ -30,7 +30,10 @@
       "mcp__playwright__browser_navigate",
       "mcp__playwright__browser_click",
       "Bash(where redis-cli)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "WebSearch",
+      "WebSearch",
+      "WebFetch(domain:github.com)"
     ],
     "deny": [],
     "additionalDirectories": [

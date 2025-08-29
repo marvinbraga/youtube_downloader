@@ -10,7 +10,7 @@ from langchain_community.document_loaders.blob_loaders.schema import Blob, BlobL
 from langchain_community.document_loaders.generic import GenericLoader
 
 from app.services.transcription.parsers import TranscriptionProvider, TranscriptionFactory
-from app.services.configs import AUDIO_DIR, audio_mapping, AUDIO_CONFIG_PATH
+from app.services.configs import AUDIO_DIR, audio_mapping
 from app.services.managers import AudioDownloadManager
 
 

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo, useMemo, useCallback } from 'react';
 import { View, Text } from 'react-native';
 // import { Theme } from '@/styles/theme';
 interface Theme {
@@ -17,7 +17,7 @@ interface TimeDisplayProps {
   showProgress?: boolean;
 }
 
-export const TimeDisplay: React.FC<TimeDisplayProps> = ({
+const TimeDisplayComponent: React.FC<TimeDisplayProps> = ({
   currentTime,
   duration,
   theme,
@@ -25,7 +25,7 @@ export const TimeDisplay: React.FC<TimeDisplayProps> = ({
   showRemaining = false,
   showProgress = false,
 }) => {
-  const formatTime = (time: number): string => {
+  const formatTime = useCallback((time: number): string => {
     if (!isFinite(time) || isNaN(time)) {
       return '00:00';
     }
@@ -40,30 +40,46 @@ export const TimeDisplay: React.FC<TimeDisplayProps> = ({
     }
 
     return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-  };
+  }, []);
 
-  const currentTimeFormatted = formatTime(currentTime);
-  const durationFormatted = formatTime(duration);
-  const remainingTime = duration > 0 ? duration - currentTime : 0;
-  const remainingTimeFormatted = formatTime(remainingTime);
-  const progressPercentage = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
-
-  const fontSize = compact ? 12 : 14;
-  const minWidth = compact ? 60 : 80;
+  // Memoizar valores calculados
+  const timeData = useMemo(() => {
+    const currentTimeFormatted = formatTime(currentTime);
+    const durationFormatted = formatTime(duration);
+    const remainingTime = duration > 0 ? duration - currentTime : 0;
+    const remainingTimeFormatted = formatTime(remainingTime);
+    const progressPercentage = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
+    
+    return {
+      currentTimeFormatted,
+      durationFormatted,
+      remainingTimeFormatted,
+      progressPercentage
+    };
+  }, [currentTime, duration, formatTime]);
+  
+  // Memoizar estilos
+  const containerStyle = useMemo(() => ({
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    paddingVertical: compact ? 2 : 6,
+    paddingHorizontal: compact ? 6 : 14,
+    backgroundColor: theme.colors.outline + '08',
+    borderRadius: compact ? 8 : 10,
+    borderWidth: 1,
+    borderColor: theme.colors.outline + '20',
+  }), [compact, theme.colors.outline]);
+  
+  const timeTextStyle = useMemo(() => ({
+    color: theme.colors.onSurface,
+    fontSize: compact ? 11 : 15,
+    fontWeight: '700' as const,
+    fontVariant: ['tabular-nums' as const],
+    letterSpacing: 0.3,
+  }), [theme.colors.onSurface, compact]);
 
   return (
-    <View
-      style={{
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: compact ? 2 : 6,
-        paddingHorizontal: compact ? 6 : 14,
-        backgroundColor: theme.colors.outline + '08',
-        borderRadius: compact ? 8 : 10,
-        borderWidth: 1,
-        borderColor: theme.colors.outline + '20',
-      }}
-    >
+    <View style={containerStyle}>
       {/* Main Time Display */}
       <View
         style={{
@@ -72,16 +88,8 @@ export const TimeDisplay: React.FC<TimeDisplayProps> = ({
           justifyContent: 'center',
         }}
       >
-        <Text
-          style={{
-            color: theme.colors.onSurface,
-            fontSize: compact ? 11 : 15,
-            fontWeight: '700',
-            fontVariant: ['tabular-nums'], // Monospace numbers for consistent width
-            letterSpacing: 0.3,
-          }}
-        >
-          {showRemaining && duration > 0 ? `-${remainingTimeFormatted}` : currentTimeFormatted}
+        <Text style={timeTextStyle}>
+          {showRemaining && duration > 0 ? `-${timeData.remainingTimeFormatted}` : timeData.currentTimeFormatted}
         </Text>
         
         {!showRemaining && (
@@ -102,10 +110,10 @@ export const TimeDisplay: React.FC<TimeDisplayProps> = ({
                 color: theme.colors.outline,
                 fontSize: compact ? 10 : 13,
                 fontWeight: '500',
-                fontVariant: ['tabular-nums'], // Monospace numbers for consistent width
+                fontVariant: ['tabular-nums' as const], // Monospace numbers for consistent width
               }}
             >
-              {durationFormatted}
+              {timeData.durationFormatted}
             </Text>
           </>
         )}
@@ -127,13 +135,28 @@ export const TimeDisplay: React.FC<TimeDisplayProps> = ({
               color: theme.colors.outline,
               fontSize: 10,
               fontWeight: '600',
-              fontVariant: ['tabular-nums'],
+              fontVariant: ['tabular-nums' as const],
             }}
           >
-            {progressPercentage}%
+            {timeData.progressPercentage}%
           </Text>
         </View>
       )}
     </View>
   );
 };
+
+// Comparação otimizada para React.memo
+const arePropsEqual = (prevProps: TimeDisplayProps, nextProps: TimeDisplayProps) => {
+  return (
+    prevProps.currentTime === nextProps.currentTime &&
+    prevProps.duration === nextProps.duration &&
+    prevProps.compact === nextProps.compact &&
+    prevProps.showRemaining === nextProps.showRemaining &&
+    prevProps.showProgress === nextProps.showProgress &&
+    prevProps.theme.colors.onSurface === nextProps.theme.colors.onSurface &&
+    prevProps.theme.colors.outline === nextProps.theme.colors.outline
+  );
+};
+
+export const TimeDisplay = memo(TimeDisplayComponent, arePropsEqual);

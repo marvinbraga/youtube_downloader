@@ -93,42 +93,33 @@ async def startup_event():
         redis_integration_success = await auto_apply_redis_integration()
         
         if not redis_integration_success:
-            logger.error("❌ ERRO CRÍTICO: Redis não disponível - Servidor não pode iniciar!")
-            logger.error("❌ Configure e inicie o Redis antes de executar o servidor")
-            raise RuntimeError("Redis obrigatório não disponível")
+            logger.error("ERRO CRITICO: Redis nao disponivel - Servidor nao pode iniciar!")
+            logger.error("Configure e inicie o Redis antes de executar o servidor")
+            raise RuntimeError("Redis obrigatorio nao disponivel")
         
-        logger.success("✅ Sistema Redis integrado com sucesso!")
+        logger.success("Sistema Redis integrado com sucesso!")
         
         # Inicializar componentes avançados Redis
         try:
             await redis_sse_manager.initialize_redis()
             await api_performance_monitor.initialize_redis()
-            logger.info("✅ Componentes avançados Redis inicializados")
+            logger.info("Componentes avancados Redis inicializados")
         except Exception as advanced_error:
-            logger.warning(f"⚠️ Erro ao inicializar componentes avançados: {advanced_error}")
-            logger.warning("⚠️ Redis básico funciona, componentes avançados indisponíveis")
+            logger.warning(f"AVISO: Erro ao inicializar componentes avancados: {advanced_error}")
+            logger.warning("AVISO: Redis basico funciona, componentes avancados indisponiveis")
         
-        # Sincronização Redis-Filesystem obrigatória
-        logger.info("Iniciando sincronização Redis-Filesystem...")
-        from sync_redis_filesystem import RedisFilesystemSync
-        syncer = RedisFilesystemSync()
-        sync_result = syncer.run_sync()
-        
-        if 'error' not in sync_result:
-            logger.info(f"✅ Sincronização concluída - {sync_result['physical_files_found']} arquivos processados")
-        else:
-            logger.error(f"❌ ERRO na sincronização: {sync_result['error']}")
-            raise RuntimeError(f"Erro na sincronização Redis-Filesystem: {sync_result['error']}")
+        # Sistema agora usa apenas Redis - sincronização desnecessária
+        logger.info("Sistema Redis configurado - audios.json eliminado completamente")
             
         # Iniciar processamento da fila de downloads
         download_queue.start_processing()
-        logger.info("✅ Fila de downloads iniciada")
+        logger.info("Fila de downloads iniciada")
         
-        logger.info("✅ Sistema iniciado com Redis - Pronto para uso!")
+        logger.info("Sistema iniciado com Redis - Pronto para uso!")
         
     except Exception as e:
-        logger.error(f"❌ ERRO CRÍTICO na inicialização: {e}")
-        logger.error("❌ Servidor não pode continuar sem Redis")
+        logger.error(f"ERRO CRITICO na inicializacao: {e}")
+        logger.error("Servidor nao pode continuar sem Redis")
         raise RuntimeError(f"Falha crítica na inicialização: {e}")
 
 
@@ -391,14 +382,14 @@ async def list_audio_files(
     Usa Redis obrigatoriamente
     """
     try:
-        logger.debug("🚀 Listando áudios do Redis...")
+        logger.debug("Listando audios do Redis...")
         audio_data = await audio_manager.get_audio_data_async()
         audio_files = audio_data.get("audios", [])
-        logger.success(f"✅ Listando {len(audio_files)} áudios do Redis")
+        logger.success(f"Listando {len(audio_files)} audios do Redis")
         return {"audio_files": audio_files}
         
     except Exception as e:
-        logger.error(f"❌ Erro ao listar arquivos de áudio do Redis: {str(e)}")
+        logger.error(f"Erro ao listar arquivos de audio do Redis: {str(e)}")
         raise HTTPException(
             status_code=500, 
             detail=f"Erro ao listar arquivos de áudio: {str(e)}"
@@ -1351,6 +1342,7 @@ async def get_redis_integration_status(
     Obtém status da integração Redis
     """
     try:
+        from app.services.integration_patch import get_redis_integration_module
         redis_module = get_redis_integration_module() 
         health = await redis_module.get_integration_health()
         

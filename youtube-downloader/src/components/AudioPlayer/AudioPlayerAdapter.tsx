@@ -1,13 +1,13 @@
-import React from 'react';
+import React, { memo, useMemo } from 'react';
 import { useTheme } from '../../context/ThemeContext';
 import { AudioPlayer, AudioPlayerProps } from './index';
 
-// Componente adaptador que conecta o sistema de temas do app com o AudioPlayer
-export const AudioPlayerAdapter: React.FC<Omit<AudioPlayerProps, 'theme' | 'isDarkMode'>> = (props) => {
+// Componente adaptador otimizado com memoização
+const AudioPlayerAdapter: React.FC<Omit<AudioPlayerProps, 'theme' | 'isDarkMode'>> = (props) => {
   const { colors, isDarkTheme, theme } = useTheme();
   
-  // Adaptar o tema para o formato esperado pelo AudioPlayer
-  const adaptedTheme = {
+  // Memoizar tema adaptado para evitar recriação desnecessária
+  const adaptedTheme = useMemo(() => ({
     colors: {
       primary: colors.primary,
       onPrimary: '#ffffff',
@@ -21,7 +21,7 @@ export const AudioPlayerAdapter: React.FC<Omit<AudioPlayerProps, 'theme' | 'isDa
       onErrorContainer: colors.error,
       shadow: '#000000',
     }
-  };
+  }), [colors, isDarkTheme]);
   
   return (
     <AudioPlayer
@@ -32,4 +32,17 @@ export const AudioPlayerAdapter: React.FC<Omit<AudioPlayerProps, 'theme' | 'isDa
   );
 };
 
-export default AudioPlayerAdapter;
+// Comparação para React.memo - só re-renderiza se áudio ou propriedades relevantes mudaram
+const arePropsEqual = (prevProps: any, nextProps: any) => {
+  return (
+    prevProps.audio?.id === nextProps.audio?.id &&
+    prevProps.disabled === nextProps.disabled &&
+    prevProps.compact === nextProps.compact &&
+    prevProps.showTitle === nextProps.showTitle &&
+    prevProps.showProgress === nextProps.showProgress
+  );
+};
+
+export const MemoizedAudioPlayerAdapter = memo(AudioPlayerAdapter, arePropsEqual);
+export { MemoizedAudioPlayerAdapter as AudioPlayerAdapter };
+export default MemoizedAudioPlayerAdapter;

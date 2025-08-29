@@ -1,5 +1,5 @@
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, memo, useMemo, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Animated } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { Audio } from '../types';
@@ -28,7 +28,7 @@ interface TranscriptionStatusConfig {
   isDisabled?: boolean;
 }
 
-const AudioItem: React.FC<AudioItemProps> = ({
+const AudioItem: React.FC<AudioItemProps> = memo(({
   audio,
   isActive,
   isHighlighted = false,
@@ -42,21 +42,36 @@ const AudioItem: React.FC<AudioItemProps> = ({
   const { colors, theme } = useTheme();
   const spinValue = useRef(new Animated.Value(0)).current;
   const animationRef = useRef<Animated.CompositeAnimation | null>(null);
+  const isMountedRef = useRef(true);
+  
+  // Cleanup geral quando o componente é desmontado
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      
+      // Garantir que a animação seja limpa na desmontagem
+      if (animationRef.current) {
+        animationRef.current.stop();
+        animationRef.current = null;
+      }
+    };
+  }, []);
 
-  const formatDate = (dateString: string) => {
+  // Memoizar funções de formatação para evitar recriação desnecessária
+  const formatDate = useCallback((dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
-  };
+  }, []);
 
-  const formatFileSize = (bytes: number) => {
+  const formatFileSize = useCallback((bytes: number) => {
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
     if (bytes === 0) return '0 Bytes';
     const i = parseInt(Math.floor(Math.log(bytes) / Math.log(1024)).toString());
     return Math.round(bytes / Math.pow(1024, i)) + ' ' + sizes[i];
-  };
+  }, []);
   
-  // Definir configurações baseadas no status de transcrição
-  const getTranscriptionStatusConfig = (): TranscriptionStatusConfig => {
+  // Memoizar configurações de status para evitar recálculos desnecessários
+  const statusConfig = useMemo((): TranscriptionStatusConfig => {
     const transcriptionStatus = audio.transcription_status || "none";
     
     switch (transcriptionStatus) {
@@ -77,7 +92,8 @@ const AudioItem: React.FC<AudioItemProps> = ({
           badgeIcon: "check",
           buttonClass: "warning",
           buttonIcon: "file-text",
-          buttonText: "Ver Transcrição"
+          buttonText: "Ver Transcrição",
+          isDisabled: false
         };
       case "error":
         return {
@@ -95,11 +111,10 @@ const AudioItem: React.FC<AudioItemProps> = ({
           buttonText: "Transcrever"
         };
     }
-  };
-
-  const statusConfig = getTranscriptionStatusConfig();
+  }, [audio.transcription_status]);
   
-  const getBadgeColor = () => {
+  // Memoizar cores para evitar recálculos a cada render
+  const badgeColor = useMemo(() => {
     switch (statusConfig.badgeClass) {
       case 'warning':
         return colors.warning;
@@ -110,10 +125,34 @@ const AudioItem: React.FC<AudioItemProps> = ({
       default:
         return colors.info;
     }
-  };
+  }, [statusConfig.badgeClass, colors]);
   
-  const getButtonColor = () => {
-    if (statusConfig.isDisabled) return '#6c757d';
+  // Verifica se deve animar - anima tanto o badge quanto o botão quando está transcrevendo
+  const isTranscribing = audio.transcription_status === 'started';
+  
+  // Estados de download memoizados
+  const downloadStates = useMemo(() => ({
+    isDownloading: audio.download_status === 'downloading' || audio.download_status === 'pending',
+    downloadError: audio.download_status === 'error',
+    isReady: audio.download_status === 'ready' || !audio.download_status,
+    isNotReady: !audio.download_status || (audio.download_status !== 'ready')
+  }), [audio.download_status]);
+  
+  // Estados dos botões memoizados
+  const buttonStates = useMemo(() => {
+    const canPlay = downloadStates.isReady && !isTranscribing;
+    const canTranscribe = downloadStates.isReady && !isTranscribing;
+    const showCancelButton = downloadStates.isDownloading && !!onCancel;
+    const showRetryButton = downloadStates.downloadError && !!onRetry;
+    
+    return { canPlay, canTranscribe, showCancelButton, showRetryButton };
+  }, [downloadStates, isTranscribing, onCancel, onRetry]);
+  
+  const buttonColor = useMemo(() => {
+    // Se não pode transcrever ou está desabilitado, usar cor de desabilitado
+    if (!buttonStates.canTranscribe || statusConfig.isDisabled) {
+      return '#6c757d';
+    }
     
     switch (statusConfig.buttonClass) {
       case 'warning':
@@ -125,54 +164,38 @@ const AudioItem: React.FC<AudioItemProps> = ({
       default:
         return colors.success;
     }
-  };
+  }, [statusConfig.buttonClass, statusConfig.isDisabled, buttonStates.canTranscribe, colors]);
   
-  // Verifica se deve animar - anima tanto o badge quanto o botão quando está transcrevendo
-  const isTranscribing = audio.transcription_status === 'started';
-  
-  // Animação de rotação para o ícone de loading
+  // Animação otimizada - só executa quando necessário
   useEffect(() => {
-    if (isTranscribing) {
-      // Só inicia a animação se ela não estiver rodando
-      if (!animationRef.current) {
-        animationRef.current = Animated.loop(
-          Animated.timing(spinValue, {
-            toValue: 1,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-          { iterations: -1 } // Loop infinito explícito
-        );
-        animationRef.current.start();
-      }
-    } else {
-      // Para a animação quando não está transcrevendo
-      if (animationRef.current) {
-        animationRef.current.stop();
-        animationRef.current = null;
-        spinValue.setValue(0);
-      }
+    if (isTranscribing && !animationRef.current) {
+      // Só inicia nova animação se não houver uma rodando
+      animationRef.current = Animated.loop(
+        Animated.timing(spinValue, {
+          toValue: 1,
+          duration: 2000, // Aumentar duração para suavizar e reduzir CPU
+          useNativeDriver: true,
+        }),
+        { iterations: -1 }
+      );
+      animationRef.current.start();
+    } else if (!isTranscribing && animationRef.current) {
+      // Para animação quando não necessária
+      animationRef.current.stop();
+      animationRef.current = null;
+      spinValue.setValue(0);
     }
-    
-    // Cleanup na desmontagem do componente
-    return () => {
-      if (animationRef.current) {
-        animationRef.current.stop();
-        animationRef.current = null;
-        spinValue.setValue(0);
-      }
-    };
-  }, [isTranscribing]);
+  }, [isTranscribing, spinValue]);
 
-  const spin = spinValue.interpolate({
+  // Memoizar interpolação da animação
+  const spin = useMemo(() => spinValue.interpolate({
     inputRange: [0, 1],
     outputRange: ['0deg', '360deg'],
-  });
+  }), [spinValue]);
   
-  // Verificar status de download
-  const isDownloading = audio.download_status === 'downloading' || audio.download_status === 'pending';
-  const downloadError = audio.download_status === 'error';
-  const isNotReady = audio.download_status && audio.download_status !== 'ready';
+  // Estados de download e botões já memoizados acima
+  const { isDownloading, downloadError, isReady } = downloadStates;
+  const { canPlay, canTranscribe, showCancelButton, showRetryButton } = buttonStates;
   
   return (
     <TouchableOpacity
@@ -197,8 +220,9 @@ const AudioItem: React.FC<AudioItemProps> = ({
         ]
       ]}
       onPress={() => onPress(audio)}
+      activeOpacity={0.7}
     >
-      {/* Indicador de download em andamento */}
+      {/* Overlay de status - prioriza download sobre erro */}
       {isDownloading && (
         <View style={[styles.downloadOverlay, { backgroundColor: colors.background.primary + 'E6' }]}>
           <ActivityIndicator size="large" color={colors.primary} />
@@ -228,8 +252,8 @@ const AudioItem: React.FC<AudioItemProps> = ({
         </View>
       )}
       
-      {/* Indicador de erro no download */}
-      {downloadError && (
+      {/* Indicador de erro no download - só mostra se não está baixando */}
+      {!isDownloading && downloadError && (
         <View style={[styles.errorOverlay, { backgroundColor: colors.error + '20' }]}>
           <Feather name="alert-circle" size={24} color={colors.error} />
           <Text style={[styles.errorText, { color: colors.error }]}>
@@ -243,14 +267,14 @@ const AudioItem: React.FC<AudioItemProps> = ({
         </View>
       )}
       
-      <View style={styles.content}>
+      <View style={styles.content} pointerEvents="box-none">
         <View style={styles.header}>
           <Text style={[styles.title, { color: colors.text.primary }]} numberOfLines={1}>
             {audio.name}
           </Text>
           
           {statusConfig.badgeText && (
-            <View style={[styles.badge, { backgroundColor: getBadgeColor() }]}>
+            <View style={[styles.badge, { backgroundColor: badgeColor }]}>
               {isTranscribing ? (
                 <Animated.View style={{ transform: [{ rotate: spin }] }}>
                   <Feather 
@@ -283,24 +307,25 @@ const AudioItem: React.FC<AudioItemProps> = ({
           </Text>
         </View>
         
-        {/* Audio Player ou Botão de Reproduzir */}
-        {showAudioPlayer && !isNotReady ? (
+        {/* Audio Player ou Botões de Ação */}
+        {showAudioPlayer && isReady ? (
           <View style={styles.audioPlayerContainer}>
             <AudioPlayerAdapter
               audio={audio}
               onPlay={() => console.log('Advanced player started:', audio.name)}
               onPause={() => console.log('Advanced player paused:', audio.name)}
               onStop={() => console.log('Advanced player stopped:', audio.name)}
-              onError={(error) => console.error('Audio player error:', error)}
+              onError={(error) => console.error('Erro no player de áudio:', error)}
               onEnded={() => console.log('Audio ended:', audio.name)}
               showTitle={false}
               compact={false}
               showProgress={true}
-              disabled={isNotReady}
+              disabled={!canPlay}
             />
           </View>
         ) : (
-          <View style={styles.actions}>
+          <View style={styles.actions} pointerEvents="box-none">
+            {/* Botão de Reproduzir/Pausar */}
             <TouchableOpacity 
               style={[
                 styles.actionButton,
@@ -308,97 +333,101 @@ const AudioItem: React.FC<AudioItemProps> = ({
                   backgroundColor: isActive ? colors.primary : colors.background.primary,
                   borderColor: isActive ? colors.primary : colors.border 
                 },
-                isNotReady && styles.disabledButton
+                !canPlay && styles.disabledButton
               ]}
               onPress={() => onPlay(audio)}
-              disabled={isNotReady}
+              disabled={!canPlay}
             >
               <Feather 
                 name={isActive ? "pause" : "play"} 
                 size={16} 
-                color={isNotReady ? colors.text.secondary : isActive ? 'white' : colors.secondary} 
+                color={!canPlay ? colors.text.secondary : isActive ? 'white' : colors.secondary} 
               />
               <Text style={[
                 styles.actionButtonText, 
                 { 
-                  color: isNotReady ? colors.text.secondary : isActive ? 'white' : colors.secondary 
+                  color: !canPlay ? colors.text.secondary : isActive ? 'white' : colors.secondary 
                 }
               ]}>
                 {isActive ? 'Pausar' : 'Reproduzir'}
               </Text>
-              </TouchableOpacity>
+            </TouchableOpacity>
             
+            {/* Botão de Transcrição */}
             <TouchableOpacity 
-            style={[
-              styles.actionButton, 
-              { 
-                backgroundColor: getButtonColor(), 
-                borderColor: getButtonColor() 
-              },
-              (statusConfig.isDisabled || isNotReady) && theme.states.button.disabled
-            ]}
-            onPress={() => onTranscribe(audio)}
-            disabled={statusConfig.isDisabled || isNotReady}
-          >
-            {isTranscribing ? (
-              <Animated.View style={{ transform: [{ rotate: spin }] }}>
+              style={[
+                styles.actionButton, 
+                { 
+                  backgroundColor: buttonColor, 
+                  borderColor: buttonColor 
+                },
+                (!canTranscribe || statusConfig.isDisabled) && [
+                  styles.disabledButton,
+                  { backgroundColor: '#6c757d', borderColor: '#6c757d' }
+                ]
+              ]}
+              onPress={() => onTranscribe(audio)}
+              disabled={!canTranscribe || statusConfig.isDisabled}
+            >
+              {isTranscribing ? (
+                <Animated.View style={{ transform: [{ rotate: spin }] }}>
+                  <Feather 
+                    name="loader" 
+                    size={16} 
+                    color="white" 
+                  />
+                </Animated.View>
+              ) : (
                 <Feather 
-                  name="loader" 
+                  name={(statusConfig.buttonIcon as any) || 'mic'} 
                   size={16} 
                   color="white" 
                 />
-              </Animated.View>
-            ) : (
-              <Feather 
-                name={(statusConfig.buttonIcon as any) || 'mic'} 
-                size={16} 
-                color="white" 
-              />
+              )}
+              <Text style={styles.transcriptionButtonText}>
+                {statusConfig.buttonText || 'Transcrever'}
+              </Text>
+            </TouchableOpacity>
+            
+            {/* Botão de cancelar download */}
+            {showCancelButton && (
+              <TouchableOpacity
+                style={[
+                  styles.actionButton,
+                  { 
+                    backgroundColor: colors.error,
+                    borderColor: colors.error
+                  }
+                ]}
+                onPress={() => onCancel!(audio)}
+              >
+                <Feather name="x" size={16} color="white" />
+                <Text style={[styles.actionButtonText, { color: 'white' }]}>Cancelar</Text>
+              </TouchableOpacity>
             )}
-            <Text style={styles.transcriptionButtonText}>
-              {statusConfig.buttonText || 'Transcrever'}
-            </Text>
-          </TouchableOpacity>
-          
-          {/* Botão de cancelar download */}
-          {isDownloading && onCancel && (
-            <TouchableOpacity
-              style={[
-                styles.actionButton,
-                { 
-                  backgroundColor: colors.error,
-                  borderColor: colors.error
-                }
-              ]}
-              onPress={() => onCancel(audio)}
-            >
-              <Feather name="x" size={16} color="white" />
-              <Text style={[styles.actionButtonText, { color: 'white' }]}>Cancelar</Text>
-            </TouchableOpacity>
-          )}
-          
-          {/* Botão de retry */}
-          {downloadError && onRetry && (
-            <TouchableOpacity
-              style={[
-                styles.actionButton,
-                { 
-                  backgroundColor: colors.warning,
-                  borderColor: colors.warning
-                }
-              ]}
-              onPress={() => onRetry(audio)}
-            >
-              <Feather name="refresh-cw" size={16} color="white" />
-              <Text style={[styles.actionButtonText, { color: 'white' }]}>Tentar Novamente</Text>
-            </TouchableOpacity>
-          )}
+            
+            {/* Botão de tentar novamente */}
+            {showRetryButton && (
+              <TouchableOpacity
+                style={[
+                  styles.actionButton,
+                  { 
+                    backgroundColor: colors.warning,
+                    borderColor: colors.warning
+                  }
+                ]}
+                onPress={() => onRetry!(audio)}
+              >
+                <Feather name="refresh-cw" size={16} color="white" />
+                <Text style={[styles.actionButtonText, { color: 'white' }]}>Tentar Novamente</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
       </View>
     </TouchableOpacity>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -537,4 +566,17 @@ const styles = StyleSheet.create({
   }
 });
 
-export default AudioItem;
+// Comparação personalizada para React.memo - só re-renderiza se propriedades relevantes mudaram
+const arePropsEqual = (prevProps: AudioItemProps, nextProps: AudioItemProps) => {
+  return (
+    prevProps.audio.id === nextProps.audio.id &&
+    prevProps.audio.transcription_status === nextProps.audio.transcription_status &&
+    prevProps.audio.download_status === nextProps.audio.download_status &&
+    prevProps.audio.download_progress === nextProps.audio.download_progress &&
+    prevProps.isActive === nextProps.isActive &&
+    prevProps.isHighlighted === nextProps.isHighlighted &&
+    prevProps.showAudioPlayer === nextProps.showAudioPlayer
+  );
+};
+
+export default memo(AudioItem, arePropsEqual);

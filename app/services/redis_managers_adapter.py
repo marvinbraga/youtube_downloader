@@ -16,7 +16,7 @@ from fastapi import HTTPException
 from loguru import logger
 from yt_dlp import YoutubeDL
 
-from app.services.configs import AUDIO_DIR, audio_mapping, AUDIO_CONFIG_PATH
+from app.services.configs import AUDIO_DIR, audio_mapping
 from app.services.redis_audio_manager import redis_audio_manager
 from app.services.redis_connection import get_redis_client
 from app.services.locks import audio_file_lock
@@ -42,45 +42,22 @@ class RedisAudioDownloadManager:
         if self.use_redis:
             logger.info("Usando Redis como backend para áudios")
         else:
-            logger.info("Usando JSON como backend para áudios (modo fallback)")
-            # Carregar dados do sistema atual como fallback
-            self.audio_data = self._load_audio_data_json()
-            self.migrate_has_transcription_to_status()
+            logger.info("Sistema Redis desabilitado - funcionalidade de áudio limitada")
+            # audios.json não existe mais - apenas inicializa estrutura vazia
+            self.audio_data = {"audios": [], "mappings": {}}
     
     def _load_audio_data_json(self) -> Dict[str, Any]:
         """
-        Carrega dados de áudio do JSON (fallback)
+        Função obsoleta - sistema não usa mais audios.json
         """
-        try:
-            from app.services.files import load_json_audios
-            with audio_file_lock:
-                return load_json_audios()
-        except Exception as e:
-            logger.error(f"Erro ao carregar dados JSON: {str(e)}")
-            return {"audios": [], "mappings": {}}
+        logger.warning("_load_audio_data_json() called but audios.json is no longer used")
+        return {"audios": [], "mappings": {}}
     
     def _save_audio_data_json(self) -> None:
         """
-        Salva dados de áudio no JSON (fallback)
+        Função obsoleta - sistema não usa mais audios.json
         """
-        if not hasattr(self, 'audio_data'):
-            return
-        
-        with audio_file_lock:
-            try:
-                temp_path = Path(str(AUDIO_CONFIG_PATH) + '.tmp')
-                with open(temp_path, 'w', encoding='utf-8') as f:
-                    json.dump(self.audio_data, f, ensure_ascii=False, indent=2)
-                temp_path.replace(AUDIO_CONFIG_PATH)
-                logger.debug(f"Dados de áudio salvos em: {AUDIO_CONFIG_PATH}")
-            except Exception as e:
-                logger.error(f"Erro ao salvar arquivo JSON: {str(e)}")
-                temp_path = Path(str(AUDIO_CONFIG_PATH) + '.tmp')
-                if temp_path.exists():
-                    try:
-                        temp_path.unlink()
-                    except:
-                        pass
+        logger.warning("_save_audio_data_json() called but audios.json is no longer used")
     
     async def _load_audio_data_redis(self) -> Dict[str, Any]:
         """
@@ -314,7 +291,8 @@ class RedisAudioDownloadManager:
             logger.info(f"Registrando áudio para download (JSON): {url}")
             
             # Recarregar dados do arquivo
-            self.audio_data = self._load_audio_data_json()
+            # audios.json eliminado - dados vazios
+            self.audio_data = {"audios": [], "mappings": {}}
             
             # Extrair ID e informações básicas do YouTube
             youtube_id = self.extract_youtube_id(url)
@@ -363,7 +341,7 @@ class RedisAudioDownloadManager:
             self.audio_data["audios"].append(audio_metadata)
             
             # Salvar os dados
-            self._save_audio_data_json()
+            # audios.json eliminado - operação ignorada
             
             logger.info(f"Áudio registrado com ID: {youtube_id}")
             return youtube_id
@@ -397,7 +375,7 @@ class RedisAudioDownloadManager:
                 }
                 
                 self.audio_data["audios"].append(audio_metadata)
-                self._save_audio_data_json()
+                # audios.json eliminado - operação ignorada
                 
                 logger.info(f"Áudio registrado com informações limitadas, ID: {youtube_id}")
                 return youtube_id
@@ -467,7 +445,8 @@ class RedisAudioDownloadManager:
         if not self.use_redis:
             # Se não está usando Redis, usar JSON
             if not hasattr(self, '_audio_data_cache'):
-                self._audio_data_cache = self._load_audio_data_json()
+                # audios.json eliminado - cache vazio
+                self._audio_data_cache = {"audios": [], "mappings": {}}
             return self._audio_data_cache
         else:
             # Para Redis, tentar usar dados em cache ou fallback para JSON
@@ -476,7 +455,8 @@ class RedisAudioDownloadManager:
             
             # Tentar carregar do JSON como fallback
             try:
-                return self._load_audio_data_json()
+                # audios.json eliminado - retorna dados vazios
+                return {"audios": [], "mappings": {}}
             except Exception as e:
                 logger.error(f"Error loading JSON fallback data: {e}")
                 return {"audios": [], "mappings": {}}
@@ -496,12 +476,14 @@ class RedisAudioDownloadManager:
                 logger.error(f"Erro ao carregar dados Redis: {str(e)}")
                 # Fallback para JSON se Redis falhar
                 try:
-                    return self._load_audio_data_json()
+                    # audios.json eliminado - retorna dados vazios
+                    return {"audios": [], "mappings": {}}
                 except Exception as json_error:
                     logger.error(f"Erro ao carregar dados JSON: {str(json_error)}")
                     return {"audios": [], "mappings": {}}
         else:
-            return self._load_audio_data_json()
+            # audios.json eliminado - retorna dados vazios
+            return {"audios": [], "mappings": {}}
     
     def update_transcription_status(self, audio_id: str, status: str, transcription_path: str = None) -> bool:
         """
@@ -531,9 +513,10 @@ class RedisAudioDownloadManager:
     def _update_transcription_status_json(self, audio_id: str, status: str, transcription_path: str = None) -> bool:
         """Versão JSON para atualizar status de transcrição"""
         # Recarregar dados do arquivo para garantir que temos a versão mais atual
-        self.audio_data = self._load_audio_data_json()
+        # audios.json eliminado - dados vazios
+        self._audio_data_cache = {"audios": [], "mappings": {}}
         
-        for audio in self.audio_data["audios"]:
+        for audio in self._audio_data_cache["audios"]:
             if audio["id"] == audio_id:
                 # Verifica se o status é válido
                 if status not in ["none", "started", "ended", "error"]:
@@ -551,7 +534,7 @@ class RedisAudioDownloadManager:
                 audio["modified_date"] = datetime.datetime.now().isoformat()
                 
                 # Salva os dados
-                self._save_audio_data_json()
+                # audios.json eliminado - operação ignorada
                 
                 logger.info(f"Status da transcrição atualizado para '{status}' para áudio {audio_id}")
                 if transcription_path:
@@ -622,7 +605,7 @@ class RedisAudioDownloadManager:
             logger.info("Iniciando migração de dados 'has_transcription' para 'transcription_status'")
             changes_made = False
             
-            for audio in self.audio_data.get("audios", []):
+            for audio in self._audio_data_cache.get("audios", []):
                 # Caso 1: Tem o campo antigo mas não o novo
                 if "has_transcription" in audio and "transcription_status" not in audio:
                     audio["transcription_status"] = "ended" if audio.get("has_transcription") else "none"
@@ -651,7 +634,7 @@ class RedisAudioDownloadManager:
             
             if changes_made:
                 logger.info("Migração de dados concluída com sucesso. Salvando alterações.")
-                self._save_audio_data_json()
+                # audios.json eliminado - operação ignorada
             else:
                 logger.info("Nenhuma alteração necessária durante a migração.")
         except Exception as e:

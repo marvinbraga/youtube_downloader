@@ -9,7 +9,7 @@ from loguru import logger
 
 from app.models.video import VideoSource, SortOption
 from app.models.audio import AudioSource
-from app.services.configs import VIDEO_DIR, JSON_CONFIG_PATH, video_mapping, AUDIO_DIR, AUDIO_CONFIG_PATH, audio_mapping
+from app.services.configs import VIDEO_DIR, JSON_CONFIG_PATH, video_mapping, AUDIO_DIR, audio_mapping
 from app.services.locks import audio_file_lock
 
 
@@ -115,149 +115,34 @@ def generate_audio_stream(audio_path: Path):
 
 def load_json_audios() -> Dict:
     """
-    Carrega os dados de áudio do arquivo JSON de forma thread-safe
+    Função obsoleta - sistema agora usa apenas Redis para dados de áudio
     
     Returns:
-        Dicionário com os dados de áudio (contendo 'audios' e 'mappings')
+        Dicionário vazio (para compatibilidade)
     """
-    with audio_file_lock:
-        try:
-            if AUDIO_CONFIG_PATH.exists():
-                with open(AUDIO_CONFIG_PATH, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                
-                # Atualiza o mapeamento em memória com os dados do arquivo
-                for audio in data.get("audios", []):
-                    audio_id = audio.get("id", "")
-                    if audio_id and "path" in audio:
-                        audio_mapping[audio_id] = AUDIO_DIR.parent / audio["path"]
-                        
-                        # Adiciona mapeamentos por palavras-chave
-                        for keyword in audio.get("keywords", []):
-                            audio_mapping[keyword] = AUDIO_DIR.parent / audio["path"]
-                
-                # Adiciona mapeamentos específicos se estiverem no arquivo
-                for key, path in data.get("mappings", {}).items():
-                    audio_mapping[key] = AUDIO_DIR.parent / path
-                
-                # Ensure mappings key exists for backward compatibility
-                if "mappings" not in data:
-                    data["mappings"] = {}
-                    
-                return data
-            return {"audios": [], "mappings": {}}
-        except Exception as e:
-            logger.error(f"Erro ao carregar arquivo de áudios JSON: {str(e)}")
-            return {"audios": [], "mappings": {}}
+    logger.warning("load_json_audios() called but audios.json is no longer used. Returning empty data.")
+    return {"audios": [], "mappings": {}}
 
 
 def scan_audio_directory() -> List[Dict]:
     """
-    Escaneia o diretório de áudios e retorna informações dos arquivos baseando-se no audios.json
-    IMPORTANTE: Esta função é síncrona e usa dados JSON apenas.
-    Para sistemas com Redis, considere usar diretamente o RedisAudioDownloadManager.get_audio_data_async()
+    Escaneia o diretório de áudios usando apenas dados do Redis
+    Sistema não usa mais audios.json
     
     Returns:
-        Lista de dicionários com informações dos áudios
+        Lista vazia - use RedisAudioDownloadManager.get_audio_data_async() para dados reais
     """
     audio_mapping.clear()
+    
+    # Log de aviso para migração
+    logger.warning("scan_audio_directory() called but audios.json is no longer used. Use Redis-based methods instead.")
     
     # Verificar se há integração Redis ativa
     try:
         from app.services.integration_patch import is_redis_integration_active
         if is_redis_integration_active():
-            logger.warning("scan_audio_directory called with Redis integration active. Consider using async methods.")
+            logger.info("Redis integration is active. Use RedisAudioDownloadManager.get_audio_data_async() for audio data.")
     except ImportError:
-        pass  # Integration patch not available, proceed with JSON
+        logger.error("Redis integration not available. Audio functionality may be limited.")
     
-    # Carrega os dados do JSON
-    audio_data = load_json_audios()
-    audio_list = []
-    
-    # Processa cada áudio do JSON, verificando se o arquivo existe
-    for audio in audio_data.get("audios", []):
-        try:
-            # Pular entradas especiais como "stats" que não são arquivos de áudio
-            if not audio.get("path") or audio.get("id") == "stats":
-                continue
-                
-            # Verificar se o arquivo existe
-            audio_path = AUDIO_DIR.parent / audio["path"]
-            if not audio_path.exists():
-                logger.warning(f"Arquivo de áudio não encontrado no caminho: {audio_path}")
-                continue
-            
-            # Obtém informações básicas do arquivo
-            stats = audio_path.stat()
-            
-            # Verifica existência de arquivo de transcrição
-            transcription_path = ""
-            has_transcription = False
-            
-            # Primeira verificação: campo no JSON
-            if audio.get("has_transcription", False) and audio.get("transcription_path"):
-                transcription_file = AUDIO_DIR.parent / audio["transcription_path"]
-                if transcription_file.exists():
-                    has_transcription = True
-                    transcription_path = audio["transcription_path"]
-                    logger.debug(f"Transcrição encontrada no JSON: {transcription_path}")
-                
-            # Segunda verificação: arquivo .md associado
-            if not has_transcription:
-                md_file = audio_path.with_suffix(".md")
-                if md_file.exists():
-                    has_transcription = True
-                    transcription_path = str(md_file.relative_to(AUDIO_DIR.parent))
-                    logger.debug(f"Transcrição encontrada por arquivo associado: {transcription_path}")
-            
-            # Adiciona à lista de áudios
-            audio_info = {
-                "id": audio["id"],
-                "name": audio.get("title", audio_path.stem),
-                "path": audio["path"],
-                "format": audio.get("format", "m4a"),
-                "created_date": audio.get("created_date", datetime.fromtimestamp(stats.st_ctime).isoformat()),
-                "modified_date": audio.get("modified_date", datetime.fromtimestamp(stats.st_mtime).isoformat()),
-                "size": stats.st_size,
-                "has_transcription": has_transcription,  # Usa o valor verificado
-                "transcription_path": transcription_path,  # Usa o caminho verificado
-                "youtube_id": audio.get("youtube_id", ""),
-                "url": audio.get("url", ""),
-                "source": AudioSource.YOUTUBE if audio.get("url") else AudioSource.LOCAL,
-                "keywords": audio.get("keywords", [])
-            }
-            
-            audio_list.append(audio_info)
-            
-            # Adiciona ao mapeamento
-            audio_mapping[audio["id"]] = audio_path
-            
-            # Se houver discrepância, atualize o arquivo JSON
-            if has_transcription != audio.get("has_transcription", False) or transcription_path != audio.get("transcription_path", ""):
-                # Encontra o áudio no array original e atualiza
-                for a in audio_data["audios"]:
-                    if a["id"] == audio["id"]:
-                        a["has_transcription"] = has_transcription
-                        a["transcription_path"] = transcription_path
-                        a["modified_date"] = datetime.now().isoformat()
-                        break
-                
-                # Salva as alterações no JSON de forma thread-safe
-                with audio_file_lock:
-                    # Escrever primeiro para arquivo temporário para operação atômica
-                    temp_path = Path(str(AUDIO_CONFIG_PATH) + '.tmp')
-                    with open(temp_path, 'w', encoding='utf-8') as f:
-                        json.dump(audio_data, f, ensure_ascii=False, indent=2)
-                    
-                    # Renomear arquivo temporário para o arquivo final (operação atômica)
-                    temp_path.replace(AUDIO_CONFIG_PATH)
-                logger.info(f"Atualizado status de transcrição para áudio {audio['id']}: {has_transcription}")
-                
-        except Exception as e:
-            logger.error(f"Erro ao processar áudio {audio.get('id')}: {str(e)}")
-            continue
-    
-    # Ordena por data de modificação (mais recente primeiro)
-    audio_list.sort(key=lambda x: x["modified_date"], reverse=True)
-    
-    return audio_list
+    return []

@@ -102,8 +102,11 @@ const { theme, isDarkMode } = useTheme();
 
 ### API Endpoints
 Key endpoints used throughout the app:
-- `GET/POST /audios/` - Audio file management
+- `GET /audio/list` - List audio files
+- `POST /audio/download` - YouTube audio download
+- `GET /audio/stream/{id}` - Stream audio file
+- `POST /audio/transcribe` - Start AI transcription
+- `GET /audio/transcription_status/{id}` - Check transcription status
+- `GET /audio/transcription/{id}` - Get transcription text
 - `GET/POST /videos/` - Video file management  
-- `POST /audios/download/` - YouTube download
-- `POST /audios/{id}/transcribe/` - AI transcription
 - `POST /token/refresh/` - Auth token refresh

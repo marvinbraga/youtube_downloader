@@ -39,7 +39,13 @@
       "Read(E:\\python\\youtube_downloader\\app\\services/**)",
       "Read(E:\\python\\youtube_downloader\\app/**)",
       "Read(E:\\python\\youtube_downloader\\app\\services/**)",
-      "Read(E:\\python\\youtube_downloader\\app\\services/**)"
+      "Read(E:\\python\\youtube_downloader\\app\\services/**)",
+      "Bash(npm run build:*)",
+      "Bash(yarn build:*)",
+      "Bash(yarn --version)",
+      "Bash(npm run:*)",
+      "Bash(yarn run:*)",
+      "Bash(npx expo:*)"
     ],
     "deny": []
   }

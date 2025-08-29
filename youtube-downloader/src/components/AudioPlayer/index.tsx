@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, memo, useMemo } from 'react';
 import { View, Text, Animated, TouchableOpacity, ActivityIndicator } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
@@ -44,7 +44,7 @@ export interface AudioPlayerProps {
   isDarkMode?: boolean;
 }
 
-export const AudioPlayer: React.FC<AudioPlayerProps> = ({
+const AudioPlayerComponent: React.FC<AudioPlayerProps> = ({
   audio,
   onPlay,
   onPause,
@@ -62,29 +62,29 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const [authenticatedUrl, setAuthenticatedUrl] = useState<string | null>(null);
   const [fadeAnim] = useState(new Animated.Value(0));
   
-  // Obter tema e tamanhos responsivos
-  const playerColors = getPlayerTheme(isDarkMode);
-  const responsiveSizes = getResponsiveSizes();
+  // Memoizar tema e tamanhos responsivos
+  const playerColors = useMemo(() => getPlayerTheme(isDarkMode), [isDarkMode]);
+  const responsiveSizes = useMemo(() => getResponsiveSizes(), []);
 
-  // Gerar URL com token de autenticação
-  useEffect(() => {
-    const generateAuthenticatedUrl = async () => {
-      try {
-        const token = await AsyncStorage.getItem('@auth_token');
-        if (token) {
-          const url = `${apiBaseUrl}/audios/${audio.id}/stream/?token=${encodeURIComponent(token)}`;
-          setAuthenticatedUrl(url);
-          console.log('🎵 Generated authenticated URL:', url);
-        } else {
-          console.error('🚨 No auth token available');
-        }
-      } catch (error) {
-        console.error('🚨 Error generating authenticated URL:', error);
+  // Memoizar geração de URL autenticada
+  const generateAuthenticatedUrl = useCallback(async () => {
+    try {
+      const token = await AsyncStorage.getItem('@auth_token');
+      if (token) {
+        const url = `${apiBaseUrl}/audio/stream/${audio.id}?token=${encodeURIComponent(token)}`;
+        setAuthenticatedUrl(url);
+        console.log('🎵 Generated authenticated URL:', url);
+      } else {
+        console.error('🚨 No auth token available');
       }
-    };
-
-    generateAuthenticatedUrl();
+    } catch (error) {
+      console.error('🚨 Error generating authenticated URL:', error);
+    }
   }, [audio.id, apiBaseUrl]);
+
+  useEffect(() => {
+    generateAuthenticatedUrl();
+  }, [generateAuthenticatedUrl]);
   
   // Animação de entrada
   useEffect(() => {
@@ -150,37 +150,41 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     }
   }, [setVolume, audio, onError]);
 
-  const containerPadding = compact ? responsiveSizes.padding - 4 : responsiveSizes.padding;
-  const borderRadius = compact ? responsiveSizes.borderRadius - 2 : responsiveSizes.borderRadius;
+  // Memoizar estilos do container
+  const containerStyles = useMemo(() => ({
+    padding: compact ? responsiveSizes.padding - 4 : responsiveSizes.padding,
+    borderRadius: compact ? responsiveSizes.borderRadius - 2 : responsiveSizes.borderRadius
+  }), [compact, responsiveSizes]);
+  
+  // Memoizar estilo principal do container
+  const mainContainerStyle = useMemo(() => ({
+    backgroundColor: isDarkMode ? 'rgba(15, 23, 42, 0.95)' : 'rgba(248, 250, 252, 0.95)',
+    borderRadius: 12,
+    padding: 12,
+    marginVertical: 4,
+    shadowColor: isDarkMode ? 'rgba(79, 70, 229, 0.3)' : 'rgba(59, 130, 246, 0.2)',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 1,
+    shadowRadius: 8,
+    elevation: 4,
+    opacity: fadeAnim,
+    borderWidth: 1,
+    borderColor: isDarkMode 
+      ? 'rgba(79, 70, 229, 0.2)' 
+      : 'rgba(59, 130, 246, 0.15)',
+    transform: [
+      {
+        scale: fadeAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0.98, 1],
+        }),
+      },
+    ],
+    overflow: 'hidden' as const,
+  }), [isDarkMode, fadeAnim]);
 
   return (
-    <Animated.View
-      style={{
-        backgroundColor: isDarkMode ? 'rgba(15, 23, 42, 0.95)' : 'rgba(248, 250, 252, 0.95)',
-        borderRadius: 12,
-        padding: 12,
-        marginVertical: 4,
-        shadowColor: isDarkMode ? 'rgba(79, 70, 229, 0.3)' : 'rgba(59, 130, 246, 0.2)',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 1,
-        shadowRadius: 8,
-        elevation: 4,
-        opacity: fadeAnim,
-        borderWidth: 1,
-        borderColor: isDarkMode 
-          ? 'rgba(79, 70, 229, 0.2)' 
-          : 'rgba(59, 130, 246, 0.15)',
-        transform: [
-          {
-            scale: fadeAnim.interpolate({
-              inputRange: [0, 1],
-              outputRange: [0.98, 1],
-            }),
-          },
-        ],
-        overflow: 'hidden',
-      }}
-    >
+    <Animated.View style={mainContainerStyle}>
       {/* Progress Bar - Compact */}
       <View style={{ marginBottom: 10 }}>
         <ProgressBar
@@ -400,3 +404,17 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     </Animated.View>
   );
 };
+
+// Comparação para React.memo - evita re-renderizações desnecessárias
+const arePropsEqual = (prevProps: AudioPlayerProps, nextProps: AudioPlayerProps) => {
+  return (
+    prevProps.audio.id === nextProps.audio.id &&
+    prevProps.disabled === nextProps.disabled &&
+    prevProps.compact === nextProps.compact &&
+    prevProps.showTitle === nextProps.showTitle &&
+    prevProps.showProgress === nextProps.showProgress &&
+    prevProps.isDarkMode === nextProps.isDarkMode
+  );
+};
+
+export const AudioPlayer = memo(AudioPlayerComponent, arePropsEqual);

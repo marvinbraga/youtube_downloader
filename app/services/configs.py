@@ -12,7 +12,6 @@ DOWNLOADS_DIR = ROOT_DIR / "downloads"
 VIDEO_DIR = DOWNLOADS_DIR / "videos"
 AUDIO_DIR = DOWNLOADS_DIR / "audio"
 JSON_CONFIG_PATH = DATA_DIR / "videos.json"
-AUDIO_CONFIG_PATH = DATA_DIR / "audios.json"
 
 # Garante que os diretórios existam
 DATA_DIR.mkdir(exist_ok=True)

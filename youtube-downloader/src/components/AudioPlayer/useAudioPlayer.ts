@@ -39,6 +39,7 @@ export const useAudioPlayer = (audioUrl: string): UseAudioPlayerReturn => {
   const soundRef = useRef<ExpoAudio.Sound | null>(null);
   const htmlAudioRef = useRef<HTMLAudioElement | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isMountedRef = useRef<boolean>(true);
   const isWeb = Platform.OS === 'web';
   
   // Global audio player context
@@ -61,43 +62,60 @@ export const useAudioPlayer = (audioUrl: string): UseAudioPlayerReturn => {
         currentTime: 0,
       }));
     } catch (error) {
-      console.error('🚨 Failed to stop player:', error);
+      console.error('Erro ao parar player:', error);
     }
   }, [isWeb]);
 
   // Cleanup function
   const cleanup = useCallback(() => {
+    isMountedRef.current = false;
+    
     // Unregister from global context
-    unregisterPlayer(playerIdRef.current);
+    try {
+      unregisterPlayer(playerIdRef.current);
+    } catch (error) {
+      console.error('Erro ao desregistrar player:', error);
+    }
     
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
 
-    if (isWeb && htmlAudioRef.current) {
-      // Cleanup blob URL if exists
-      if (htmlAudioRef.current.src && htmlAudioRef.current.src.startsWith('blob:')) {
-        URL.revokeObjectURL(htmlAudioRef.current.src);
+    try {
+      if (isWeb && htmlAudioRef.current) {
+        // Cleanup blob URL if exists
+        if (htmlAudioRef.current.src && htmlAudioRef.current.src.startsWith('blob:')) {
+          URL.revokeObjectURL(htmlAudioRef.current.src);
+        }
+        htmlAudioRef.current.pause();
+        htmlAudioRef.current.src = '';
+        htmlAudioRef.current = null;
+      } else if (soundRef.current) {
+        soundRef.current.unloadAsync().catch((error) => {
+          console.error('Erro ao descarregar áudio:', error);
+        });
+        soundRef.current = null;
       }
-      htmlAudioRef.current.pause();
-      htmlAudioRef.current.src = '';
-      htmlAudioRef.current = null;
-    } else if (soundRef.current) {
-      soundRef.current.unloadAsync().catch(console.error);
-      soundRef.current = null;
+    } catch (error) {
+      console.error('Erro durante limpeza do player:', error);
     }
   }, [isWeb, unregisterPlayer]);
 
   // Initialize audio based on platform
   useEffect(() => {
+    isMountedRef.current = true;
+    
     if (!audioUrl) {
       console.log('🎵 No audio URL provided, skipping initialization');
       return;
     }
 
     console.log('🎵 Initializing audio for platform:', Platform.OS, 'URL:', audioUrl);
-    setState(prev => ({ ...prev, isLoading: true, error: null }));
+    
+    if (isMountedRef.current) {
+      setState(prev => ({ ...prev, isLoading: true, error: null }));
+    }
 
     // Register player with global context
     registerPlayer(playerIdRef.current, stopPlayer);
@@ -121,53 +139,65 @@ export const useAudioPlayer = (audioUrl: string): UseAudioPlayerReturn => {
       // Setup event listeners
       audio.addEventListener('loadedmetadata', () => {
         console.log('🎵 Web: Metadata loaded, duration:', audio.duration);
-        setState(prev => ({
-          ...prev,
-          duration: isFinite(audio.duration) ? audio.duration : 0,
-          isLoading: false,
-          error: null,
-        }));
+        if (isMountedRef.current) {
+          setState(prev => ({
+            ...prev,
+            duration: isFinite(audio.duration) ? audio.duration : 0,
+            isLoading: false,
+            error: null,
+          }));
+        }
       });
 
       audio.addEventListener('timeupdate', () => {
-        setState(prev => ({
-          ...prev,
-          currentTime: audio.currentTime,
-          buffered: audio.buffered.length > 0 ? audio.buffered.end(0) : 0,
-        }));
+        if (isMountedRef.current) {
+          setState(prev => ({
+            ...prev,
+            currentTime: audio.currentTime,
+            buffered: audio.buffered.length > 0 ? audio.buffered.end(0) : 0,
+          }));
+        }
       });
 
       audio.addEventListener('play', () => {
-        setState(prev => ({ ...prev, isPlaying: true }));
+        if (isMountedRef.current) {
+          setState(prev => ({ ...prev, isPlaying: true }));
+        }
       });
 
       audio.addEventListener('pause', () => {
-        setState(prev => ({ ...prev, isPlaying: false }));
+        if (isMountedRef.current) {
+          setState(prev => ({ ...prev, isPlaying: false }));
+        }
       });
 
       audio.addEventListener('ended', () => {
-        setState(prev => ({
-          ...prev,
-          isPlaying: false,
-          currentTime: 0,
-        }));
+        if (isMountedRef.current) {
+          setState(prev => ({
+            ...prev,
+            isPlaying: false,
+            currentTime: 0,
+          }));
+        }
       });
 
       audio.addEventListener('error', (e) => {
-        console.error('🚨 Web: Audio error:', e);
-        setState(prev => ({
-          ...prev,
-          isLoading: false,
-          isPlaying: false,
-          error: `Erro ao carregar áudio`,
-        }));
+        console.error('Erro no áudio web:', e);
+        if (isMountedRef.current) {
+          setState(prev => ({
+            ...prev,
+            isLoading: false,
+            isPlaying: false,
+            error: 'Erro ao carregar áudio',
+          }));
+        }
       });
 
       // Extract audio ID to try different URL formats
-      const audioIdMatch = audioUrl.match(/\/audios\/([^\/]+)\/stream/);
+      const audioIdMatch = audioUrl.match(/\/audio\/stream\/([^\/\?]+)/);
       const audioId = audioIdMatch ? audioIdMatch[1] : null;
       
-      // Try AudioScreen format first (seems to work better)
+      // Use standardized audio streaming endpoint
       const urlToTry = audioId ? `http://localhost:8000/audio/stream/${audioId}` : audioUrl;
       
       console.log('🎵 Web: Trying URL:', urlToTry);
@@ -175,12 +205,14 @@ export const useAudioPlayer = (audioUrl: string): UseAudioPlayerReturn => {
       audio.load();
 
     } catch (error) {
-      console.error('🚨 Web: Failed to initialize audio:', error);
-      setState(prev => ({
-        ...prev,
-        isLoading: false,
-        error: `Failed to initialize audio: ${error}`,
-      }));
+      console.error('Erro ao inicializar áudio web:', error);
+      if (isMountedRef.current) {
+        setState(prev => ({
+          ...prev,
+          isLoading: false,
+          error: 'Falha ao inicializar áudio',
+        }));
+      }
     }
   }, [audioUrl]);
 
@@ -216,12 +248,14 @@ export const useAudioPlayer = (audioUrl: string): UseAudioPlayerReturn => {
       }, 100);
 
     } catch (error) {
-      console.error('🚨 Mobile: Failed to load audio:', error);
-      setState(prev => ({
-        ...prev,
-        isLoading: false,
-        error: `Failed to load audio: ${error}`,
-      }));
+      console.error('Erro ao carregar áudio mobile:', error);
+      if (isMountedRef.current) {
+        setState(prev => ({
+          ...prev,
+          isLoading: false,
+          error: 'Falha ao carregar áudio',
+        }));
+      }
     }
   }, [audioUrl]);
 
@@ -238,26 +272,29 @@ export const useAudioPlayer = (audioUrl: string): UseAudioPlayerReturn => {
         buffered,
       });
 
-      setState(prev => ({
-        ...prev,
-        currentTime,
-        duration,
-        isPlaying: status.isPlaying || false,
-        buffered,
-        error: null,
-      }));
+      if (isMountedRef.current) {
+        setState(prev => ({
+          ...prev,
+          currentTime,
+          duration,
+          isPlaying: status.isPlaying || false,
+          buffered,
+          error: null,
+        }));
+      }
 
-      if (status.didJustFinish) {
+      if (status.didJustFinish && isMountedRef.current) {
         setState(prev => ({
           ...prev,
           isPlaying: false,
           currentTime: 0,
         }));
       }
-    } else if (status.error) {
+    } else if (status.error && isMountedRef.current) {
+      console.error('Erro na reprodução:', status.error);
       setState(prev => ({
         ...prev,
-        error: `Playback error: ${status.error}`,
+        error: 'Erro na reprodução do áudio',
         isPlaying: false,
       }));
     }
@@ -277,12 +314,14 @@ export const useAudioPlayer = (audioUrl: string): UseAudioPlayerReturn => {
         await soundRef.current.playAsync();
       }
     } catch (error) {
-      console.error('🚨 Failed to play:', error);
-      setState(prev => ({
-        ...prev,
-        error: `Failed to play: ${error}`,
-        isPlaying: false,
-      }));
+      console.error('Erro ao reproduzir áudio:', error);
+      if (isMountedRef.current) {
+        setState(prev => ({
+          ...prev,
+          error: 'Falha ao reproduzir áudio',
+          isPlaying: false,
+        }));
+      }
     }
   }, [isWeb, onPlaybackStatusUpdate, stopAllOtherPlayers]);
 
@@ -294,11 +333,13 @@ export const useAudioPlayer = (audioUrl: string): UseAudioPlayerReturn => {
         await soundRef.current.pauseAsync();
       }
     } catch (error) {
-      console.error('🚨 Failed to pause:', error);
-      setState(prev => ({
-        ...prev,
-        error: `Failed to pause: ${error}`,
-      }));
+      console.error('Erro ao pausar áudio:', error);
+      if (isMountedRef.current) {
+        setState(prev => ({
+          ...prev,
+          error: 'Falha ao pausar áudio',
+        }));
+      }
     }
   }, [isWeb]);
 
@@ -322,11 +363,13 @@ export const useAudioPlayer = (audioUrl: string): UseAudioPlayerReturn => {
         }));
       }
     } catch (error) {
-      console.error('🚨 Failed to stop:', error);
-      setState(prev => ({
-        ...prev,
-        error: `Failed to stop: ${error}`,
-      }));
+      console.error('Erro ao parar áudio:', error);
+      if (isMountedRef.current) {
+        setState(prev => ({
+          ...prev,
+          error: 'Falha ao parar áudio',
+        }));
+      }
     }
   }, [isWeb]);
 
@@ -338,14 +381,18 @@ export const useAudioPlayer = (audioUrl: string): UseAudioPlayerReturn => {
         if (isFinite(htmlAudioRef.current.duration) && htmlAudioRef.current.duration > 0) {
           htmlAudioRef.current.currentTime = Math.max(0, Math.min(time, htmlAudioRef.current.duration));
         } else {
-          console.log('🚨 Web: Cannot seek - duration not available');
-          setState(prev => ({ ...prev, error: 'Duração do áudio ainda não foi carregada' }));
+          console.log('Web: Não é possível navegar - duração não disponível');
+          if (isMountedRef.current) {
+            setState(prev => ({ ...prev, error: 'Duração do áudio ainda não foi carregada' }));
+          }
         }
       } else if (!isWeb && soundRef.current) {
         const status = await soundRef.current.getStatusAsync();
         if (!status.isLoaded) {
-          console.log('🚨 Mobile: Sound is not loaded yet, cannot seek');
-          setState(prev => ({ ...prev, error: 'Áudio ainda não foi carregado completamente' }));
+          console.log('Mobile: Áudio não carregado, não é possível navegar');
+          if (isMountedRef.current) {
+            setState(prev => ({ ...prev, error: 'Áudio ainda não foi carregado completamente' }));
+          }
           return;
         }
 
@@ -353,20 +400,24 @@ export const useAudioPlayer = (audioUrl: string): UseAudioPlayerReturn => {
         console.log('🎵 Mobile: Seeking to position (ms):', timeInMillis);
         await soundRef.current.setPositionAsync(timeInMillis);
 
-        setState(prev => ({
-          ...prev,
-          currentTime: time,
-          error: null,
-        }));
+        if (isMountedRef.current) {
+          setState(prev => ({
+            ...prev,
+            currentTime: time,
+            error: null,
+          }));
+        }
       }
 
       console.log('🎵 Seek completed');
     } catch (error) {
-      console.error('🚨 Seek failed:', error);
-      setState(prev => ({
-        ...prev,
-        error: `Failed to seek: ${error}`,
-      }));
+      console.error('Erro ao navegar no áudio:', error);
+      if (isMountedRef.current) {
+        setState(prev => ({
+          ...prev,
+          error: 'Falha ao navegar no áudio',
+        }));
+      }
     }
   }, [isWeb]);
 
@@ -380,13 +431,17 @@ export const useAudioPlayer = (audioUrl: string): UseAudioPlayerReturn => {
         await soundRef.current.setVolumeAsync(clampedVolume);
       }
       
-      setState(prev => ({ ...prev, volume: clampedVolume }));
+      if (isMountedRef.current) {
+        setState(prev => ({ ...prev, volume: clampedVolume }));
+      }
     } catch (error) {
-      console.error('🚨 Failed to set volume:', error);
-      setState(prev => ({
-        ...prev,
-        error: `Failed to set volume: ${error}`,
-      }));
+      console.error('Erro ao ajustar volume:', error);
+      if (isMountedRef.current) {
+        setState(prev => ({
+          ...prev,
+          error: 'Falha ao ajustar volume',
+        }));
+      }
     }
   }, [isWeb]);
 
@@ -402,13 +457,17 @@ export const useAudioPlayer = (audioUrl: string): UseAudioPlayerReturn => {
         console.log('🎵 Mobile: Playback rate set to', clampedRate);
       }
       
-      setState(prev => ({ ...prev, playbackRate: clampedRate }));
+      if (isMountedRef.current) {
+        setState(prev => ({ ...prev, playbackRate: clampedRate }));
+      }
     } catch (error) {
-      console.error('🚨 Failed to set playback rate:', error);
-      setState(prev => ({
-        ...prev,
-        error: `Failed to set playback rate: ${error}`,
-      }));
+      console.error('Erro ao ajustar velocidade de reprodução:', error);
+      if (isMountedRef.current) {
+        setState(prev => ({
+          ...prev,
+          error: 'Falha ao ajustar velocidade de reprodução',
+        }));
+      }
     }
   }, [isWeb]);
 

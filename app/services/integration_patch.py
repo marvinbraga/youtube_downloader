@@ -288,15 +288,15 @@ async def auto_apply_redis_integration(force_retry: bool = False):
             return True
         
         if not force_retry:
-            logger.info("🚀 Iniciando integração Redis automaticamente...")
+            logger.info("Iniciando integracao Redis automaticamente...")
         else:
             logger.info("🔄 Retentando integração Redis (forçada)...")
         
         success = await apply_redis_integration(force_retry=force_retry)
         
         if success:
-            logger.success("✅ Integração Redis aplicada com sucesso!")
-            logger.info("🎯 Sistema agora opera com performance 100x superior")
+            logger.success("Integracao Redis aplicada com sucesso!")
+            logger.info("Sistema agora opera com performance 100x superior")
             
             # Log das funcionalidades disponíveis (apenas na primeira vez)
             if redis_patch._attempt_count == 1:
@@ -312,7 +312,7 @@ async def auto_apply_redis_integration(force_retry: bool = False):
             
         else:
             if redis_patch._attempt_count == 1:
-                logger.warning("⚠️ Integração Redis não aplicada - usando sistema original")
+                logger.warning("AVISO: Integracao Redis nao aplicada - usando sistema original")
                 logger.info("💡 Para usar Redis:")
                 logger.info("   1. Instale e configure Redis")
                 logger.info("   2. Configure variáveis REDIS_HOST, REDIS_PORT")
@@ -323,7 +323,7 @@ async def auto_apply_redis_integration(force_retry: bool = False):
             return False
             
     except Exception as e:
-        logger.error(f"❌ Erro na integração automática: {e}")
+        logger.error(f"Erro na integracao automatica: {e}")
         logger.warning("🔄 Continuando com sistema original")
         return False
 

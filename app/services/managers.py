@@ -11,8 +11,7 @@ from fastapi import HTTPException
 from loguru import logger
 from yt_dlp import YoutubeDL
 
-from app.services.configs import AUDIO_DIR, audio_mapping, AUDIO_CONFIG_PATH
-from app.services.files import load_json_audios
+from app.services.configs import AUDIO_DIR, audio_mapping
 from app.services.locks import audio_file_lock
 
 
@@ -76,42 +75,25 @@ class AudioDownloadManager:
         Inicializa o gerenciador de download de áudio usando o diretório de áudio configurado
         """
         self.download_dir = AUDIO_DIR
-        self.audio_data = self._load_audio_data()
+        # audios.json eliminado - dados vazios
+        self.audio_data = {"audios": [], "mappings": {}}
         logger.debug(f"Gerenciador de download de áudio inicializado com diretório: {self.download_dir}")
     
     def _load_audio_data(self) -> Dict[str, Any]:
         """
-        Carrega os dados de áudio do arquivo JSON utilizando a função load_json_audios de forma thread-safe
+        Função obsoleta - sistema agora usa apenas Redis para dados de áudio
         
         Returns:
-            Dicionário com os dados de áudio
+            Dicionário vazio (para compatibilidade)
         """
-        with audio_file_lock:
-            return load_json_audios()
+        logger.warning("AudioDownloadManager._load_audio_data() called but audios.json is no longer used")
+        return {"audios": [], "mappings": {}}
     
     def _save_audio_data(self) -> None:
         """
-        Salva os dados de áudio no arquivo JSON de forma thread-safe
+        Função obsoleta - sistema agora usa apenas Redis para dados de áudio
         """
-        with audio_file_lock:
-            try:
-                # Escrever primeiro para arquivo temporário para operação atômica
-                temp_path = Path(str(AUDIO_CONFIG_PATH) + '.tmp')
-                with open(temp_path, 'w', encoding='utf-8') as f:
-                    json.dump(self.audio_data, f, ensure_ascii=False, indent=2)
-                
-                # Renomear arquivo temporário para o arquivo final (operação atômica)
-                temp_path.replace(AUDIO_CONFIG_PATH)
-                
-            except Exception as e:
-                logger.error(f"Erro ao salvar arquivo de configuração de áudio: {str(e)}")
-                # Remover arquivo temporário em caso de erro
-                temp_path = Path(str(AUDIO_CONFIG_PATH) + '.tmp')
-                if temp_path.exists():
-                    try:
-                        temp_path.unlink()
-                    except:
-                        pass
+        logger.warning("AudioDownloadManager._save_audio_data() called but audios.json is no longer used")
     
     def extract_youtube_id(self, url: str) -> Optional[str]:
         """
@@ -162,9 +144,9 @@ class AudioDownloadManager:
             ID do áudio registrado
         """
         try:
-                
             # Recarregar dados do arquivo para garantir que temos a versão mais atual
-            self.audio_data = self._load_audio_data()
+            # audios.json eliminado - dados vazios
+            self.audio_data = {"audios": [], "mappings": {}}
             
             # Extrair ID e informações básicas do YouTube
             youtube_id = self.extract_youtube_id(url)
@@ -187,7 +169,7 @@ class AudioDownloadManager:
                     # Fallback para um título baseado no ID do YouTube
                     title = f"Video_{youtube_id}"
             
-            # Criar entrada no audios.json com status downloading
+            # Criar entrada no Redis com status downloading
             created_date = datetime.datetime.now().isoformat()
             
             audio_metadata = {
@@ -214,7 +196,7 @@ class AudioDownloadManager:
             self.audio_data["audios"].append(audio_metadata)
             
             # Salvar os dados
-            self._save_audio_data()
+            # audios.json eliminado - operação ignorada
             
             return youtube_id
             
@@ -251,7 +233,7 @@ class AudioDownloadManager:
                 }
                 
                 self.audio_data["audios"].append(audio_metadata)
-                self._save_audio_data()
+                # audios.json eliminado - operação ignorada
                 
                 return youtube_id
             else:
@@ -269,9 +251,9 @@ class AudioDownloadManager:
             Caminho do arquivo baixado
         """
         try:
-            
             # Recarregar dados do arquivo para garantir que temos a versão mais atual
-            self.audio_data = self._load_audio_data()
+            # audios.json eliminado - dados vazios
+            self.audio_data = {"audios": [], "mappings": {}}
             
             # Primeiro, vamos extrair as informações do vídeo para obter o ID do YouTube
             youtube_id = self.extract_youtube_id(url)
@@ -371,7 +353,7 @@ class AudioDownloadManager:
                 self.audio_data["mappings"].update(mappings)
                 
                 # Salvar os dados
-                self._save_audio_data()
+                # audios.json eliminado - operação ignorada
                 
                 # Atualizar o mapeamento em memória
                 self._add_audio_mappings(filename, info, youtube_id)
@@ -400,9 +382,9 @@ class AudioDownloadManager:
             Caminho do arquivo baixado
         """
         try:
-            
             # Recarregar dados do arquivo para garantir que temos a versão mais atual
-            self.audio_data = self._load_audio_data()
+            # audios.json eliminado - dados vazios
+            self.audio_data = {"audios": [], "mappings": {}}
             
             # Notificar início via SSE
             if sse_manager:
@@ -484,7 +466,7 @@ class AudioDownloadManager:
                             "modified_date": datetime.datetime.now().isoformat()
                         })
                         break
-                self._save_audio_data()
+                # audios.json eliminado - operação ignorada
                 
                 # Notificar erro via SSE
                 if sse_manager:
@@ -526,7 +508,7 @@ class AudioDownloadManager:
             self.audio_data["mappings"].update(mappings)
             
             # Salvar os dados
-            self._save_audio_data()
+            # audios.json eliminado - operação ignorada
             
             # Atualizar o mapeamento em memória
             self._add_audio_mappings(filename, info, audio_id)
@@ -554,7 +536,7 @@ class AudioDownloadManager:
                     })
                     break
             
-            self._save_audio_data()
+            # audios.json eliminado - operação ignorada
             raise
     
     def get_audio_info(self, audio_id: str) -> Optional[Dict[str, Any]]:
@@ -596,7 +578,8 @@ class AudioDownloadManager:
             True se atualizado com sucesso, False caso contrário
         """
         # Recarregar dados do arquivo para garantir que temos a versão mais atual
-        self.audio_data = self._load_audio_data()
+        # audios.json eliminado - dados vazios
+        self.audio_data = {"audios": [], "mappings": {}}
         
         for audio in self.audio_data["audios"]:
             if audio["id"] == audio_id:
@@ -616,7 +599,7 @@ class AudioDownloadManager:
                 audio["modified_date"] = datetime.datetime.now().isoformat()
                 
                 # Salva os dados
-                self._save_audio_data()
+                # audios.json eliminado - operação ignorada
                 
                 
                 return True
@@ -729,7 +712,8 @@ class AudioDownloadManager:
                         changes_made = True
             
             if changes_made:
-                self._save_audio_data()
+                # audios.json eliminado - operação ignorada
+                logger.info("Migração de dados concluída com sucesso")
         except Exception as e:
             logger.error(f"Erro durante a migração de dados: {str(e)}")
     
@@ -747,13 +731,14 @@ class AudioDownloadManager:
                 current_progress = progress_data.get('current_progress', 0)
                 if current_progress != last_progress and current_progress > 0:
                     # Recarregar dados antes de atualizar para evitar sobrescrever alterações
-                    self.audio_data = self._load_audio_data()
+                    # audios.json eliminado - dados vazios
+                    self.audio_data = {"audios": [], "mappings": {}}
                     # Atualizar no arquivo JSON
                     for i, audio in enumerate(self.audio_data["audios"]):
                         if audio["id"] == audio_id:
                             self.audio_data["audios"][i]["download_progress"] = current_progress
                             break
-                    self._save_audio_data()
+                    # audios.json eliminado - operação ignorada
                     last_progress = current_progress
                 
                 time.sleep(1)  # Check a cada segundo

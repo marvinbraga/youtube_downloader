@@ -24,13 +24,60 @@ const api = axios.create({
 // Interceptor para adicionar o token de autenticação
 api.interceptors.request.use(
   async (config) => {
-    const token = await AsyncStorage.getItem('@auth_token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    try {
+      const token = await AsyncStorage.getItem('@auth_token');
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+    } catch (error) {
+      console.error('Erro ao obter token de autenticação:', error);
     }
     return config;
   },
-  (error) => Promise.reject(error)
+  (error) => {
+    console.error('Erro no interceptor de requisição:', error);
+    return Promise.reject(error);
+  }
+);
+
+// Interceptor para tratamento de respostas e retry automático
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+    
+    // Se é erro 401 e não é uma tentativa de retry
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true;
+      
+      try {
+        console.log('Token expirado, tentando reautenticar...');
+        const newToken = await authenticate();
+        originalRequest.headers.Authorization = `Bearer ${newToken}`;
+        return api(originalRequest);
+      } catch (authError) {
+        console.error('Erro na reautenticação:', authError);
+        // Limpar token inválido
+        try {
+          await AsyncStorage.removeItem('@auth_token');
+        } catch (storageError) {
+          console.error('Erro ao limpar token:', storageError);
+        }
+        return Promise.reject(authError);
+      }
+    }
+    
+    // Log detalhado do erro para depuração
+    console.error('Erro na API:', {
+      url: error.config?.url,
+      method: error.config?.method,
+      status: error.response?.status,
+      message: error.message,
+      data: error.response?.data
+    });
+    
+    return Promise.reject(error);
+  }
 );
 
 // Constantes
@@ -70,12 +117,8 @@ export const fetchVideos = async (sortBy = 'none'): Promise<Video[]> => {
       transcription_status: ensureTranscriptionStatus(video.transcription_status)
     }));
   } catch (error) {
-    if (axios.isAxiosError(error) && error.response?.status === 401) {
-      await authenticate();
-      return fetchVideos(sortBy);
-    }
     console.error('Erro ao buscar vídeos:', error);
-    throw error;
+    throw new Error('Falha ao carregar lista de vídeos');
   }
 };
 
@@ -86,12 +129,8 @@ export const fetchVideoStream = async (videoId: string): Promise<Blob> => {
     });
     return response.data;
   } catch (error) {
-    if (axios.isAxiosError(error) && error.response?.status === 401) {
-      await authenticate();
-      return fetchVideoStream(videoId);
-    }
     console.error('Erro ao buscar stream de vídeo:', error);
-    throw error;
+    throw new Error('Falha ao carregar stream do vídeo');
   }
 };
 
@@ -109,12 +148,8 @@ export const fetchAudios = async (): Promise<Audio[]> => {
       transcription_status: ensureTranscriptionStatus(audio.transcription_status)
     }));
   } catch (error) {
-    if (axios.isAxiosError(error) && error.response?.status === 401) {
-      await authenticate();
-      return fetchAudios();
-    }
     console.error('Erro ao buscar áudios:', error);
-    throw error;
+    throw new Error('Falha ao carregar lista de áudios');
   }
 };
 
@@ -125,12 +160,8 @@ export const checkAudioExists = async (youtubeUrl: string): Promise<AudioExistsR
     });
     return response.data;
   } catch (error) {
-    if (axios.isAxiosError(error) && error.response?.status === 401) {
-      await authenticate();
-      return checkAudioExists(youtubeUrl);
-    }
     console.error('Erro ao verificar existência de áudio:', error);
-    throw error;
+    throw new Error('Falha ao verificar se o áudio já existe');
   }
 };
 
@@ -142,12 +173,8 @@ export const downloadAudio = async (youtubeUrl: string, highQuality: boolean): P
     });
     return response.data;
   } catch (error) {
-    if (axios.isAxiosError(error) && error.response?.status === 401) {
-      await authenticate();
-      return downloadAudio(youtubeUrl, highQuality);
-    }
     console.error('Erro ao fazer download de áudio:', error);
-    throw error;
+    throw new Error('Falha ao iniciar download do áudio');
   }
 };
 
@@ -170,12 +197,8 @@ export const transcribeAudio = async (
       status: ensureTranscriptionStatus(response.data.status)
     };
   } catch (error) {
-    if (axios.isAxiosError(error) && error.response?.status === 401) {
-      await authenticate();
-      return transcribeAudio(audioId, provider, language);
-    }
     console.error('Erro ao transcrever áudio:', error);
-    throw error;
+    throw new Error('Falha ao iniciar transcrição do áudio');
   }
 };
 
@@ -189,12 +212,8 @@ export const checkTranscriptionStatus = async (audioId: string): Promise<{status
       status: ensureTranscriptionStatus(response.data.status)
     };
   } catch (error) {
-    if (axios.isAxiosError(error) && error.response?.status === 401) {
-      await authenticate();
-      return checkTranscriptionStatus(audioId);
-    }
     console.error('Erro ao verificar status da transcrição:', error);
-    throw error;
+    throw new Error('Falha ao verificar status da transcrição');
   }
 };
 
@@ -206,12 +225,8 @@ export const fetchTranscription = async (itemId: string): Promise<string> => {
     });
     return response.data;
   } catch (error) {
-    if (axios.isAxiosError(error) && error.response?.status === 401) {
-      await authenticate();
-      return fetchTranscription(itemId);
-    }
     console.error('Erro ao buscar transcrição:', error);
-    throw error;
+    throw new Error('Falha ao carregar texto da transcrição');
   }
 };
 
@@ -221,12 +236,8 @@ export const getQueueStatus = async (): Promise<any> => {
     const response = await api.get('/downloads/queue/status');
     return response.data;
   } catch (error) {
-    if (axios.isAxiosError(error) && error.response?.status === 401) {
-      await authenticate();
-      return getQueueStatus();
-    }
     console.error('Erro ao obter status da fila:', error);
-    throw error;
+    throw new Error('Falha ao obter status da fila de downloads');
   }
 };
 
@@ -239,12 +250,8 @@ export const getQueueTasks = async (status?: string, audioId?: string): Promise<
     const response = await api.get(`/downloads/queue/tasks?${params.toString()}`);
     return response.data;
   } catch (error) {
-    if (axios.isAxiosError(error) && error.response?.status === 401) {
-      await authenticate();
-      return getQueueTasks(status, audioId);
-    }
     console.error('Erro ao obter tasks da fila:', error);
-    throw error;
+    throw new Error('Falha ao obter tarefas da fila de downloads');
   }
 };
 
@@ -253,12 +260,8 @@ export const cancelDownloadTask = async (taskId: string): Promise<any> => {
     const response = await api.post(`/downloads/queue/cancel/${taskId}`);
     return response.data;
   } catch (error) {
-    if (axios.isAxiosError(error) && error.response?.status === 401) {
-      await authenticate();
-      return cancelDownloadTask(taskId);
-    }
     console.error('Erro ao cancelar download:', error);
-    throw error;
+    throw new Error('Falha ao cancelar download');
   }
 };
 
@@ -267,12 +270,8 @@ export const retryDownloadTask = async (taskId: string): Promise<any> => {
     const response = await api.post(`/downloads/queue/retry/${taskId}`);
     return response.data;
   } catch (error) {
-    if (axios.isAxiosError(error) && error.response?.status === 401) {
-      await authenticate();
-      return retryDownloadTask(taskId);
-    }
     console.error('Erro ao fazer retry do download:', error);
-    throw error;
+    throw new Error('Falha ao tentar novamente o download');
   }
 };
 
@@ -281,12 +280,8 @@ export const cleanupQueue = async (maxAgeHours: number = 24): Promise<any> => {
     const response = await api.delete(`/downloads/queue/cleanup?max_age_hours=${maxAgeHours}`);
     return response.data;
   } catch (error) {
-    if (axios.isAxiosError(error) && error.response?.status === 401) {
-      await authenticate();
-      return cleanupQueue(maxAgeHours);
-    }
     console.error('Erro ao limpar fila:', error);
-    throw error;
+    throw new Error('Falha ao limpar fila de downloads');
   }
 };
 

@@ -217,18 +217,13 @@ def temp_json_files():
         }
     ]
     
-    audio_file = os.path.join(temp_dir, 'audios.json')
     video_file = os.path.join(temp_dir, 'videos.json')
-    
-    with open(audio_file, 'w', encoding='utf-8') as f:
-        json.dump(audio_data, f, indent=2)
     
     with open(video_file, 'w', encoding='utf-8') as f:
         json.dump(video_data, f, indent=2)
     
     yield {
         'temp_dir': temp_dir,
-        'audio_file': audio_file,
         'video_file': video_file,
         'audio_data': audio_data,
         'video_data': video_data

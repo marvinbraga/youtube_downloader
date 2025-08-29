@@ -36,7 +36,8 @@
       "WebFetch(domain:github.com)",
       "Bash(git log:*)",
       "Bash(git restore:*)",
-      "Bash(echo $USE_REDIS)"
+      "Bash(echo $USE_REDIS)",
+      "Bash(del:*)"
     ],
     "deny": [],
     "additionalDirectories": [

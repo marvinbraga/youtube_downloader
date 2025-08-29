@@ -92,7 +92,8 @@ class RedisAPIEndpoints:
                 try:
                     # Executa Redis e JSON em paralelo
                     redis_task = self._get_audios_from_redis()
-                    json_task = self._get_audios_from_json()
+                    # audios.json eliminado - sem fallback JSON
+                    json_task = None
                     
                     redis_result, json_result = await asyncio.gather(
                         redis_task, json_task, return_exceptions=True
@@ -133,7 +134,8 @@ class RedisAPIEndpoints:
                 except Exception as e:
                     logger.warning(f"Falha no Redis, usando fallback JSON: {e}")
                     # Auto-fallback para JSON
-                    audios = await self._get_audios_from_json()
+                    # audios.json eliminado - usar apenas Redis
+                    audios = []
                     performance_ms = (time.time() - start_time) * 1000
                     
                     return HybridResponse.create_response(
@@ -146,7 +148,8 @@ class RedisAPIEndpoints:
             
             # Modo JSON direto
             else:
-                audios = await self._get_audios_from_json()
+                # audios.json eliminado - usar apenas Redis
+                audios = []
                 performance_ms = (time.time() - start_time) * 1000
                 
                 return HybridResponse.create_response(
@@ -269,10 +272,9 @@ class RedisAPIEndpoints:
         return await self.redis_audio_manager.get_all_audios()
     
     async def _get_audios_from_json(self) -> List[Dict[str, Any]]:
-        """Obtém audios do JSON"""
-        # Executa scan_audio_directory em thread pool para não bloquear
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, scan_audio_directory)
+        """Função obsoleta - audios.json eliminado"""
+        logger.warning("_get_audios_from_json() called but audios.json is no longer used")
+        return []
     
     async def _search_audios_redis(self, query: str, limit: int, offset: int) -> List[Dict[str, Any]]:
         """Busca otimizada no Redis"""
@@ -289,7 +291,8 @@ class RedisAPIEndpoints:
     async def _search_audios_json(self, query: str, limit: int, offset: int) -> List[Dict[str, Any]]:
         """Busca básica no JSON"""
         loop = asyncio.get_event_loop()
-        all_audios = await loop.run_in_executor(None, scan_audio_directory)
+        # audios.json eliminado - retorna lista vazia
+        all_audios = []
         
         # Busca simples por título e descrição
         query_lower = query.lower()

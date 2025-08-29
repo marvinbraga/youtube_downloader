@@ -289,25 +289,13 @@ class HybridModeManager:
             health["redis_status"] = "error"
             health["redis_connection"] = str(e)
         
-        # Testa operações básicas JSON
-        try:
-            from app.services.files import scan_audio_directory
-            import time
-            
-            json_start = time.time()
-            audios = scan_audio_directory()
-            json_time = (time.time() - json_start) * 1000
-            
-            health["json_operations"] = {
-                "status": "ok",
-                "test_time_ms": round(json_time, 2),
-                "sample_count": len(audios) if audios else 0
-            }
-        except Exception as e:
-            health["json_operations"] = {
-                "status": "error", 
-                "error": str(e)
-            }
+        # Sistema JSON eliminado - apenas documenta
+        health["json_operations"] = {
+            "status": "disabled",
+            "message": "audios.json system completely eliminated",
+            "test_time_ms": 0,
+            "sample_count": 0
+        }
         
         # Adiciona resumo de performance
         if self.config.performance_monitoring:

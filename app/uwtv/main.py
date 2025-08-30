@@ -465,7 +465,7 @@ async def transcribe_audio(
         else:
             # Se não encontrou no gerenciador, tenta encontrar o arquivo
             try:
-                audio_path = TranscriptionService.find_audio_file(request.file_id)
+                audio_path = await TranscriptionService.find_audio_file(request.file_id)
             except FileNotFoundError:
                 logger.error(f"Arquivo de áudio não encontrado: '{request.file_id}'")
                 raise HTTPException(
@@ -592,7 +592,7 @@ async def transcribe_audio(
                     # Salva a transcrição
                     if docs:
                         output_path = str(transcription_file)
-                        transcription_path = TranscriptionService.save_transcription(docs, output_path)
+                        transcription_path = await TranscriptionService.save_transcription(docs, output_path)
                         
                         # Notificar progresso de salvamento
                         if redis_progress_manager:
@@ -694,7 +694,7 @@ async def get_transcription(
         # Se não encontrou no gerenciador ou o status não é "ended", tenta encontrar o arquivo
         try:
             # Tenta encontrar o arquivo de áudio
-            audio_file = TranscriptionService.find_audio_file(file_id)
+            audio_file = await TranscriptionService.find_audio_file(file_id)
             transcription_file = audio_file.with_suffix(".md")
             
             if not transcription_file.exists():

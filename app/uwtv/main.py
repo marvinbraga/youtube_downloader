@@ -677,7 +677,7 @@ async def get_transcription(
     try:
         
         # Primeiro verifica no gerenciador de áudio
-        audio_info = audio_manager.get_audio_info(file_id)
+        audio_info = await audio_manager.get_audio_info(file_id)
         
         if audio_info and audio_info.get("transcription_status") == "ended":
             transcription_path = AUDIO_DIR.parent / audio_info["transcription_path"]
@@ -838,7 +838,7 @@ async def get_transcription_status(
         # log de informação
         
         # Procura no gerenciador de áudio
-        audio_info = audio_manager.get_audio_info(file_id)
+        audio_info = await audio_manager.get_audio_info(file_id)
         
         if not audio_info:
             logger.warning(f"Áudio não encontrado: {file_id}")
@@ -934,7 +934,7 @@ async def get_download_status(
         sse_status = sse_manager.get_download_status(audio_id)
         
         # Depois, verifica no gerenciador de áudio (dados persistidos)
-        audio_info = audio_manager.get_audio_info(audio_id)
+        audio_info = await audio_manager.get_audio_info(audio_id)
         
         if not audio_info and not sse_status:
             raise HTTPException(

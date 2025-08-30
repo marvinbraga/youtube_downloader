@@ -422,7 +422,7 @@ async def transcribe_audio(
     try:
         
         # Verifica se existe informação do áudio no gerenciador
-        audio_info = audio_manager.get_audio_info(request.file_id)
+        audio_info = await audio_manager.get_audio_info(request.file_id)
         
         if audio_info:
             audio_path = AUDIO_DIR.parent / audio_info["path"]
@@ -482,7 +482,7 @@ async def transcribe_audio(
             # Se encontramos no sistema de arquivos mas o status não está correto, atualizamos o gerenciador
             if audio_info:
                 rel_path = str(transcription_file.relative_to(AUDIO_DIR.parent))
-                audio_manager.update_transcription_status(
+                await audio_manager.update_transcription_status(
                     audio_info["id"],
                     "ended",
                     rel_path
@@ -525,7 +525,7 @@ async def transcribe_audio(
         
         # Atualiza o status para "started" antes de iniciar a transcrição
         if audio_info:
-            audio_manager.update_transcription_status(audio_info["id"], "started")
+            await audio_manager.update_transcription_status(audio_info["id"], "started")
             
         # Cria uma tarefa em segundo plano para transcrição
         async def async_transcribe_task():
@@ -601,7 +601,7 @@ async def transcribe_audio(
                         # Atualiza o status no gerenciador se houver ID
                         if audio_info:
                             rel_path = Path(transcription_path).relative_to(AUDIO_DIR.parent)
-                            audio_manager.update_transcription_status(
+                            await audio_manager.update_transcription_status(
                                 audio_info["id"], 
                                 "ended",
                                 str(rel_path)
@@ -620,7 +620,7 @@ async def transcribe_audio(
                         error_msg = "Falha na transcrição: nenhum conteúdo gerado"
                         
                         if audio_info:
-                            audio_manager.update_transcription_status(audio_info["id"], "error")
+                            await audio_manager.update_transcription_status(audio_info["id"], "error")
                         
                         if redis_progress_manager:
                             await redis_progress_manager.fail_task(
@@ -636,7 +636,7 @@ async def transcribe_audio(
                 
                 # Em caso de erro, atualiza o status para "error"
                 if audio_info:
-                    audio_manager.update_transcription_status(audio_info["id"], "error")
+                    await audio_manager.update_transcription_status(audio_info["id"], "error")
                 
                 if redis_progress_manager:
                     await redis_progress_manager.fail_task(
@@ -708,7 +708,7 @@ async def get_transcription(
             # Se encontrou o arquivo, mas o status no gerenciador não está correto, atualiza-o
             if audio_info and audio_info.get("transcription_status") != "ended":
                 rel_path = str(transcription_file.relative_to(AUDIO_DIR.parent))
-                audio_manager.update_transcription_status(audio_info["id"], "ended", rel_path)
+                await audio_manager.update_transcription_status(audio_info["id"], "ended", rel_path)
         except FileNotFoundError:
             # Tenta procurar a transcrição diretamente
             transcription_files = list(AUDIO_DIR.glob("**/*.md"))
@@ -732,7 +732,7 @@ async def get_transcription(
             # Também atualiza o status no gerenciador se possível
             if audio_info:
                 rel_path = str(transcription_file.relative_to(AUDIO_DIR.parent))
-                audio_manager.update_transcription_status(audio_info["id"], "ended", rel_path)
+                await audio_manager.update_transcription_status(audio_info["id"], "ended", rel_path)
         
         # Retorna o arquivo de transcrição
         return FileResponse(

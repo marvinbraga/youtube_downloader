@@ -382,7 +382,7 @@ class RedisAudioDownloadManager:
             else:
                 raise
     
-    def get_audio_info(self, audio_id: str) -> Optional[Dict[str, Any]]:
+    async def get_audio_info(self, audio_id: str) -> Optional[Dict[str, Any]]:
         """
         Obtém informações de um áudio pelo ID
         
@@ -393,7 +393,7 @@ class RedisAudioDownloadManager:
             Dicionário com informações do áudio ou None se não encontrado
         """
         if self.use_redis:
-            return asyncio.run(self._get_audio_info_redis(audio_id))
+            return await self._get_audio_info_redis(audio_id)
         else:
             return self._get_audio_info_json(audio_id)
     
@@ -485,7 +485,7 @@ class RedisAudioDownloadManager:
             # audios.json eliminado - retorna dados vazios
             return {"audios": [], "mappings": {}}
     
-    def update_transcription_status(self, audio_id: str, status: str, transcription_path: str = None) -> bool:
+    async def update_transcription_status(self, audio_id: str, status: str, transcription_path: str = None) -> bool:
         """
         Atualiza o status de transcrição de um áudio
         
@@ -498,7 +498,7 @@ class RedisAudioDownloadManager:
             True se atualizado com sucesso, False caso contrário
         """
         if self.use_redis:
-            return asyncio.run(self._update_transcription_status_redis(audio_id, status, transcription_path))
+            return await self._update_transcription_status_redis(audio_id, status, transcription_path)
         else:
             return self._update_transcription_status_json(audio_id, status, transcription_path)
     

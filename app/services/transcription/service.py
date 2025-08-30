@@ -132,7 +132,7 @@ class TranscriptionService:
         return RedisAudioDownloadManager()
     
     @staticmethod
-    def find_audio_file(file_id: str) -> Path:
+    async def find_audio_file(file_id: str) -> Path:
         """
         Encontra um arquivo de áudio pelo ID.
         
@@ -147,7 +147,7 @@ class TranscriptionService:
         """
         # Primeiro verifica se é um ID de áudio no gerenciador
         audio_manager = TranscriptionService.get_audio_manager()
-        audio_info = audio_manager.get_audio_info(file_id)
+        audio_info = await audio_manager.get_audio_info(file_id)
         
         if audio_info:
             # Se encontrou no gerenciador, retorna o caminho do arquivo
@@ -413,7 +413,7 @@ class TranscriptionService:
             raise
 
     @staticmethod
-    def save_transcription(docs: List[Dict], output_path: Optional[str] = None) -> str:
+    async def save_transcription(docs: List[Dict], output_path: Optional[str] = None) -> str:
         """
         Salva a transcrição em um arquivo markdown.
         
@@ -461,7 +461,7 @@ class TranscriptionService:
                         audio_file_path = AUDIO_DIR.parent / audio["path"]
                         if str(audio_file_path) == str(audio_path):
                             # Atualiza o status da transcrição
-                            audio_manager.update_transcription_status(
+                            await audio_manager.update_transcription_status(
                                 audio["id"], 
                                 "ended",
                                 str(filepath.relative_to(AUDIO_DIR.parent))

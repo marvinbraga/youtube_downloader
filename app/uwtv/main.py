@@ -23,11 +23,15 @@ from app.services.securities import AUTHORIZED_CLIENTS, create_access_token, ver
 from app.services.transcription.service import TranscriptionService
 from app.services.sse_manager import sse_manager
 from app.services.download_queue import download_queue, DownloadTask
-from app.services.integration_patch import auto_apply_redis_integration, get_integration_health
+from app.services.integration_patch import auto_apply_redis_integration, get_integration_health, is_redis_integration_active
 from app.api.redis_endpoints import redis_api_endpoints
 from app.api.sse_integration import create_progress_stream, redis_sse_manager
 from app.services.hybrid_mode_manager import hybrid_mode_manager
 from app.services.api_performance_monitor import api_performance_monitor
+
+# Função helper para obter o monitor de performance
+def get_api_performance_monitor():
+    return api_performance_monitor
 # Redis fallback middleware removido - Redis obrigatório
 from app.services.redis_progress_manager import RedisProgressManager, TaskType, TaskStatus, ProgressMetrics, get_progress_manager
 
@@ -81,10 +85,15 @@ download_queue.on_download_cancelled = on_download_cancelled_callback
 
 # Processamento da fila será iniciado no startup event
 
+# Variáveis para rastrear tempo de startup
+startup_time_ms = 0
+startup_completed = False
+
 @app.on_event("startup")
 async def startup_event():
     """Evento de startup da aplicação - Redis obrigatório"""
-    global redis_integration_success
+    global redis_integration_success, startup_time_ms, startup_completed
+    startup_start = time.time()
     
     logger.info("Iniciando aplicação - Redis obrigatório...")
     
@@ -98,6 +107,11 @@ async def startup_event():
             raise RuntimeError("Redis obrigatorio nao disponivel")
         
         logger.success("Sistema Redis integrado com sucesso!")
+        
+        # Calcula tempo de startup
+        startup_time_ms = (time.time() - startup_start) * 1000
+        startup_completed = True
+        logger.info(f"Startup concluído em {startup_time_ms:.1f}ms")
         
         # Inicializar componentes avançados Redis
         try:

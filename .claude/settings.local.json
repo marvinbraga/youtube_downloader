@@ -37,7 +37,9 @@
       "Bash(git log:*)",
       "Bash(git restore:*)",
       "Bash(echo $USE_REDIS)",
-      "Bash(del:*)"
+      "Bash(del:*)",
+      "Bash(uv sync:*)",
+      "Bash(uv pip install:*)"
     ],
     "deny": [],
     "additionalDirectories": [

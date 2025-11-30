@@ -315,30 +315,7 @@ class TranscriptionService:
             
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(text)
-            
-            # Tenta atualizar o status da transcrição no gerenciador
-            try:
-                # Obtém o caminho do arquivo original
-                source_path = docs[0].metadata.get('source')
-                if source_path:
-                    audio_path = Path(source_path)
-                    # Tenta encontrar o ID do áudio no gerenciador
-                    audio_manager = TranscriptionService.get_audio_manager()
-                    
-                    # Procura por todos os áudios para encontrar aquele que corresponde ao caminho
-                    for audio in audio_manager.audio_data["audios"]:
-                        audio_file_path = AUDIO_DIR.parent / audio["path"]
-                        if str(audio_file_path) == str(audio_path):
-                            # Atualiza o status da transcrição
-                            audio_manager.update_transcription_status(
-                                audio["id"], 
-                                str(filepath.relative_to(AUDIO_DIR.parent))
-                            )
-                            logger.debug(f"Status de transcrição atualizado para áudio: {audio['id']}")
-                            break
-            except Exception as e:
-                logger.error(f"Erro ao atualizar status de transcrição: {str(e)}")
-                
+
             logger.success(f"Transcrição salva com sucesso em: {filepath}")
             return str(filepath)
             

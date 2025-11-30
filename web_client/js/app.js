@@ -20,6 +20,8 @@ $(document).ready(function() {
     let currentAudioId = null;
     let currentVideoId = null;
     let activeDownloads = new Map();
+    let currentTranscription = null;
+    let currentTranscriptionId = null;
 
     // ========================================
     // Bootstrap Components
@@ -27,6 +29,7 @@ $(document).ready(function() {
     const toastEl = document.getElementById('liveToast');
     const toast = new bootstrap.Toast(toastEl, { delay: 5000 });
     const loadingModal = new bootstrap.Modal(document.getElementById('loadingModal'));
+    const transcriptionModal = new bootstrap.Modal(document.getElementById('transcriptionModal'));
 
     // ========================================
     // Utility Functions
@@ -781,6 +784,286 @@ $(document).ready(function() {
     }
 
     // ========================================
+    // Transcription Functions
+    // ========================================
+    async function loadTranscriptionMediaList() {
+        if (!authToken) {
+            await authenticate();
+            return;
+        }
+
+        try {
+            // Load both audios and videos
+            const [audioResponse, videoResponse] = await Promise.all([
+                $.ajax({
+                    url: `${API_BASE_URL}/audio/list`,
+                    method: 'GET',
+                    headers: getAuthHeaders()
+                }),
+                $.ajax({
+                    url: `${API_BASE_URL}/video/list-downloads`,
+                    method: 'GET',
+                    headers: getAuthHeaders()
+                })
+            ]);
+
+            const audios = (audioResponse.audio_files || []).map(a => ({ ...a, mediaType: 'audio' }));
+            const videos = (videoResponse.videos || []).filter(v => v.download_status === 'ready').map(v => ({ ...v, mediaType: 'video' }));
+
+            const allMedia = [...audios, ...videos].sort((a, b) => {
+                const dateA = new Date(a.modified_date || 0);
+                const dateB = new Date(b.modified_date || 0);
+                return dateB - dateA;
+            });
+
+            renderTranscriptionMediaList(allMedia);
+
+        } catch (error) {
+            console.error('Error loading transcription media list:', error);
+            if (error.status === 401) {
+                authenticate();
+            } else {
+                renderTranscriptionMediaList([]);
+                showToast('Erro ao carregar lista de mídias', 'error');
+            }
+        }
+    }
+
+    function renderTranscriptionMediaList(mediaList) {
+        const container = $('#transcriptionMediaList');
+        container.empty();
+
+        if (mediaList.length === 0) {
+            container.html(`
+                <div class="text-center py-5 text-body-secondary">
+                    <i class="bi bi-collection fs-1 mb-3 d-block opacity-50"></i>
+                    <p class="mb-0">Nenhuma mídia encontrada</p>
+                </div>
+            `);
+            return;
+        }
+
+        mediaList.forEach(media => {
+            const isAudio = media.mediaType === 'audio';
+            const icon = isAudio ? 'bi-music-note-beamed' : 'bi-camera-video';
+            const typeBadge = isAudio ?
+                '<span class="badge bg-info"><i class="bi bi-music-note me-1"></i>Áudio</span>' :
+                '<span class="badge bg-primary"><i class="bi bi-camera-video me-1"></i>Vídeo</span>';
+
+            const transcriptionStatus = getTranscriptionStatusBadge(media.transcription_status);
+
+            const item = $(`
+                <div class="list-group-item list-group-item-action transcription-media-item" data-id="${media.id}" data-type="${media.mediaType}">
+                    <div class="d-flex w-100 align-items-center">
+                        <div class="me-3">
+                            <div class="bg-body-tertiary rounded d-flex align-items-center justify-content-center"
+                                 style="width: 48px; height: 48px;">
+                                <i class="bi ${icon} text-danger fs-5"></i>
+                            </div>
+                        </div>
+                        <div class="flex-grow-1 min-width-0">
+                            <h6 class="mb-1 text-truncate">${media.title || media.name}</h6>
+                            <small class="text-body-tertiary">
+                                ${typeBadge}
+                                <span class="ms-2"><i class="bi bi-hdd me-1"></i>${formatFileSize(media.filesize)}</span>
+                                <span class="ms-2"><i class="bi bi-calendar me-1"></i>${formatDate(media.modified_date)}</span>
+                            </small>
+                        </div>
+                        <div class="ms-2 d-flex align-items-center gap-2">
+                            ${transcriptionStatus}
+                            <button class="btn btn-sm btn-outline-info view-transcription-btn" data-id="${media.id}"
+                                    title="Ver Transcrição" ${media.transcription_status !== 'ended' ? 'disabled' : ''}>
+                                <i class="bi bi-eye"></i>
+                            </button>
+                            <button class="btn btn-sm btn-danger start-transcription-btn" data-id="${media.id}"
+                                    title="Transcrever" ${media.transcription_status === 'started' ? 'disabled' : ''}>
+                                <i class="bi bi-file-text"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `);
+
+            item.find('.start-transcription-btn').on('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                startTranscription(media.id);
+            });
+
+            item.find('.view-transcription-btn').on('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                viewTranscription(media.id, media.title || media.name);
+            });
+
+            container.append(item);
+        });
+    }
+
+    function getTranscriptionStatusBadge(status) {
+        const badges = {
+            'ended': '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Transcrito</span>',
+            'started': '<span class="badge bg-warning"><i class="bi bi-hourglass-split me-1"></i>Em andamento</span>',
+            'error': '<span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Erro</span>',
+            'none': '<span class="badge bg-secondary"><i class="bi bi-dash-circle me-1"></i>Não transcrito</span>'
+        };
+        return badges[status] || badges['none'];
+    }
+
+    async function startTranscription(fileId) {
+        if (!authToken) {
+            showToast('Não autenticado', 'error');
+            return;
+        }
+
+        const provider = $('#transcriptionProvider').val();
+        const language = $('#transcriptionLanguage').val();
+
+        try {
+            showLoading('Iniciando transcrição...');
+
+            const response = await $.ajax({
+                url: `${API_BASE_URL}/audio/transcribe`,
+                method: 'POST',
+                headers: getAuthHeaders(),
+                data: JSON.stringify({
+                    file_id: fileId,
+                    provider: provider,
+                    language: language
+                })
+            });
+
+            hideLoading();
+
+            if (response.status === 'processing' || response.status === 'success') {
+                showToast('Transcrição iniciada! Este processo pode levar alguns minutos.', 'success');
+                // Start polling for status
+                pollTranscriptionStatus(fileId);
+            } else if (response.message && response.message.includes('já existe')) {
+                showToast('Transcrição já existe para este arquivo.', 'info');
+                viewTranscription(fileId);
+            } else {
+                showToast(response.message || 'Transcrição iniciada', 'info');
+            }
+
+            // Reload list to update status
+            loadTranscriptionMediaList();
+
+        } catch (error) {
+            hideLoading();
+            console.error('Error starting transcription:', error);
+            const message = error.responseJSON?.detail || 'Erro ao iniciar transcrição';
+            showToast(message, 'error');
+        }
+    }
+
+    async function pollTranscriptionStatus(fileId) {
+        if (!authToken) return;
+
+        try {
+            const response = await $.ajax({
+                url: `${API_BASE_URL}/audio/transcription_status/${fileId}`,
+                method: 'GET',
+                headers: getAuthHeaders()
+            });
+
+            if (response.status === 'ended') {
+                showToast('Transcrição concluída!', 'success');
+                loadTranscriptionMediaList();
+            } else if (response.status === 'error') {
+                showToast('Erro na transcrição', 'error');
+                loadTranscriptionMediaList();
+            } else if (response.status === 'started') {
+                // Continue polling
+                setTimeout(() => pollTranscriptionStatus(fileId), 5000);
+            }
+
+        } catch (error) {
+            console.error('Error polling transcription status:', error);
+        }
+    }
+
+    async function viewTranscription(fileId, title = '') {
+        if (!authToken) {
+            showToast('Não autenticado', 'error');
+            return;
+        }
+
+        try {
+            showLoading('Carregando transcrição...');
+
+            const response = await fetch(`${API_BASE_URL}/audio/transcription/${fileId}`, {
+                headers: { 'Authorization': `Bearer ${authToken}` }
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+
+            const text = await response.text();
+            currentTranscription = text;
+            currentTranscriptionId = fileId;
+
+            hideLoading();
+
+            // Update transcription pane
+            $('#currentTranscriptionTitle').text(title || fileId);
+            $('#transcriptionContent').html(`<pre class="transcription-text mb-0">${escapeHtml(text)}</pre>`);
+            $('#copyTranscriptionBtn').prop('disabled', false);
+            $('#downloadTranscriptionBtn').prop('disabled', false);
+
+            // Also update modal
+            $('#transcriptionModalLabel').html(`<i class="bi bi-file-text text-danger me-2"></i>${title || 'Transcrição'}`);
+            $('#transcriptionModalContent').html(`<pre class="transcription-text mb-0">${escapeHtml(text)}</pre>`);
+            transcriptionModal.show();
+
+        } catch (error) {
+            hideLoading();
+            console.error('Error loading transcription:', error);
+            showToast('Erro ao carregar transcrição', 'error');
+        }
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function copyTranscription() {
+        if (!currentTranscription) {
+            showToast('Nenhuma transcrição para copiar', 'warning');
+            return;
+        }
+
+        navigator.clipboard.writeText(currentTranscription).then(() => {
+            showToast('Transcrição copiada para a área de transferência!', 'success');
+        }).catch(err => {
+            console.error('Error copying:', err);
+            showToast('Erro ao copiar transcrição', 'error');
+        });
+    }
+
+    function downloadTranscription() {
+        if (!currentTranscription) {
+            showToast('Nenhuma transcrição para baixar', 'warning');
+            return;
+        }
+
+        const blob = new Blob([currentTranscription], { type: 'text/markdown' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `transcription_${currentTranscriptionId || 'unknown'}.md`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        showToast('Download iniciado!', 'success');
+    }
+
+    // ========================================
     // Helper Functions
     // ========================================
     function getStatusBadge(status) {
@@ -859,8 +1142,21 @@ $(document).ready(function() {
             loadAudioList();
         } else if (target === '#video-pane') {
             loadVideoList();
+        } else if (target === '#transcription-pane') {
+            loadTranscriptionMediaList();
         }
     });
+
+    // Transcription buttons
+    $('#refreshTranscriptionListBtn').on('click', () => {
+        loadTranscriptionMediaList();
+        showToast('Lista de mídias atualizada', 'info');
+    });
+
+    $('#copyTranscriptionBtn').on('click', copyTranscription);
+    $('#downloadTranscriptionBtn').on('click', downloadTranscription);
+    $('#modalCopyTranscriptionBtn').on('click', copyTranscription);
+    $('#modalDownloadTranscriptionBtn').on('click', downloadTranscription);
 
     // Prevent video right-click
     $('#videoPlayer').on('contextmenu', (e) => e.preventDefault());

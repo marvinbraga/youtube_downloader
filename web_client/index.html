@@ -67,6 +67,14 @@
                     <span>Vídeos</span>
                 </button>
             </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link d-flex align-items-center justify-content-center gap-2"
+                        id="transcription-tab" data-bs-toggle="pill" data-bs-target="#transcription-pane"
+                        type="button" role="tab">
+                    <i class="bi bi-file-text"></i>
+                    <span>Transcrições</span>
+                </button>
+            </li>
         </ul>
 
         <!-- Tab Content -->
@@ -239,6 +247,83 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Transcription Tab -->
+            <div class="tab-pane fade" id="transcription-pane" role="tabpanel" tabindex="0">
+                <!-- Transcription Viewer -->
+                <div class="card mb-4">
+                    <div class="card-header bg-body-tertiary d-flex align-items-center justify-content-between">
+                        <div class="d-flex align-items-center gap-2">
+                            <i class="bi bi-file-text text-danger fs-5"></i>
+                            <h5 class="mb-0 text-truncate" id="currentTranscriptionTitle">Selecione um item para ver a transcrição</h5>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-sm btn-outline-secondary" id="copyTranscriptionBtn" title="Copiar transcrição" disabled>
+                                <i class="bi bi-clipboard"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" id="downloadTranscriptionBtn" title="Baixar transcrição" disabled>
+                                <i class="bi bi-download"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="transcriptionContent" class="transcription-viewer" style="max-height: 400px; overflow-y: auto;">
+                            <p class="text-body-secondary text-center py-5">
+                                <i class="bi bi-file-text fs-1 d-block mb-3 opacity-50"></i>
+                                Selecione um áudio ou vídeo e clique em "Transcrever" para gerar a transcrição.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Transcription Controls -->
+                <div class="row g-3 mb-4">
+                    <div class="col-md-6">
+                        <label class="form-label"><i class="bi bi-translate me-1"></i>Provedor de Transcrição</label>
+                        <select class="form-select" id="transcriptionProvider">
+                            <option value="groq" selected>Groq (Whisper) - Rápido</option>
+                            <option value="openai">OpenAI (Whisper) - Preciso</option>
+                            <option value="fast">FasterWhisper - Local</option>
+                            <option value="local">Whisper Local</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label"><i class="bi bi-globe me-1"></i>Idioma</label>
+                        <select class="form-select" id="transcriptionLanguage">
+                            <option value="pt" selected>Português</option>
+                            <option value="en">English</option>
+                            <option value="es">Español</option>
+                            <option value="fr">Français</option>
+                            <option value="de">Deutsch</option>
+                            <option value="it">Italiano</option>
+                            <option value="ja">日本語</option>
+                            <option value="ko">한국어</option>
+                            <option value="zh">中文</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Items to Transcribe -->
+                <div class="card">
+                    <div class="card-header bg-body-tertiary d-flex align-items-center justify-content-between">
+                        <div class="d-flex align-items-center gap-2">
+                            <i class="bi bi-list-ul text-danger fs-5"></i>
+                            <h5 class="mb-0">Mídias Disponíveis</h5>
+                        </div>
+                        <button class="btn btn-sm btn-outline-secondary" id="refreshTranscriptionListBtn" title="Atualizar lista">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                    </div>
+                    <div class="list-group list-group-flush" id="transcriptionMediaList" style="max-height: 400px; overflow-y: auto;">
+                        <div class="text-center py-5 text-body-secondary">
+                            <div class="spinner-border text-danger mb-3" role="status">
+                                <span class="visually-hidden">Carregando...</span>
+                            </div>
+                            <p class="mb-0">Carregando mídias...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -281,6 +366,37 @@
                     </button>
                     <button type="button" class="btn btn-danger" id="confirmDeleteBtn">
                         <i class="bi bi-trash me-1"></i>Excluir
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Transcription Modal -->
+    <div class="modal fade" id="transcriptionModal" tabindex="-1" aria-labelledby="transcriptionModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content bg-body-tertiary">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="transcriptionModalLabel">
+                        <i class="bi bi-file-text text-danger me-2"></i>
+                        Transcrição
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="transcriptionModalContent" class="transcription-text">
+                        <p class="text-body-secondary text-center py-3">Carregando transcrição...</p>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" id="modalCopyTranscriptionBtn">
+                        <i class="bi bi-clipboard me-1"></i>Copiar
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" id="modalDownloadTranscriptionBtn">
+                        <i class="bi bi-download me-1"></i>Baixar
+                    </button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="bi bi-x-lg me-1"></i>Fechar
                     </button>
                 </div>
             </div>

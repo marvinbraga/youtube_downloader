@@ -401,6 +401,40 @@ class AudioDownloadManager:
             repo = AudioRepository(session)
             await repo.update(audio_id, download_progress=progress)
 
+    async def delete_audio(self, audio_id: str) -> bool:
+        """Exclui um áudio do banco de dados e remove os arquivos físicos."""
+        try:
+            logger.info(f"Iniciando exclusão do áudio: {audio_id}")
+
+            # Obtém informações do áudio antes de excluir
+            audio_info = await self.get_audio_info(audio_id)
+            if not audio_info:
+                logger.warning(f"Áudio não encontrado: {audio_id}")
+                return False
+
+            # Remove o diretório físico do áudio
+            audio_dir = self.download_dir / audio_id
+            if audio_dir.exists() and audio_dir.is_dir():
+                import shutil
+                shutil.rmtree(audio_dir)
+                logger.info(f"Diretório removido: {audio_dir}")
+
+            # Remove do mapeamento em memória
+            if audio_id in audio_mapping:
+                del audio_mapping[audio_id]
+
+            # Remove do banco de dados
+            async with get_db_context() as session:
+                repo = AudioRepository(session)
+                result = await repo.delete(audio_id)
+
+            logger.success(f"Áudio excluído com sucesso: {audio_id}")
+            return result
+
+        except Exception as e:
+            logger.error(f"Erro ao excluir áudio {audio_id}: {str(e)}")
+            raise
+
     # Mantém compatibilidade com código legado
     def migrate_has_transcription_to_status(self) -> None:
         """Migração não necessária com SQLite - mantida para compatibilidade"""
@@ -741,3 +775,37 @@ class VideoDownloadManager:
         async with get_db_context() as session:
             repo = VideoRepository(session)
             await repo.update(video_id, download_progress=progress)
+
+    async def delete_video(self, video_id: str) -> bool:
+        """Exclui um vídeo do banco de dados e remove os arquivos físicos."""
+        try:
+            logger.info(f"Iniciando exclusão do vídeo: {video_id}")
+
+            # Obtém informações do vídeo antes de excluir
+            video_info = await self.get_video_info(video_id)
+            if not video_info:
+                logger.warning(f"Vídeo não encontrado: {video_id}")
+                return False
+
+            # Remove o diretório físico do vídeo
+            video_dir = self.download_dir / video_id
+            if video_dir.exists() and video_dir.is_dir():
+                import shutil
+                shutil.rmtree(video_dir)
+                logger.info(f"Diretório removido: {video_dir}")
+
+            # Remove do mapeamento em memória
+            if video_id in video_mapping:
+                del video_mapping[video_id]
+
+            # Remove do banco de dados
+            async with get_db_context() as session:
+                repo = VideoRepository(session)
+                result = await repo.delete(video_id)
+
+            logger.success(f"Vídeo excluído com sucesso: {video_id}")
+            return result
+
+        except Exception as e:
+            logger.error(f"Erro ao excluir vídeo {video_id}: {str(e)}")
+            raise

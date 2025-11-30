@@ -51,7 +51,36 @@ $(document).ready(function() {
     }
 
     function hideLoading() {
-        loadingModal.hide();
+        try {
+            loadingModal.hide();
+        } catch (e) {
+            console.error('Error hiding modal:', e);
+        }
+        // Limpeza imediata
+        cleanupModals();
+        // Limpeza adicional após delay para garantir
+        setTimeout(cleanupModals, 100);
+        setTimeout(cleanupModals, 300);
+    }
+
+    function cleanupModals() {
+        // Limpar o modal de loading
+        const modalEl = document.getElementById('loadingModal');
+        if (modalEl) {
+            modalEl.classList.remove('show');
+            modalEl.style.display = 'none';
+            modalEl.setAttribute('aria-hidden', 'true');
+            modalEl.removeAttribute('aria-modal');
+            modalEl.removeAttribute('role');
+        }
+        // Remover TODOS os backdrops (pode haver múltiplos)
+        document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
+            backdrop.remove();
+        });
+        // Limpar estilos do body
+        document.body.classList.remove('modal-open');
+        document.body.style.removeProperty('padding-right');
+        document.body.style.removeProperty('overflow');
     }
 
     function formatFileSize(bytes) {
@@ -203,8 +232,11 @@ $(document).ready(function() {
                         </div>
                         <div class="ms-2 d-flex align-items-center gap-2">
                             ${statusBadge}
-                            <button class="btn btn-sm btn-danger play-audio-btn" data-id="${audio.id}">
+                            <button class="btn btn-sm btn-danger play-audio-btn" data-id="${audio.id}" title="Reproduzir">
                                 <i class="bi bi-play-fill"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger delete-audio-btn" data-id="${audio.id}" title="Excluir">
+                                <i class="bi bi-trash"></i>
                             </button>
                         </div>
                     </div>
@@ -215,6 +247,12 @@ $(document).ready(function() {
                 e.preventDefault();
                 e.stopPropagation();
                 playAudio(audio);
+            });
+
+            item.find('.delete-audio-btn').on('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                confirmDeleteAudio(audio);
             });
 
             item.on('click', (e) => {
@@ -320,8 +358,11 @@ $(document).ready(function() {
                         <div class="ms-2 d-flex align-items-center gap-2">
                             ${statusBadge}
                             <button class="btn btn-sm btn-danger play-video-btn" data-id="${video.id}"
-                                    ${video.download_status !== 'ready' ? 'disabled' : ''}>
+                                    ${video.download_status !== 'ready' ? 'disabled' : ''} title="Reproduzir">
                                 <i class="bi bi-play-fill"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger delete-video-btn" data-id="${video.id}" title="Excluir">
+                                <i class="bi bi-trash"></i>
                             </button>
                         </div>
                     </div>
@@ -334,6 +375,12 @@ $(document).ready(function() {
                 if (video.download_status === 'ready') {
                     playVideo(video);
                 }
+            });
+
+            item.find('.delete-video-btn').on('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                confirmDeleteVideo(video);
             });
 
             item.on('click', (e) => {
@@ -608,6 +655,128 @@ $(document).ready(function() {
 
         } catch (error) {
             console.error('Error polling status:', error);
+        }
+    }
+
+    // ========================================
+    // Delete Functions
+    // ========================================
+    const deleteModalEl = document.getElementById('deleteModal');
+    const deleteModal = new bootstrap.Modal(deleteModalEl);
+    let pendingDeleteItem = null;
+    let pendingDeleteType = null;
+
+    function confirmDeleteAudio(audio) {
+        const title = audio.title || audio.name || audio.id;
+        pendingDeleteItem = audio;
+        pendingDeleteType = 'audio';
+        $('#deleteItemTitle').text(`"${title}"`);
+        $('#deleteModalLabel').html('<i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>Excluir Áudio');
+        deleteModal.show();
+    }
+
+    function confirmDeleteVideo(video) {
+        const title = video.title || video.name || video.id;
+        pendingDeleteItem = video;
+        pendingDeleteType = 'video';
+        $('#deleteItemTitle').text(`"${title}"`);
+        $('#deleteModalLabel').html('<i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>Excluir Vídeo');
+        deleteModal.show();
+    }
+
+    // Handle confirm delete button click
+    $('#confirmDeleteBtn').on('click', function() {
+        if (pendingDeleteItem && pendingDeleteType) {
+            deleteModal.hide();
+            if (pendingDeleteType === 'audio') {
+                deleteAudio(pendingDeleteItem.id);
+            } else if (pendingDeleteType === 'video') {
+                deleteVideo(pendingDeleteItem.id);
+            }
+            pendingDeleteItem = null;
+            pendingDeleteType = null;
+        }
+    });
+
+    // Clear pending delete on modal close
+    deleteModalEl.addEventListener('hidden.bs.modal', function() {
+        pendingDeleteItem = null;
+        pendingDeleteType = null;
+    });
+
+    async function deleteAudio(audioId) {
+        if (!authToken) {
+            showToast('Não autenticado', 'error');
+            return;
+        }
+
+        try {
+            showLoading('Excluindo áudio...');
+
+            await $.ajax({
+                url: `${API_BASE_URL}/audio/${audioId}`,
+                method: 'DELETE',
+                headers: getAuthHeaders(),
+                timeout: 30000 // 30 segundos
+            });
+
+            // Se o áudio excluído estava tocando, parar o player
+            if (currentAudioId === audioId) {
+                const audioPlayer = document.getElementById('audioPlayer');
+                audioPlayer.pause();
+                audioPlayer.src = '';
+                currentAudioId = null;
+                $('#currentAudioTitle').text('Selecione um áudio para reproduzir');
+            }
+
+            // Atualiza a lista e depois fecha o loading
+            await loadAudioList();
+            hideLoading();
+            showToast('Áudio excluído com sucesso!', 'success');
+
+        } catch (error) {
+            hideLoading();
+            console.error('Error deleting audio:', error);
+            const message = error.responseJSON?.detail || 'Erro ao excluir áudio';
+            showToast(message, 'error');
+        }
+    }
+
+    async function deleteVideo(videoId) {
+        if (!authToken) {
+            showToast('Não autenticado', 'error');
+            return;
+        }
+
+        try {
+            showLoading('Excluindo vídeo...');
+
+            await $.ajax({
+                url: `${API_BASE_URL}/video/${videoId}`,
+                method: 'DELETE',
+                headers: getAuthHeaders(),
+                timeout: 30000 // 30 segundos
+            });
+
+            // Se o vídeo excluído estava tocando, parar o player
+            if (currentVideoId === videoId) {
+                const videoPlayer = document.getElementById('videoPlayer');
+                videoPlayer.pause();
+                videoPlayer.src = '';
+                currentVideoId = null;
+                $('#currentVideoTitle').text('Selecione um vídeo para reproduzir');
+            }
+
+            // Atualiza a lista e depois fecha o loading
+            await loadVideoList();
+            hideLoading();
+            showToast('Vídeo excluído com sucesso!', 'success');
+
+        } catch (error) {
+            hideLoading();
+            console.error('Error deleting video:', error);
+            const message = error.responseJSON?.detail || 'Erro ao excluir vídeo';
+            showToast(message, 'error');
         }
     }
 

@@ -918,6 +918,62 @@ async def get_download_status(
         )
 
 
+@app.delete("/audio/{audio_id}")
+async def delete_audio(
+    audio_id: str,
+    token_data: dict = Depends(verify_token)
+):
+    """Exclui um áudio do banco de dados e remove os arquivos físicos"""
+    try:
+        result = await audio_manager.delete_audio(audio_id)
+        if result:
+            return {
+                "status": "success",
+                "message": f"Áudio {audio_id} excluído com sucesso"
+            }
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Áudio não encontrado: {audio_id}"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Erro ao excluir áudio: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao excluir áudio: {str(e)}"
+        )
+
+
+@app.delete("/video/{video_id}")
+async def delete_video(
+    video_id: str,
+    token_data: dict = Depends(verify_token)
+):
+    """Exclui um vídeo do banco de dados e remove os arquivos físicos"""
+    try:
+        result = await video_manager.delete_video(video_id)
+        if result:
+            return {
+                "status": "success",
+                "message": f"Vídeo {video_id} excluído com sucesso"
+            }
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Vídeo não encontrado: {video_id}"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Erro ao excluir vídeo: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao excluir vídeo: {str(e)}"
+        )
+
+
 # Endpoints para gerenciamento da fila
 
 @app.get("/downloads/queue/status")

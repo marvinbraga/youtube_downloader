@@ -504,6 +504,10 @@ $(document).ready(function() {
     }
 
     function addActiveDownload(id, type, title) {
+        // Não adicionar se já existe
+        if (activeDownloads.has(id)) {
+            return;
+        }
         activeDownloads.set(id, { type, title, progress: 0, status: 'downloading' });
         updateProgressUI();
     }
@@ -525,6 +529,18 @@ $(document).ready(function() {
             const statusClass = download.status === 'ready' ? 'bg-success' :
                                download.status === 'error' ? 'bg-danger' : 'bg-danger';
 
+            // Determinar o label baseado no progresso
+            // 0-94% = Baixando, 95-99% = Convertendo, 100% = Concluído
+            let statusLabel = 'Baixando...';
+            let statusIcon = 'bi-arrow-down-circle';
+            if (download.progress >= 95 && download.progress < 100) {
+                statusLabel = 'Convertendo...';
+                statusIcon = 'bi-gear';
+            } else if (download.progress >= 100) {
+                statusLabel = 'Concluído';
+                statusIcon = 'bi-check-circle';
+            }
+
             const progressItem = $(`
                 <div class="mb-3" data-download-id="${id}">
                     <div class="d-flex justify-content-between align-items-center mb-2">
@@ -532,7 +548,10 @@ $(document).ready(function() {
                             <i class="bi ${icon} text-danger"></i>
                             <span class="text-truncate" style="max-width: 300px;">${download.title}</span>
                         </span>
-                        <span class="badge ${statusClass}">${download.progress}%</span>
+                        <span class="d-flex align-items-center gap-2">
+                            <span class="badge bg-secondary"><i class="bi ${statusIcon} me-1"></i>${statusLabel}</span>
+                            <span class="badge ${statusClass}">${download.progress}%</span>
+                        </span>
                     </div>
                     <div class="progress" style="height: 6px;">
                         <div class="progress-bar ${statusClass} progress-bar-striped progress-bar-animated"
@@ -567,10 +586,9 @@ $(document).ready(function() {
 
                 if (response.download_status === 'ready') {
                     showToast(`Download concluído: ${download.title}`, 'success');
-                    setTimeout(() => {
-                        activeDownloads.delete(id);
-                        updateProgressUI();
-                    }, 3000);
+                    // Remover imediatamente
+                    activeDownloads.delete(id);
+                    updateProgressUI();
 
                     // Reload appropriate list
                     if (type === 'video') loadVideoList();
@@ -578,10 +596,9 @@ $(document).ready(function() {
 
                 } else if (response.download_status === 'error') {
                     showToast(`Erro no download: ${download.title}`, 'error');
-                    setTimeout(() => {
-                        activeDownloads.delete(id);
-                        updateProgressUI();
-                    }, 3000);
+                    // Remover imediatamente
+                    activeDownloads.delete(id);
+                    updateProgressUI();
 
                 } else {
                     // Continue polling

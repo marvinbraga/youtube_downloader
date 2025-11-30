@@ -870,8 +870,8 @@ async def get_download_status(
 ):
     """Obtém o status atual de um download específico"""
     try:
-        sse_status = sse_manager.get_download_status(audio_id)
         audio_info = await audio_manager.get_audio_info(audio_id)
+        sse_status = sse_manager.get_download_status(audio_id)
 
         if not audio_info and not sse_status:
             raise HTTPException(
@@ -879,21 +879,32 @@ async def get_download_status(
                 detail=f"Áudio não encontrado: {audio_id}"
             )
 
+        # Banco de dados é a fonte da verdade
+        db_status = audio_info.get("download_status", "unknown") if audio_info else "unknown"
+        db_progress = audio_info.get("download_progress", 0) if audio_info else 0
+        db_error = audio_info.get("download_error", "") if audio_info else ""
+
         status = {
             "audio_id": audio_id,
-            "download_status": audio_info.get("download_status", "unknown") if audio_info else "unknown",
-            "download_progress": audio_info.get("download_progress", 0) if audio_info else 0,
-            "download_error": audio_info.get("download_error", "") if audio_info else ""
+            "download_status": db_status,
+            "download_progress": db_progress,
+            "download_error": db_error,
+            "live_updates": sse_status is not None
         }
 
-        if sse_status:
-            status.update({
-                "download_status": sse_status.get("status", status["download_status"]),
-                "download_progress": sse_status.get("progress", status["download_progress"]),
-                "live_updates": True
-            })
-        else:
-            status["live_updates"] = False
+        # Só usa SSE se o banco ainda não marcou como pronto/erro
+        # e o SSE tem informação mais recente de progresso
+        if sse_status and db_status not in ["ready", "completed", "error"]:
+            sse_progress = sse_status.get("progress", 0)
+            sse_stat = sse_status.get("status", "")
+
+            # SSE completed significa que deve estar pronto no banco em breve
+            if sse_stat == "completed":
+                status["download_status"] = "ready"
+                status["download_progress"] = 100
+            elif sse_progress > db_progress:
+                # SSE tem progresso mais recente
+                status["download_progress"] = sse_progress
 
         return status
 

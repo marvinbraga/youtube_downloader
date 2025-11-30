@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cliente de Streaming de Vídeos</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<div class="error" id="errorMessage"></div>
+<div class="success" id="successMessage"></div>
+<div class="info" id="infoMessage"></div>
+
+<div class="tabs">
+    <div class="tab active" data-tab="videos"><i class="fas fa-video icon"></i>Vídeos</div>
+    <div class="tab" data-tab="audio"><i class="fas fa-headphones icon"></i>Áudio</div>
+    <div class="tab" data-tab="download"><i class="fas fa-download icon"></i>Download</div>
+</div>
+
+<div class="tab-content active" id="videos-tab">
+    <!-- Movido o video-container para dentro da aba de vídeos -->
+    <div class="video-container">
+        <div class="loading-overlay" id="loadingOverlay">
+            <div style="text-align: center;">
+                <div class="loading-spinner"></div>
+                <div class="loading-text">Carregando vídeo...</div>
+            </div>
+        </div>
+        <video id="videoPlayer" controls controlsList="nodownload">
+            <source src="" type="video/mp4">
+            Seu navegador não suporta a tag de vídeo.
+        </video>
+        <h2 class="video-title" id="currentVideoTitle">Selecione um conteúdo para reproduzir</h2>
+    </div>
+
+    <div class="controls">
+        <div class="search-container">
+            <input type="text"
+                   class="search-input"
+                   id="searchVideoInput"
+                   placeholder="Digite para buscar vídeos..."
+                   autocomplete="off">
+        </div>
+
+        <h3>Ordenar por:</h3>
+        <button class="sort-button active" data-sort="none">Padrão</button>
+        <button class="sort-button" data-sort="title">Título</button>
+        <button class="sort-button" data-sort="date">Data</button>
+    </div>
+
+    <div class="video-list" id="videoList">
+        <h2>Vídeos Disponíveis</h2>
+        <div id="videos"></div>
+    </div>
+</div>
+
+<div class="tab-content" id="audio-tab">
+    <div class="controls">
+        <div class="search-container">
+            <input type="text"
+                   class="search-input"
+                   id="searchAudioInput"
+                   placeholder="Digite para buscar áudios..."
+                   autocomplete="off">
+        </div>
+    </div>
+
+    <div class="audio-list" id="audioList">
+        <h2>Áudios Disponíveis</h2>
+        <div id="audios"></div>
+    </div>
+</div>
+
+<div class="tab-content" id="download-tab">
+    <div class="download-form">
+        <h2>Download de Áudio do YouTube</h2>
+        <div class="form-group">
+            <label for="youtubeUrl">URL do YouTube:</label>
+            <input type="url" id="youtubeUrl" placeholder="https://www.youtube.com/watch?v=..." required>
+        </div>
+        
+        <div class="form-group">
+            <div class="checkbox-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="highQuality" checked>
+                    Alta qualidade de áudio
+                </label>
+            </div>
+        </div>
+        
+        <button class="btn btn-primary" id="downloadAudioBtn">
+            <i class="fas fa-download icon"></i>Baixar Áudio
+        </button>
+    </div>
+    
+    <div class="download-form">
+        <h2>Transcrição de Áudio</h2>
+        <p>Selecione um arquivo de áudio na aba "Áudio" e use o botão de transcrição para converter áudio em texto.</p>
+    </div>
+</div>
+
+<!-- Modal de Transcrição -->
+<div id="transcriptionModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 id="transcriptionTitle">Transcrição</h2>
+            <span class="close">&times;</span>
+        </div>
+        <div class="modal-body" id="transcriptionContent">
+            <!-- O conteúdo da transcrição será carregado aqui -->
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-primary" id="downloadTranscriptionBtn">
+                <i class="fas fa-download icon"></i>Baixar Transcrição
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Referência ao arquivo JavaScript externo -->
+<script src="js/app.js"></script>
+</body>
+</html>

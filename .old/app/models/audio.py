@@ -35,11 +35,6 @@ class AudioDownloadRequest(BaseModel):
     high_quality: bool = True
 
 
-class VideoDownloadRequest(BaseModel):
-    url: HttpUrl
-    resolution: str = "1080p"  # 360p, 480p, 720p, 1080p, 1440p, 2160p, best
-
-
 class TranscriptionProvider(str, Enum):
     GROQ = "groq"
     OPENAI = "openai"

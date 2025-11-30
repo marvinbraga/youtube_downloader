@@ -6,8 +6,9 @@ from typing import Iterator, Optional, List, Union, Literal
 from enum import Enum
 
 from loguru import logger
-from langchain_core.documents import Document
-from langchain_core.document_loaders import BaseBlobParser, Blob
+from langchain.document_loaders.blob_loaders import Blob
+from langchain.schema import Document
+from langchain_core.document_loaders import BaseBlobParser
 
 
 class TranscriptionProvider(str, Enum):

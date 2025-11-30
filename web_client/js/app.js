@@ -689,8 +689,12 @@ $(document).ready(function() {
 
     // Handle confirm delete button click
     $('#confirmDeleteBtn').on('click', function() {
-        if (pendingDeleteItem && pendingDeleteType) {
-            deleteModal.hide();
+        deleteModal.hide();
+        if (pendingDeleteTranscriptionId) {
+            deleteTranscription(pendingDeleteTranscriptionId);
+            pendingDeleteTranscriptionId = null;
+            pendingDeleteTranscriptionTitle = null;
+        } else if (pendingDeleteItem && pendingDeleteType) {
             if (pendingDeleteType === 'audio') {
                 deleteAudio(pendingDeleteItem.id);
             } else if (pendingDeleteType === 'video') {
@@ -705,6 +709,8 @@ $(document).ready(function() {
     deleteModalEl.addEventListener('hidden.bs.modal', function() {
         pendingDeleteItem = null;
         pendingDeleteType = null;
+        pendingDeleteTranscriptionId = null;
+        pendingDeleteTranscriptionTitle = null;
     });
 
     async function deleteAudio(audioId) {
@@ -879,6 +885,10 @@ $(document).ready(function() {
                                     title="Transcrever" ${media.transcription_status === 'started' ? 'disabled' : ''}>
                                 <i class="bi bi-file-text"></i>
                             </button>
+                            <button class="btn btn-sm btn-outline-danger delete-transcription-btn" data-id="${media.id}"
+                                    title="Excluir Transcrição" ${media.transcription_status !== 'ended' ? 'disabled' : ''}>
+                                <i class="bi bi-trash"></i>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -894,6 +904,12 @@ $(document).ready(function() {
                 e.preventDefault();
                 e.stopPropagation();
                 viewTranscription(media.id, media.title || media.name);
+            });
+
+            item.find('.delete-transcription-btn').on('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                confirmDeleteTranscription(media.id, media.title || media.name);
             });
 
             container.append(item);
@@ -1011,6 +1027,7 @@ $(document).ready(function() {
             $('#transcriptionContent').html(`<pre class="transcription-text mb-0">${escapeHtml(text)}</pre>`);
             $('#copyTranscriptionBtn').prop('disabled', false);
             $('#downloadTranscriptionBtn').prop('disabled', false);
+            $('#deleteTranscriptionBtn').prop('disabled', false);
 
             // Also update modal
             $('#transcriptionModalLabel').html(`<i class="bi bi-file-text text-danger me-2"></i>${title || 'Transcrição'}`);
@@ -1061,6 +1078,62 @@ $(document).ready(function() {
         URL.revokeObjectURL(url);
 
         showToast('Download iniciado!', 'success');
+    }
+
+    let pendingDeleteTranscriptionId = null;
+    let pendingDeleteTranscriptionTitle = null;
+
+    function confirmDeleteTranscription(fileId, title) {
+        pendingDeleteTranscriptionId = fileId;
+        pendingDeleteTranscriptionTitle = title;
+        $('#deleteItemTitle').text(`Transcrição de "${title}"`);
+        $('#deleteModalLabel').html('<i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>Excluir Transcrição');
+        deleteModal.show();
+    }
+
+    async function deleteTranscription(fileId) {
+        if (!authToken) {
+            showToast('Não autenticado', 'error');
+            return;
+        }
+
+        try {
+            showLoading('Excluindo transcrição...');
+
+            await $.ajax({
+                url: `${API_BASE_URL}/audio/transcription/${fileId}`,
+                method: 'DELETE',
+                headers: getAuthHeaders()
+            });
+
+            hideLoading();
+            showToast('Transcrição excluída com sucesso!', 'success');
+
+            // Limpa a visualização se era a transcrição atual
+            if (currentTranscriptionId === fileId) {
+                currentTranscription = null;
+                currentTranscriptionId = null;
+                $('#currentTranscriptionTitle').text('Selecione um item para ver a transcrição');
+                $('#transcriptionContent').html(`
+                    <p class="text-body-secondary text-center py-5">
+                        <i class="bi bi-file-text fs-1 d-block mb-3 opacity-50"></i>
+                        Selecione um áudio ou vídeo e clique em "Transcrever" para gerar a transcrição.
+                    </p>
+                `);
+                $('#copyTranscriptionBtn').prop('disabled', true);
+                $('#downloadTranscriptionBtn').prop('disabled', true);
+                $('#deleteTranscriptionBtn').prop('disabled', true);
+            }
+
+            // Recarrega a lista
+            loadTranscriptionMediaList();
+
+        } catch (error) {
+            hideLoading();
+            console.error('Error deleting transcription:', error);
+            const message = error.responseJSON?.detail || 'Erro ao excluir transcrição';
+            showToast(message, 'error');
+        }
     }
 
     // ========================================
@@ -1155,6 +1228,11 @@ $(document).ready(function() {
 
     $('#copyTranscriptionBtn').on('click', copyTranscription);
     $('#downloadTranscriptionBtn').on('click', downloadTranscription);
+    $('#deleteTranscriptionBtn').on('click', () => {
+        if (currentTranscriptionId) {
+            confirmDeleteTranscription(currentTranscriptionId, $('#currentTranscriptionTitle').text());
+        }
+    });
     $('#modalCopyTranscriptionBtn').on('click', copyTranscription);
     $('#modalDownloadTranscriptionBtn').on('click', downloadTranscription);
 

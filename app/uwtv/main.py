@@ -822,6 +822,65 @@ async def get_transcription_status(
         )
 
 
+@app.delete("/audio/transcription/{file_id}")
+async def delete_transcription(
+        file_id: str,
+        token_data: dict = Depends(verify_token)
+):
+    """Exclui a transcrição de um áudio"""
+    try:
+        logger.info(f"Solicitação de exclusão de transcrição para ID: {file_id}")
+
+        audio_info = await audio_manager.get_audio_info(file_id)
+
+        if not audio_info:
+            logger.warning(f"Áudio não encontrado: {file_id}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Áudio não encontrado: {file_id}"
+            )
+
+        transcription_status = audio_info.get("transcription_status", "none")
+        transcription_path = audio_info.get("transcription_path")
+
+        if transcription_status != "ended" or not transcription_path:
+            logger.warning(f"Transcrição não encontrada para: {file_id}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Transcrição não encontrada para: {file_id}"
+            )
+
+        # Caminho completo do arquivo de transcrição
+        full_path = AUDIO_DIR.parent / transcription_path
+
+        # Remove o arquivo se existir
+        if full_path.exists():
+            full_path.unlink()
+            logger.info(f"Arquivo de transcrição removido: {full_path}")
+        else:
+            logger.warning(f"Arquivo de transcrição não existe: {full_path}")
+
+        # Atualiza o status no banco de dados
+        await audio_manager.update_transcription_status(file_id, "none", None)
+
+        logger.success(f"Transcrição excluída com sucesso para: {file_id}")
+
+        return {
+            "status": "success",
+            "message": f"Transcrição excluída com sucesso",
+            "file_id": file_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Erro ao excluir transcrição: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao excluir transcrição: {str(e)}"
+        )
+
+
 # SSE e status de download
 
 @app.get("/audio/download-events")

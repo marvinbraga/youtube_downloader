@@ -1,0 +1,153 @@
+/* Custom styles for YouTube Downloader - Bootstrap 5.3 Dark Theme */
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bs-body-bg);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--bs-secondary-bg);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--bs-tertiary-bg);
+}
+
+/* Nav pills customization */
+.nav-pills .nav-link.active {
+    background-color: var(--bs-danger) !important;
+}
+
+.nav-pills .nav-link:not(.active):hover {
+    background-color: var(--bs-tertiary-bg);
+}
+
+/* Media item styling */
+.media-item {
+    transition: all 0.2s ease;
+}
+
+.media-item:hover {
+    background-color: var(--bs-tertiary-bg) !important;
+}
+
+.media-item.active {
+    background-color: rgba(var(--bs-danger-rgb), 0.1) !important;
+    border-left: 3px solid var(--bs-danger) !important;
+}
+
+/* Video player styling */
+#videoPlayer {
+    background-color: #000;
+}
+
+/* Audio player custom styling */
+audio {
+    border-radius: 0.375rem;
+}
+
+audio::-webkit-media-controls-panel {
+    background-color: var(--bs-tertiary-bg);
+}
+
+/* Progress bar animation */
+.progress-bar-animated {
+    animation: progress-bar-stripes 1s linear infinite;
+}
+
+/* Toast animations */
+.toast {
+    animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* Badge status colors */
+#authBadge.bg-success {
+    background-color: var(--bs-success) !important;
+}
+
+#authBadge.bg-danger {
+    background-color: var(--bs-danger) !important;
+}
+
+/* List group item hover effect */
+.list-group-item-action {
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+/* Cards hover effect */
+.card {
+    transition: box-shadow 0.2s ease;
+}
+
+.card:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* Button loading state */
+.btn.loading {
+    pointer-events: none;
+    opacity: 0.7;
+}
+
+.btn.loading .spinner-border {
+    width: 1rem;
+    height: 1rem;
+    border-width: 2px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .nav-pills .nav-link {
+        padding: 0.75rem 1rem;
+    }
+
+    .card-header h5 {
+        font-size: 1rem;
+    }
+}
+
+/* Custom focus states */
+.form-control:focus,
+.form-select:focus {
+    border-color: var(--bs-danger);
+    box-shadow: 0 0 0 0.25rem rgba(var(--bs-danger-rgb), 0.25);
+}
+
+/* Input group styling */
+.input-group-text {
+    background-color: var(--bs-tertiary-bg);
+    border-color: var(--bs-border-color);
+}
+
+/* Badge in list items */
+.list-group-item .badge {
+    font-size: 0.7rem;
+}
+
+/* File size and date info styling */
+.text-body-tertiary {
+    font-size: 0.85rem;
+}
+
+/* Video loading overlay */
+#videoLoadingOverlay.d-flex {
+    display: flex !important;
+}

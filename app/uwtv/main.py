@@ -9,6 +9,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Depends, Query, BackgroundTasks, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 from loguru import logger
 import uuid
@@ -129,6 +130,26 @@ async def list_videos(
     except Exception as e:
         logger.error(f"Erro ao listar vídeos: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erro ao listar vídeos: {str(e)}")
+
+
+@app.get("/video/list-downloads")
+async def list_video_downloads(
+        token_data: dict = Depends(verify_token)
+):
+    """Lista todos os vídeos baixados"""
+    try:
+        logger.debug("Listando vídeos do banco de dados")
+
+        videos = await video_manager.get_all_videos()
+
+        logger.info(f"Encontrados {len(videos)} vídeos")
+        return {"videos": videos}
+    except Exception as e:
+        logger.exception(f"Erro ao listar vídeos: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao listar vídeos: {str(e)}"
+        )
 
 
 @app.get("/video/{video_id}")
@@ -415,26 +436,6 @@ async def get_video_download_status(
         raise HTTPException(
             status_code=500,
             detail=f"Erro ao obter status: {str(e)}"
-        )
-
-
-@app.get("/video/list-downloads")
-async def list_video_downloads(
-        token_data: dict = Depends(verify_token)
-):
-    """Lista todos os vídeos baixados"""
-    try:
-        logger.debug("Listando vídeos do banco de dados")
-
-        videos = await video_manager.get_all_videos()
-
-        logger.info(f"Encontrados {len(videos)} vídeos")
-        return {"videos": videos}
-    except Exception as e:
-        logger.exception(f"Erro ao listar vídeos: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao listar vídeos: {str(e)}"
         )
 
 
@@ -1061,3 +1062,19 @@ async def cleanup_queue(
             status_code=500,
             detail=f"Erro ao limpar fila: {str(e)}"
         )
+
+
+# Web Client - Arquivos estáticos
+WEB_CLIENT_DIR = Path(__file__).parent.parent.parent / "web_client"
+
+if WEB_CLIENT_DIR.exists():
+    # Montar arquivos estáticos (CSS, JS)
+    app.mount("/static", StaticFiles(directory=str(WEB_CLIENT_DIR)), name="static")
+
+    @app.get("/")
+    async def serve_index():
+        """Serve a página principal do web client"""
+        index_path = WEB_CLIENT_DIR / "index.html"
+        if index_path.exists():
+            return FileResponse(str(index_path), media_type="text/html")
+        raise HTTPException(status_code=404, detail="Index não encontrado")

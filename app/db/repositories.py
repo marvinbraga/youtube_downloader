@@ -381,15 +381,18 @@ class FolderRepository:
         """Conta itens em uma pasta"""
         from sqlalchemy import func
 
-        audio_count = await self.session.execute(
+        audio_result = await self.session.execute(
             select(func.count(Audio.id)).where(Audio.folder_id == folder_id)
         )
-        video_count = await self.session.execute(
+        video_result = await self.session.execute(
             select(func.count(Video.id)).where(Video.folder_id == folder_id)
         )
 
+        audio_count = audio_result.scalar() or 0
+        video_count = video_result.scalar() or 0
+
         return {
-            "audios": audio_count.scalar() or 0,
-            "videos": video_count.scalar() or 0,
-            "total": (audio_count.scalar() or 0) + (video_count.scalar() or 0)
+            "audios": audio_count,
+            "videos": video_count,
+            "total": audio_count + video_count
         }

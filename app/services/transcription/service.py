@@ -9,8 +9,8 @@ from langchain_community.document_loaders.blob_loaders.schema import Blob, BlobL
 from langchain_community.document_loaders.generic import GenericLoader
 
 from app.services.transcription.parsers import TranscriptionProvider, TranscriptionFactory
-from app.services.configs import AUDIO_DIR, audio_mapping, AUDIO_CONFIG_PATH
-from app.services.managers import AudioDownloadManager
+from app.services.configs import AUDIO_DIR, VIDEO_DIR, audio_mapping, AUDIO_CONFIG_PATH
+from app.services.managers import AudioDownloadManager, VideoDownloadManager
 
 
 class AudioLoader(BlobLoader):
@@ -130,9 +130,9 @@ class TranscriptionService:
         return AudioDownloadManager()
     
     @staticmethod
-    def find_audio_file(file_id: str) -> Path:
+    async def find_audio_file(file_id: str) -> Path:
         """
-        Encontra um arquivo de áudio pelo ID.
+        Encontra um arquivo de áudio ou vídeo pelo ID.
         
         Args:
             file_id: ID do arquivo a ser localizado
@@ -145,16 +145,29 @@ class TranscriptionService:
         """
         # Primeiro verifica se é um ID de áudio no gerenciador
         audio_manager = TranscriptionService.get_audio_manager()
-        audio_info = audio_manager.get_audio_info(file_id)
+        audio_info = await audio_manager.get_audio_info(file_id)
         
         if audio_info:
             # Se encontrou no gerenciador, retorna o caminho do arquivo
-            logger.debug(f"Arquivo encontrado no gerenciador: {audio_info['path']}")
+            logger.debug(f"Arquivo encontrado no gerenciador de áudio: {audio_info['path']}")
             audio_path = AUDIO_DIR.parent / audio_info['path']
             if audio_path.exists():
                 return audio_path
             else:
                 logger.warning(f"Caminho no gerenciador existe mas arquivo não encontrado: {audio_path}")
+        
+        # Verifica se é um ID de vídeo no gerenciador
+        video_manager = VideoDownloadManager()
+        video_info = await video_manager.get_video_info(file_id)
+        
+        if video_info:
+            # Se encontrou no gerenciador de vídeos, retorna o caminho do arquivo
+            logger.debug(f"Arquivo encontrado no gerenciador de vídeo: {video_info['path']}")
+            video_path = VIDEO_DIR.parent / video_info['path']
+            if video_path.exists():
+                return video_path
+            else:
+                logger.warning(f"Caminho no gerenciador existe mas arquivo não encontrado: {video_path}")
         
         # Primeiro procura no mapeamento de áudios
         if file_id in audio_mapping:
@@ -174,24 +187,27 @@ class TranscriptionService:
         checked_files = 0
         possible_matches = []
         
-        # Procura em todo o diretório de áudio de maneira recursiva (para encontrar arquivos em subdiretórios)
+        # Procura em todo o diretório de áudio de maneira recursiva
         for audio_file in AUDIO_DIR.glob("**/*.m4a"):
             checked_files += 1
-            
-            # Para cada arquivo, calcula a similaridade com o ID buscado
             file_name = audio_file.stem
             normalized_name = TranscriptionService.normalize_id(file_name)
-            
-            # Log detalhado para depuração
             logger.debug(f"Verificando arquivo: '{file_name}' (normalizado: '{normalized_name}')")
-            
-            # Calcula a similaridade entre o ID procurado e o nome do arquivo
             similarity = TranscriptionService.calculate_similarity(normalized_id, normalized_name)
-            
-            # Se houver alguma similaridade, adiciona à lista de possíveis correspondências
             if similarity > 0:
                 possible_matches.append((audio_file, similarity))
                 logger.debug(f"Possível correspondência encontrada: {audio_file} (similaridade: {similarity:.2f})")
+        
+        # Procura também no diretório de vídeos
+        for video_file in VIDEO_DIR.glob("**/*.mp4"):
+            checked_files += 1
+            file_name = video_file.stem
+            normalized_name = TranscriptionService.normalize_id(file_name)
+            logger.debug(f"Verificando vídeo: '{file_name}' (normalizado: '{normalized_name}')")
+            similarity = TranscriptionService.calculate_similarity(normalized_id, normalized_name)
+            if similarity > 0:
+                possible_matches.append((video_file, similarity))
+                logger.debug(f"Possível correspondência de vídeo encontrada: {video_file} (similaridade: {similarity:.2f})")
         
         logger.debug(f"Verificados {checked_files} arquivos, encontradas {len(possible_matches)} possíveis correspondências")
         
@@ -208,30 +224,33 @@ class TranscriptionService:
         # Busca por qualquer parte do ID original em qualquer parte do nome do arquivo
         relaxed_matches = []
         for audio_file in AUDIO_DIR.glob("**/*.m4a"):
-            # Verifica se qualquer parte do ID está contida no nome do arquivo
-            # ou se qualquer parte do nome do arquivo está contida no ID
             if any(word.lower() in audio_file.stem.lower() for word in file_id.split() if len(word) > 3):
                 relaxed_matches.append(audio_file)
                 logger.debug(f"Correspondência relaxada encontrada: {audio_file}")
+        
+        # Busca relaxada também em vídeos
+        for video_file in VIDEO_DIR.glob("**/*.mp4"):
+            if any(word.lower() in video_file.stem.lower() for word in file_id.split() if len(word) > 3):
+                relaxed_matches.append(video_file)
+                logger.debug(f"Correspondência relaxada de vídeo encontrada: {video_file}")
         
         if relaxed_matches:
             logger.info(f"Encontrada correspondência relaxada: {relaxed_matches[0]}")
             return relaxed_matches[0]
             
-        # Se não encontrar por similaridade nem critérios relaxados, tenta o primeiro arquivo
+        # Se não encontrar por similaridade nem critérios relaxados, tenta o arquivo mais recente
         if checked_files > 0:
             logger.warning("Nenhuma correspondência encontrada. Tentando usar o arquivo mais recente.")
             
-            # Obtém todos os arquivos de áudio e ordena por data de modificação (mais recente primeiro)
-            all_audio_files = list(AUDIO_DIR.glob("**/*.m4a"))
-            if all_audio_files:
-                newest_file = max(all_audio_files, key=lambda x: x.stat().st_mtime)
+            all_media_files = list(AUDIO_DIR.glob("**/*.m4a")) + list(VIDEO_DIR.glob("**/*.mp4"))
+            if all_media_files:
+                newest_file = max(all_media_files, key=lambda x: x.stat().st_mtime)
                 logger.info(f"Usando arquivo mais recente: {newest_file}")
                 return newest_file
         
         # Se não encontrar de nenhuma forma, lança exceção
-        logger.error(f"Arquivo de áudio não encontrado: {file_id}")
-        raise FileNotFoundError(f"Arquivo de áudio não encontrado: {file_id}")
+        logger.error(f"Arquivo de áudio/vídeo não encontrado: {file_id}")
+        raise FileNotFoundError(f"Arquivo de áudio/vídeo não encontrado: {file_id}")
     
     @staticmethod
     def transcribe_audio(

@@ -520,22 +520,25 @@ async def transcribe_audio(
         background_tasks: BackgroundTasks,
         token_data: dict = Depends(verify_token)
 ):
-    """Transcreve um arquivo de áudio"""
+    """Transcreve um arquivo de áudio ou vídeo"""
     try:
         logger.info(f"Solicitação de transcrição para arquivo ID: '{request.file_id}'")
 
         # Verifica se existe informação do áudio
         audio_info = await audio_manager.get_audio_info(request.file_id)
+        video_info = None
+        media_path = None
+        is_video = False
 
         if audio_info:
             logger.debug(f"Áudio encontrado: {audio_info['id']}")
-            audio_path = AUDIO_DIR.parent / audio_info["path"]
+            media_path = AUDIO_DIR.parent / audio_info["path"]
 
-            if not audio_path.exists():
-                logger.error(f"Arquivo de áudio não encontrado: {audio_path}")
+            if not media_path.exists():
+                logger.error(f"Arquivo de áudio não encontrado: {media_path}")
                 raise HTTPException(
                     status_code=404,
-                    detail=f"Arquivo de áudio não encontrado: {audio_path}"
+                    detail=f"Arquivo de áudio não encontrado: {media_path}"
                 )
 
             transcription_status = audio_info.get("transcription_status", "none")
@@ -563,17 +566,58 @@ async def transcribe_audio(
             elif transcription_status == "error":
                 logger.warning(f"Erro anterior na transcrição. Tentando novamente.")
         else:
-            try:
-                audio_path = TranscriptionService.find_audio_file(request.file_id)
-                logger.debug(f"Arquivo encontrado por busca: {audio_path}")
-            except FileNotFoundError:
-                logger.error(f"Arquivo de áudio não encontrado: '{request.file_id}'")
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Arquivo de áudio não encontrado: {request.file_id}"
-                )
+            # Se não encontrou como áudio, tenta como vídeo
+            video_info = await video_manager.get_video_info(request.file_id)
 
-        transcription_file = audio_path.with_suffix(".md")
+            if video_info:
+                logger.debug(f"Vídeo encontrado: {video_info['id']}")
+                is_video = True
+                media_path = AUDIO_DIR.parent / video_info["path"]
+
+                if not media_path.exists():
+                    logger.error(f"Arquivo de vídeo não encontrado: {media_path}")
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Arquivo de vídeo não encontrado: {media_path}"
+                    )
+
+                transcription_status = video_info.get("transcription_status", "none")
+
+                if transcription_status == "ended" and video_info.get("transcription_path"):
+                    transcription_path = AUDIO_DIR.parent / video_info["transcription_path"]
+                    if transcription_path.exists():
+                        logger.info(f"Transcrição já existe: {transcription_path}")
+                        return TranscriptionResponse(
+                            file_id=request.file_id,
+                            transcription_path=str(transcription_path),
+                            status="success",
+                            message="Transcrição já existe"
+                        )
+
+                elif transcription_status == "started":
+                    logger.info(f"Transcrição já está em andamento para: {request.file_id}")
+                    return TranscriptionResponse(
+                        file_id=request.file_id,
+                        transcription_path="",
+                        status="processing",
+                        message="A transcrição já está em andamento"
+                    )
+
+                elif transcription_status == "error":
+                    logger.warning(f"Erro anterior na transcrição. Tentando novamente.")
+            else:
+                # Tenta encontrar o arquivo por busca
+                try:
+                    media_path = await TranscriptionService.find_audio_file(request.file_id)
+                    logger.debug(f"Arquivo encontrado por busca: {media_path}")
+                except FileNotFoundError:
+                    logger.error(f"Arquivo de áudio/vídeo não encontrado: '{request.file_id}'")
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Arquivo de áudio/vídeo não encontrado: {request.file_id}"
+                    )
+
+        transcription_file = media_path.with_suffix(".md")
 
         if transcription_file.exists():
             logger.info(f"Transcrição já existe: {transcription_file}")
@@ -582,6 +626,13 @@ async def transcribe_audio(
                 rel_path = str(transcription_file.relative_to(AUDIO_DIR.parent))
                 await audio_manager.update_transcription_status(
                     audio_info["id"],
+                    "ended",
+                    rel_path
+                )
+            elif video_info:
+                rel_path = str(transcription_file.relative_to(AUDIO_DIR.parent))
+                await video_manager.update_transcription_status(
+                    video_info["id"],
                     "ended",
                     rel_path
                 )
@@ -596,6 +647,13 @@ async def transcribe_audio(
         # Atualiza o status para "started"
         if audio_info:
             await audio_manager.update_transcription_status(audio_info["id"], "started")
+        elif video_info:
+            await video_manager.update_transcription_status(video_info["id"], "started")
+
+        # Captura as variáveis para a closure
+        _audio_info = audio_info
+        _video_info = video_info
+        _media_path = media_path
 
         # Tarefa em segundo plano para transcrição
         def transcribe_task():
@@ -603,7 +661,7 @@ async def transcribe_audio(
                 provider = TranscriptionProvider(request.provider)
 
                 docs = TranscriptionService.transcribe_audio(
-                    file_path=str(audio_path),
+                    file_path=str(_media_path),
                     provider=provider,
                     language=request.language
                 )
@@ -612,23 +670,33 @@ async def transcribe_audio(
                     output_path = str(transcription_file)
                     transcription_path = TranscriptionService.save_transcription(docs, output_path)
 
-                    if audio_info:
+                    if _audio_info:
                         rel_path = Path(transcription_path).relative_to(AUDIO_DIR.parent)
-                        # Executa atualização assíncrona
                         asyncio.run(audio_manager.update_transcription_status(
-                            audio_info["id"],
+                            _audio_info["id"],
+                            "ended",
+                            str(rel_path)
+                        ))
+                    elif _video_info:
+                        rel_path = Path(transcription_path).relative_to(AUDIO_DIR.parent)
+                        asyncio.run(video_manager.update_transcription_status(
+                            _video_info["id"],
                             "ended",
                             str(rel_path)
                         ))
 
                     logger.success(f"Transcrição concluída: {output_path}")
                 else:
-                    if audio_info:
-                        asyncio.run(audio_manager.update_transcription_status(audio_info["id"], "error"))
+                    if _audio_info:
+                        asyncio.run(audio_manager.update_transcription_status(_audio_info["id"], "error"))
+                    elif _video_info:
+                        asyncio.run(video_manager.update_transcription_status(_video_info["id"], "error"))
                     logger.error(f"Falha na transcrição: nenhum conteúdo gerado")
             except Exception as e:
-                if audio_info:
-                    asyncio.run(audio_manager.update_transcription_status(audio_info["id"], "error"))
+                if _audio_info:
+                    asyncio.run(audio_manager.update_transcription_status(_audio_info["id"], "error"))
+                elif _video_info:
+                    asyncio.run(video_manager.update_transcription_status(_video_info["id"], "error"))
                 logger.exception(f"Erro na tarefa de transcrição: {str(e)}")
 
         background_tasks.add_task(transcribe_task)
@@ -674,7 +742,7 @@ async def get_transcription(
                 logger.warning(f"Caminho de transcrição não existe: {transcription_path}")
 
         try:
-            audio_file = TranscriptionService.find_audio_file(file_id)
+            audio_file = await TranscriptionService.find_audio_file(file_id)
             transcription_file = audio_file.with_suffix(".md")
 
             if not transcription_file.exists():
@@ -787,29 +855,43 @@ async def get_transcription_status(
         file_id: str,
         token_data: dict = Depends(verify_token)
 ):
-    """Obtém o status atual da transcrição"""
+    """Obtém o status atual da transcrição de áudio ou vídeo"""
     try:
         logger.info(f"Solicitação de status de transcrição para ID: {file_id}")
 
+        # Primeiro tenta buscar como áudio
         audio_info = await audio_manager.get_audio_info(file_id)
+        media_info = None
+        media_type = None
 
-        if not audio_info:
-            logger.warning(f"Áudio não encontrado: {file_id}")
+        if audio_info:
+            media_info = audio_info
+            media_type = "audio"
+        else:
+            # Se não encontrou como áudio, tenta como vídeo
+            video_info = await video_manager.get_video_info(file_id)
+            if video_info:
+                media_info = video_info
+                media_type = "video"
+
+        if not media_info:
+            logger.warning(f"Áudio/vídeo não encontrado: {file_id}")
             raise HTTPException(
                 status_code=404,
-                detail=f"Áudio não encontrado: {file_id}"
+                detail=f"Áudio/vídeo não encontrado: {file_id}"
             )
 
-        transcription_status = audio_info.get("transcription_status", "none")
+        transcription_status = media_info.get("transcription_status", "none")
 
         transcription_path = None
-        if transcription_status == "ended" and audio_info.get("transcription_path"):
-            transcription_path = audio_info["transcription_path"]
+        if transcription_status == "ended" and media_info.get("transcription_path"):
+            transcription_path = media_info["transcription_path"]
 
         return {
             "file_id": file_id,
             "status": transcription_status,
-            "transcription_path": transcription_path
+            "transcription_path": transcription_path,
+            "media_type": media_type
         }
 
     except HTTPException:

@@ -809,3 +809,24 @@ class VideoDownloadManager:
         except Exception as e:
             logger.error(f"Erro ao excluir vídeo {video_id}: {str(e)}")
             raise
+
+    async def update_transcription_status(
+        self,
+        video_id: str,
+        status: str,
+        transcription_path: str = None
+    ) -> bool:
+        """Atualiza o status de transcrição de um vídeo"""
+        if status not in ["none", "started", "ended", "error"]:
+            logger.warning(f"Status de transcrição inválido: {status}")
+            return False
+
+        async with get_db_context() as session:
+            repo = VideoRepository(session)
+            result = await repo.update_transcription_status(video_id, status, transcription_path)
+            if result:
+                logger.info(f"Status da transcrição atualizado para '{status}' para vídeo {video_id}")
+                return True
+
+        logger.warning(f"Vídeo não encontrado: {video_id}")
+        return False

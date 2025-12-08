@@ -234,3 +234,19 @@ class VideoRepository:
             update_data["resolution"] = resolution
 
         return await self.update(video_id, **update_data)
+
+    async def update_transcription_status(
+        self,
+        video_id: str,
+        status: str,
+        transcription_path: str = None
+    ) -> Optional[Video]:
+        """Atualiza o status de transcrição de um vídeo"""
+        update_data = {
+            "transcription_status": status,
+            "modified_date": datetime.now()
+        }
+        if transcription_path is not None:
+            update_data["transcription_path"] = transcription_path
+
+        return await self.update(video_id, **update_data)

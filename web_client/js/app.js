@@ -1684,8 +1684,8 @@ $(document).ready(function() {
             showLoading('Movendo item...');
 
             const endpoint = itemType === 'audio'
-                ? `${API_BASE_URL}/folders/move/audio/${itemId}`
-                : `${API_BASE_URL}/folders/move/video/${itemId}`;
+                ? `${API_BASE_URL}/audio/${itemId}/folder`
+                : `${API_BASE_URL}/video/${itemId}/folder`;
 
             await $.ajax({
                 url: endpoint,
@@ -1717,8 +1717,8 @@ $(document).ready(function() {
             showLoading('Removendo da pasta...');
 
             const endpoint = itemType === 'audio'
-                ? `${API_BASE_URL}/folders/move/audio/${itemId}`
-                : `${API_BASE_URL}/folders/move/video/${itemId}`;
+                ? `${API_BASE_URL}/audio/${itemId}/folder`
+                : `${API_BASE_URL}/video/${itemId}/folder`;
 
             await $.ajax({
                 url: endpoint,

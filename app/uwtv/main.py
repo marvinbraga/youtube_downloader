@@ -1325,6 +1325,95 @@ async def create_folder(
         )
 
 
+@app.get("/folders/root", response_model=List[FolderResponse])
+async def list_root_folders(
+        token_data: dict = Depends(verify_token)
+):
+    """Lista apenas pastas raiz (sem parent)"""
+    try:
+        async with get_db_context() as session:
+            repo = FolderRepository(session)
+            root_folders = await repo.get_root_folders()
+            return [FolderResponse(**f.to_dict()) for f in root_folders]
+
+    except Exception as e:
+        logger.exception(f"Erro ao listar pastas raiz: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao listar pastas raiz: {str(e)}"
+        )
+
+
+@app.get("/folders/{folder_id}/children", response_model=List[FolderResponse])
+async def list_folder_children(
+        folder_id: str,
+        token_data: dict = Depends(verify_token)
+):
+    """Lista subpastas de uma pasta"""
+    try:
+        async with get_db_context() as session:
+            repo = FolderRepository(session)
+
+            # Verifica se a pasta existe
+            folder = await repo.get_by_id(folder_id)
+            if not folder:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Pasta não encontrada: {folder_id}"
+                )
+
+            children = await repo.get_children(folder_id)
+            return [FolderResponse(**f.to_dict()) for f in children]
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Erro ao listar subpastas: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao listar subpastas: {str(e)}"
+        )
+
+
+@app.get("/folders/{folder_id}/items")
+async def get_folder_items(
+        folder_id: str,
+        token_data: dict = Depends(verify_token)
+):
+    """Lista itens (áudios e vídeos) de uma pasta"""
+    try:
+        async with get_db_context() as session:
+            folder_repo = FolderRepository(session)
+            audio_repo = AudioRepository(session)
+            video_repo = VideoRepository(session)
+
+            # Verifica se a pasta existe
+            folder = await folder_repo.get_by_id(folder_id)
+            if not folder:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Pasta não encontrada: {folder_id}"
+                )
+
+            audios = await audio_repo.get_by_folder(folder_id)
+            videos = await video_repo.get_by_folder(folder_id)
+
+            return {
+                "audios": [a.to_dict() for a in audios],
+                "videos": [v.to_dict() for v in videos],
+                "item_count": len(audios) + len(videos)
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Erro ao listar itens da pasta: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao listar itens da pasta: {str(e)}"
+        )
+
+
 @app.get("/folders", response_model=List[FolderTreeResponse])
 async def list_folders(
         tree: bool = Query(True, description="Retornar como árvore hierárquica"),

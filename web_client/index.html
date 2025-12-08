@@ -75,6 +75,14 @@
                     <span>Transcrições</span>
                 </button>
             </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link d-flex align-items-center justify-content-center gap-2"
+                        id="folders-tab" data-bs-toggle="pill" data-bs-target="#folders-pane"
+                        type="button" role="tab">
+                    <i class="bi bi-folder2"></i>
+                    <span>Pastas</span>
+                </button>
+            </li>
         </ul>
 
         <!-- Tab Content -->
@@ -248,6 +256,89 @@
                 </div>
             </div>
 
+            <!-- Folders Tab -->
+            <div class="tab-pane fade" id="folders-pane" role="tabpanel" tabindex="0">
+                <!-- Breadcrumb Navigation -->
+                <nav aria-label="Navegação de pastas" class="mb-3">
+                    <ol class="breadcrumb bg-body-tertiary rounded-3 p-3 mb-0" id="folderBreadcrumb">
+                        <li class="breadcrumb-item active" aria-current="page">
+                            <i class="bi bi-house-fill me-1"></i>Raiz
+                        </li>
+                    </ol>
+                </nav>
+
+                <!-- Folder Actions -->
+                <div class="d-flex gap-2 mb-3">
+                    <button class="btn btn-danger" id="createFolderBtn">
+                        <i class="bi bi-folder-plus me-1"></i>Nova Pasta
+                    </button>
+                    <button class="btn btn-outline-secondary" id="backToParentBtn" disabled>
+                        <i class="bi bi-arrow-left me-1"></i>Voltar
+                    </button>
+                    <div class="flex-grow-1"></div>
+                    <button class="btn btn-outline-secondary" id="refreshFoldersBtn" title="Atualizar">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                </div>
+
+                <!-- Folder Content -->
+                <div class="row g-3">
+                    <!-- Folders Column -->
+                    <div class="col-lg-4">
+                        <div class="card h-100">
+                            <div class="card-header bg-body-tertiary d-flex align-items-center gap-2">
+                                <i class="bi bi-folder2 text-warning fs-5"></i>
+                                <h5 class="mb-0">Pastas</h5>
+                            </div>
+                            <div class="list-group list-group-flush" id="folderList" style="max-height: 500px; overflow-y: auto;">
+                                <div class="text-center py-5 text-body-secondary">
+                                    <div class="spinner-border text-danger mb-3" role="status">
+                                        <span class="visually-hidden">Carregando...</span>
+                                    </div>
+                                    <p class="mb-0">Carregando pastas...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Items Column -->
+                    <div class="col-lg-8">
+                        <div class="card h-100">
+                            <div class="card-header bg-body-tertiary d-flex align-items-center justify-content-between">
+                                <div class="d-flex align-items-center gap-2">
+                                    <i class="bi bi-collection text-danger fs-5"></i>
+                                    <h5 class="mb-0">Itens na Pasta</h5>
+                                </div>
+                                <span class="badge bg-secondary" id="folderItemCount">0 itens</span>
+                            </div>
+                            <div class="list-group list-group-flush" id="folderItemList" style="max-height: 500px; overflow-y: auto;">
+                                <div class="text-center py-5 text-body-secondary">
+                                    <i class="bi bi-inbox fs-1 mb-3 d-block opacity-50"></i>
+                                    <p class="mb-0">Selecione uma pasta para ver os itens</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Unorganized Items -->
+                <div class="card mt-4">
+                    <div class="card-header bg-body-tertiary d-flex align-items-center justify-content-between">
+                        <div class="d-flex align-items-center gap-2">
+                            <i class="bi bi-inbox text-secondary fs-5"></i>
+                            <h5 class="mb-0">Itens sem Pasta</h5>
+                        </div>
+                        <span class="badge bg-secondary" id="unorganizedItemCount">0 itens</span>
+                    </div>
+                    <div class="list-group list-group-flush" id="unorganizedItemList" style="max-height: 300px; overflow-y: auto;">
+                        <div class="text-center py-4 text-body-secondary">
+                            <i class="bi bi-check-circle fs-1 mb-3 d-block opacity-50"></i>
+                            <p class="mb-0">Todos os itens estão organizados em pastas</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Transcription Tab -->
             <div class="tab-pane fade" id="transcription-pane" role="tabpanel" tabindex="0">
                 <!-- Transcription Viewer -->
@@ -400,6 +491,93 @@
                     </button>
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
                         <i class="bi bi-x-lg me-1"></i>Fechar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create/Edit Folder Modal -->
+    <div class="modal fade" id="folderModal" tabindex="-1" aria-labelledby="folderModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-body-tertiary">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="folderModalLabel">
+                        <i class="bi bi-folder-plus text-warning me-2"></i>
+                        Nova Pasta
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="folderForm">
+                        <input type="hidden" id="folderEditId">
+                        <div class="mb-3">
+                            <label for="folderName" class="form-label">Nome da Pasta</label>
+                            <input type="text" class="form-control" id="folderName" required maxlength="255"
+                                   placeholder="Digite o nome da pasta">
+                        </div>
+                        <div class="mb-3">
+                            <label for="folderDescription" class="form-label">Descrição (opcional)</label>
+                            <textarea class="form-control" id="folderDescription" rows="2"
+                                      placeholder="Descrição da pasta"></textarea>
+                        </div>
+                        <div class="row g-3">
+                            <div class="col-6">
+                                <label for="folderColor" class="form-label">Cor</label>
+                                <input type="color" class="form-control form-control-color w-100" id="folderColor" value="#FFC107">
+                            </div>
+                            <div class="col-6">
+                                <label for="folderIcon" class="form-label">Ícone</label>
+                                <select class="form-select" id="folderIcon">
+                                    <option value="folder2">Pasta</option>
+                                    <option value="folder2-open">Pasta Aberta</option>
+                                    <option value="star">Favoritos</option>
+                                    <option value="heart">Amados</option>
+                                    <option value="music-note-beamed">Música</option>
+                                    <option value="camera-video">Vídeos</option>
+                                    <option value="book">Estudos</option>
+                                    <option value="briefcase">Trabalho</option>
+                                    <option value="house">Casa</option>
+                                    <option value="person">Pessoal</option>
+                                </select>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="bi bi-x-lg me-1"></i>Cancelar
+                    </button>
+                    <button type="button" class="btn btn-danger" id="saveFolderBtn">
+                        <i class="bi bi-check-lg me-1"></i>Salvar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Move Item Modal -->
+    <div class="modal fade" id="moveItemModal" tabindex="-1" aria-labelledby="moveItemModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-body-tertiary">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="moveItemModalLabel">
+                        <i class="bi bi-arrow-right-circle text-info me-2"></i>
+                        Mover Item
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-3">Mover "<span id="moveItemTitle" class="fw-bold"></span>" para:</p>
+                    <input type="hidden" id="moveItemId">
+                    <input type="hidden" id="moveItemType">
+                    <div class="list-group" id="moveFolderList" style="max-height: 300px; overflow-y: auto;">
+                        <!-- Folders will be rendered here -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="bi bi-x-lg me-1"></i>Cancelar
                     </button>
                 </div>
             </div>

@@ -196,3 +196,76 @@ audio::-webkit-media-controls-panel {
     padding: 1.5rem;
     border-radius: 0.5rem;
 }
+
+/* Folder styles */
+.folder-item {
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+.folder-item:hover {
+    background-color: var(--bs-tertiary-bg) !important;
+    transform: translateX(3px);
+}
+
+.folder-item.active {
+    background-color: rgba(var(--bs-warning-rgb), 0.1) !important;
+    border-left: 3px solid var(--bs-warning) !important;
+}
+
+.folder-media-item,
+.unorganized-item {
+    transition: all 0.2s ease;
+}
+
+.folder-media-item:hover,
+.unorganized-item:hover {
+    background-color: var(--bs-tertiary-bg) !important;
+}
+
+/* Breadcrumb styling */
+#folderBreadcrumb {
+    background-color: var(--bs-tertiary-bg);
+}
+
+#folderBreadcrumb .breadcrumb-item a {
+    color: var(--bs-danger);
+}
+
+#folderBreadcrumb .breadcrumb-item a:hover {
+    color: var(--bs-light);
+    text-decoration: underline !important;
+}
+
+#folderBreadcrumb .breadcrumb-item.active {
+    color: var(--bs-body-color);
+}
+
+/* Move folder list styling */
+.move-folder-option {
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+.move-folder-option:hover:not(.active) {
+    background-color: var(--bs-tertiary-bg) !important;
+    transform: translateX(3px);
+}
+
+.move-folder-option.active {
+    background-color: rgba(var(--bs-warning-rgb), 0.15) !important;
+    border-left: 3px solid var(--bs-warning) !important;
+    cursor: default;
+}
+
+/* Folder color picker */
+#folderColor {
+    height: 38px;
+    cursor: pointer;
+}
+
+/* Folder icon preview */
+.folder-icon-preview {
+    font-size: 2rem;
+    transition: all 0.2s ease;
+}

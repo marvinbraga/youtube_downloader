@@ -23,6 +23,11 @@ $(document).ready(function() {
     let currentTranscription = null;
     let currentTranscriptionId = null;
 
+    // Folder state
+    let currentFolders = [];
+    let currentFolderId = null;  // null = root folder
+    let folderPath = [];  // breadcrumb path
+
     // ========================================
     // Bootstrap Components
     // ========================================
@@ -30,6 +35,8 @@ $(document).ready(function() {
     const toast = new bootstrap.Toast(toastEl, { delay: 5000 });
     const loadingModal = new bootstrap.Modal(document.getElementById('loadingModal'));
     const transcriptionModal = new bootstrap.Modal(document.getElementById('transcriptionModal'));
+    const folderModal = new bootstrap.Modal(document.getElementById('folderModal'));
+    const moveItemModal = new bootstrap.Modal(document.getElementById('moveItemModal'));
 
     // ========================================
     // Utility Functions
@@ -694,6 +701,10 @@ $(document).ready(function() {
             deleteTranscription(pendingDeleteTranscriptionId);
             pendingDeleteTranscriptionId = null;
             pendingDeleteTranscriptionTitle = null;
+        } else if (pendingDeleteFolder && pendingDeleteType === 'folder') {
+            deleteFolder(pendingDeleteFolder.id);
+            pendingDeleteFolder = null;
+            pendingDeleteType = null;
         } else if (pendingDeleteItem && pendingDeleteType) {
             if (pendingDeleteType === 'audio') {
                 deleteAudio(pendingDeleteItem.id);
@@ -711,6 +722,7 @@ $(document).ready(function() {
         pendingDeleteType = null;
         pendingDeleteTranscriptionId = null;
         pendingDeleteTranscriptionTitle = null;
+        pendingDeleteFolder = null;
     });
 
     async function deleteAudio(audioId) {
@@ -1137,6 +1149,602 @@ $(document).ready(function() {
     }
 
     // ========================================
+    // Folder Functions
+    // ========================================
+    async function loadFolders(parentId = null) {
+        if (!authToken) {
+            await authenticate();
+            return;
+        }
+
+        try {
+            let url = `${API_BASE_URL}/folders`;
+            if (parentId) {
+                url = `${API_BASE_URL}/folders/${parentId}/children`;
+            } else {
+                url = `${API_BASE_URL}/folders/root`;
+            }
+
+            const response = await $.ajax({
+                url: url,
+                method: 'GET',
+                headers: getAuthHeaders()
+            });
+
+            currentFolders = response || [];
+            currentFolderId = parentId;
+            renderFolderList(currentFolders);
+
+            // Update back button state
+            $('#backToParentBtn').prop('disabled', !parentId);
+
+            // Load folder items
+            if (parentId) {
+                loadFolderItems(parentId);
+            } else {
+                renderFolderItems([], []);
+            }
+
+            // Load unorganized items
+            loadUnorganizedItems();
+
+        } catch (error) {
+            console.error('Error loading folders:', error);
+            if (error.status === 401) {
+                authenticate();
+            } else {
+                renderFolderList([]);
+            }
+        }
+    }
+
+    function renderFolderList(folders) {
+        const container = $('#folderList');
+        container.empty();
+
+        if (folders.length === 0) {
+            container.html(`
+                <div class="text-center py-4 text-body-secondary">
+                    <i class="bi bi-folder2 fs-1 mb-3 d-block opacity-50"></i>
+                    <p class="mb-0">Nenhuma pasta encontrada</p>
+                    <small>Clique em "Nova Pasta" para criar</small>
+                </div>
+            `);
+            return;
+        }
+
+        folders.forEach(folder => {
+            const iconClass = folder.icon || 'folder2';
+            const colorStyle = folder.color ? `color: ${folder.color}` : 'color: var(--bs-warning)';
+
+            const item = $(`
+                <a href="#" class="list-group-item list-group-item-action folder-item" data-id="${folder.id}">
+                    <div class="d-flex w-100 align-items-center">
+                        <div class="me-3">
+                            <i class="bi bi-${iconClass} fs-4" style="${colorStyle}"></i>
+                        </div>
+                        <div class="flex-grow-1 min-width-0">
+                            <h6 class="mb-0 text-truncate">${folder.name}</h6>
+                            ${folder.description ? `<small class="text-body-tertiary">${folder.description}</small>` : ''}
+                        </div>
+                        <div class="ms-2 d-flex align-items-center gap-1">
+                            <button class="btn btn-sm btn-outline-secondary edit-folder-btn" data-id="${folder.id}" title="Editar">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger delete-folder-btn" data-id="${folder.id}" title="Excluir">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                </a>
+            `);
+
+            // Navigate into folder
+            item.on('click', (e) => {
+                if ($(e.target).closest('.edit-folder-btn, .delete-folder-btn').length === 0) {
+                    e.preventDefault();
+                    navigateToFolder(folder);
+                }
+            });
+
+            // Edit folder
+            item.find('.edit-folder-btn').on('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                openEditFolderModal(folder);
+            });
+
+            // Delete folder
+            item.find('.delete-folder-btn').on('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                confirmDeleteFolder(folder);
+            });
+
+            container.append(item);
+        });
+    }
+
+    async function navigateToFolder(folder) {
+        folderPath.push(folder);
+        updateBreadcrumb();
+        await loadFolders(folder.id);
+        await loadFolderItems(folder.id);
+    }
+
+    async function navigateToRoot() {
+        folderPath = [];
+        currentFolderId = null;
+        updateBreadcrumb();
+        await loadFolders(null);
+    }
+
+    async function navigateBack() {
+        if (folderPath.length > 0) {
+            folderPath.pop();
+            const parentFolder = folderPath.length > 0 ? folderPath[folderPath.length - 1] : null;
+            currentFolderId = parentFolder ? parentFolder.id : null;
+            updateBreadcrumb();
+            await loadFolders(currentFolderId);
+        }
+    }
+
+    function updateBreadcrumb() {
+        const container = $('#folderBreadcrumb');
+        container.empty();
+
+        // Root
+        const rootItem = $(`
+            <li class="breadcrumb-item ${folderPath.length === 0 ? 'active' : ''}">
+                <a href="#" class="text-decoration-none breadcrumb-link">
+                    <i class="bi bi-house-fill me-1"></i>Raiz
+                </a>
+            </li>
+        `);
+        if (folderPath.length > 0) {
+            rootItem.find('a').on('click', (e) => {
+                e.preventDefault();
+                navigateToRoot();
+            });
+        }
+        container.append(rootItem);
+
+        // Folder path
+        folderPath.forEach((folder, index) => {
+            const isLast = index === folderPath.length - 1;
+            const pathItem = $(`
+                <li class="breadcrumb-item ${isLast ? 'active' : ''}">
+                    ${isLast ? folder.name : `<a href="#" class="text-decoration-none breadcrumb-link">${folder.name}</a>`}
+                </li>
+            `);
+            if (!isLast) {
+                pathItem.find('a').on('click', (e) => {
+                    e.preventDefault();
+                    // Navigate to this folder
+                    folderPath = folderPath.slice(0, index + 1);
+                    currentFolderId = folder.id;
+                    updateBreadcrumb();
+                    loadFolders(folder.id);
+                });
+            }
+            container.append(pathItem);
+        });
+    }
+
+    async function loadFolderItems(folderId) {
+        if (!authToken) return;
+
+        try {
+            const response = await $.ajax({
+                url: `${API_BASE_URL}/folders/${folderId}/items`,
+                method: 'GET',
+                headers: getAuthHeaders()
+            });
+
+            renderFolderItems(response.audios || [], response.videos || []);
+            $('#folderItemCount').text(`${response.item_count || 0} itens`);
+
+        } catch (error) {
+            console.error('Error loading folder items:', error);
+            renderFolderItems([], []);
+        }
+    }
+
+    function renderFolderItems(audios, videos) {
+        const container = $('#folderItemList');
+        container.empty();
+
+        const allItems = [
+            ...audios.map(a => ({ ...a, itemType: 'audio' })),
+            ...videos.map(v => ({ ...v, itemType: 'video' }))
+        ];
+
+        if (allItems.length === 0) {
+            container.html(`
+                <div class="text-center py-5 text-body-secondary">
+                    <i class="bi bi-inbox fs-1 mb-3 d-block opacity-50"></i>
+                    <p class="mb-0">Pasta vazia</p>
+                </div>
+            `);
+            return;
+        }
+
+        allItems.forEach(item => {
+            const isAudio = item.itemType === 'audio';
+            const icon = isAudio ? 'bi-music-note-beamed' : 'bi-camera-video';
+            const badgeClass = isAudio ? 'bg-info' : 'bg-primary';
+
+            const element = $(`
+                <div class="list-group-item list-group-item-action folder-media-item" data-id="${item.id}" data-type="${item.itemType}">
+                    <div class="d-flex w-100 align-items-center">
+                        <div class="me-3">
+                            <i class="bi ${icon} text-danger fs-5"></i>
+                        </div>
+                        <div class="flex-grow-1 min-width-0">
+                            <h6 class="mb-1 text-truncate">${item.title || item.name}</h6>
+                            <small class="text-body-tertiary">
+                                <span class="badge ${badgeClass} me-2">${isAudio ? 'Áudio' : 'Vídeo'}</span>
+                                <span><i class="bi bi-hdd me-1"></i>${formatFileSize(item.filesize)}</span>
+                            </small>
+                        </div>
+                        <div class="ms-2 d-flex align-items-center gap-1">
+                            <button class="btn btn-sm btn-outline-secondary move-item-btn" data-id="${item.id}" data-type="${item.itemType}" title="Mover">
+                                <i class="bi bi-arrow-right-circle"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-warning remove-from-folder-btn" data-id="${item.id}" data-type="${item.itemType}" title="Remover da pasta">
+                                <i class="bi bi-x-circle"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `);
+
+            element.find('.move-item-btn').on('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                openMoveItemModal(item, item.itemType);
+            });
+
+            element.find('.remove-from-folder-btn').on('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                removeItemFromFolder(item.id, item.itemType);
+            });
+
+            container.append(element);
+        });
+    }
+
+    async function loadUnorganizedItems() {
+        if (!authToken) return;
+
+        try {
+            const [audioResponse, videoResponse] = await Promise.all([
+                $.ajax({
+                    url: `${API_BASE_URL}/audio/list`,
+                    method: 'GET',
+                    headers: getAuthHeaders()
+                }),
+                $.ajax({
+                    url: `${API_BASE_URL}/video/list-downloads`,
+                    method: 'GET',
+                    headers: getAuthHeaders()
+                })
+            ]);
+
+            const unorganizedAudios = (audioResponse.audio_files || []).filter(a => !a.folder_id);
+            const unorganizedVideos = (videoResponse.videos || []).filter(v => !v.folder_id);
+
+            renderUnorganizedItems(unorganizedAudios, unorganizedVideos);
+            $('#unorganizedItemCount').text(`${unorganizedAudios.length + unorganizedVideos.length} itens`);
+
+        } catch (error) {
+            console.error('Error loading unorganized items:', error);
+        }
+    }
+
+    function renderUnorganizedItems(audios, videos) {
+        const container = $('#unorganizedItemList');
+        container.empty();
+
+        const allItems = [
+            ...audios.map(a => ({ ...a, itemType: 'audio' })),
+            ...videos.map(v => ({ ...v, itemType: 'video' }))
+        ];
+
+        if (allItems.length === 0) {
+            container.html(`
+                <div class="text-center py-4 text-body-secondary">
+                    <i class="bi bi-check-circle fs-1 mb-3 d-block opacity-50"></i>
+                    <p class="mb-0">Todos os itens estão organizados em pastas</p>
+                </div>
+            `);
+            return;
+        }
+
+        allItems.forEach(item => {
+            const isAudio = item.itemType === 'audio';
+            const icon = isAudio ? 'bi-music-note-beamed' : 'bi-camera-video';
+            const badgeClass = isAudio ? 'bg-info' : 'bg-primary';
+
+            const element = $(`
+                <div class="list-group-item list-group-item-action unorganized-item" data-id="${item.id}" data-type="${item.itemType}">
+                    <div class="d-flex w-100 align-items-center">
+                        <div class="me-3">
+                            <i class="bi ${icon} text-danger fs-5"></i>
+                        </div>
+                        <div class="flex-grow-1 min-width-0">
+                            <h6 class="mb-1 text-truncate">${item.title || item.name}</h6>
+                            <small class="text-body-tertiary">
+                                <span class="badge ${badgeClass} me-2">${isAudio ? 'Áudio' : 'Vídeo'}</span>
+                                <span><i class="bi bi-hdd me-1"></i>${formatFileSize(item.filesize)}</span>
+                            </small>
+                        </div>
+                        <div class="ms-2">
+                            <button class="btn btn-sm btn-danger move-to-folder-btn" data-id="${item.id}" data-type="${item.itemType}" title="Mover para pasta">
+                                <i class="bi bi-folder-plus me-1"></i>Mover
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `);
+
+            element.find('.move-to-folder-btn').on('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                openMoveItemModal(item, item.itemType);
+            });
+
+            container.append(element);
+        });
+    }
+
+    // Folder CRUD operations
+    function openCreateFolderModal() {
+        $('#folderEditId').val('');
+        $('#folderName').val('');
+        $('#folderDescription').val('');
+        $('#folderColor').val('#FFC107');
+        $('#folderIcon').val('folder2');
+        $('#folderModalLabel').html('<i class="bi bi-folder-plus text-warning me-2"></i>Nova Pasta');
+        folderModal.show();
+    }
+
+    function openEditFolderModal(folder) {
+        $('#folderEditId').val(folder.id);
+        $('#folderName').val(folder.name);
+        $('#folderDescription').val(folder.description || '');
+        $('#folderColor').val(folder.color || '#FFC107');
+        $('#folderIcon').val(folder.icon || 'folder2');
+        $('#folderModalLabel').html('<i class="bi bi-pencil text-warning me-2"></i>Editar Pasta');
+        folderModal.show();
+    }
+
+    async function saveFolder() {
+        const folderId = $('#folderEditId').val();
+        const name = $('#folderName').val().trim();
+        const description = $('#folderDescription').val().trim();
+        const color = $('#folderColor').val();
+        const icon = $('#folderIcon').val();
+
+        if (!name) {
+            showToast('Nome da pasta é obrigatório', 'warning');
+            return;
+        }
+
+        try {
+            showLoading(folderId ? 'Atualizando pasta...' : 'Criando pasta...');
+
+            const data = {
+                name: name,
+                description: description || null,
+                color: color,
+                icon: icon,
+                parent_id: currentFolderId
+            };
+
+            if (folderId) {
+                // Update
+                await $.ajax({
+                    url: `${API_BASE_URL}/folders/${folderId}`,
+                    method: 'PUT',
+                    headers: getAuthHeaders(),
+                    data: JSON.stringify(data)
+                });
+                showToast('Pasta atualizada com sucesso!', 'success');
+            } else {
+                // Create
+                await $.ajax({
+                    url: `${API_BASE_URL}/folders`,
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    data: JSON.stringify(data)
+                });
+                showToast('Pasta criada com sucesso!', 'success');
+            }
+
+            hideLoading();
+            folderModal.hide();
+            loadFolders(currentFolderId);
+
+        } catch (error) {
+            hideLoading();
+            console.error('Error saving folder:', error);
+            const message = error.responseJSON?.detail || 'Erro ao salvar pasta';
+            showToast(message, 'error');
+        }
+    }
+
+    let pendingDeleteFolder = null;
+
+    function confirmDeleteFolder(folder) {
+        pendingDeleteFolder = folder;
+        pendingDeleteItem = null;
+        pendingDeleteType = 'folder';
+        $('#deleteItemTitle').text(`Pasta "${folder.name}"`);
+        $('#deleteModalLabel').html('<i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>Excluir Pasta');
+        deleteModal.show();
+    }
+
+    async function deleteFolder(folderId) {
+        if (!authToken) {
+            showToast('Não autenticado', 'error');
+            return;
+        }
+
+        try {
+            showLoading('Excluindo pasta...');
+
+            await $.ajax({
+                url: `${API_BASE_URL}/folders/${folderId}`,
+                method: 'DELETE',
+                headers: getAuthHeaders()
+            });
+
+            hideLoading();
+            showToast('Pasta excluída com sucesso!', 'success');
+            loadFolders(currentFolderId);
+
+        } catch (error) {
+            hideLoading();
+            console.error('Error deleting folder:', error);
+            const message = error.responseJSON?.detail || 'Erro ao excluir pasta';
+            showToast(message, 'error');
+        }
+    }
+
+    // Move item functions
+    async function openMoveItemModal(item, itemType) {
+        $('#moveItemId').val(item.id);
+        $('#moveItemType').val(itemType);
+        $('#moveItemTitle').text(item.title || item.name);
+
+        try {
+            // Load all folders
+            const response = await $.ajax({
+                url: `${API_BASE_URL}/folders`,
+                method: 'GET',
+                headers: getAuthHeaders()
+            });
+
+            renderMoveFolderList(response || [], item.folder_id);
+            moveItemModal.show();
+
+        } catch (error) {
+            console.error('Error loading folders for move:', error);
+            showToast('Erro ao carregar pastas', 'error');
+        }
+    }
+
+    function renderMoveFolderList(folders, currentFolderIdOfItem) {
+        const container = $('#moveFolderList');
+        container.empty();
+
+        // Add root option
+        const rootItem = $(`
+            <a href="#" class="list-group-item list-group-item-action move-folder-option ${!currentFolderIdOfItem ? 'active' : ''}" data-folder-id="">
+                <i class="bi bi-house me-2"></i>Raiz (sem pasta)
+            </a>
+        `);
+        rootItem.on('click', (e) => {
+            e.preventDefault();
+            moveItemToFolder(null);
+        });
+        container.append(rootItem);
+
+        // Add folders
+        folders.forEach(folder => {
+            const iconClass = folder.icon || 'folder2';
+            const isCurrentFolder = folder.id === currentFolderIdOfItem;
+
+            const item = $(`
+                <a href="#" class="list-group-item list-group-item-action move-folder-option ${isCurrentFolder ? 'active' : ''}" data-folder-id="${folder.id}">
+                    <i class="bi bi-${iconClass} me-2" style="color: ${folder.color || 'var(--bs-warning)'}"></i>
+                    ${folder.name}
+                    ${isCurrentFolder ? '<span class="badge bg-secondary ms-2">Atual</span>' : ''}
+                </a>
+            `);
+            item.on('click', (e) => {
+                e.preventDefault();
+                if (!isCurrentFolder) {
+                    moveItemToFolder(folder.id);
+                }
+            });
+            container.append(item);
+        });
+    }
+
+    async function moveItemToFolder(folderId) {
+        const itemId = $('#moveItemId').val();
+        const itemType = $('#moveItemType').val();
+
+        if (!itemId || !itemType) return;
+
+        try {
+            showLoading('Movendo item...');
+
+            const endpoint = itemType === 'audio'
+                ? `${API_BASE_URL}/folders/move/audio/${itemId}`
+                : `${API_BASE_URL}/folders/move/video/${itemId}`;
+
+            await $.ajax({
+                url: endpoint,
+                method: 'PUT',
+                headers: getAuthHeaders(),
+                data: JSON.stringify({ folder_id: folderId })
+            });
+
+            hideLoading();
+            moveItemModal.hide();
+            showToast('Item movido com sucesso!', 'success');
+
+            // Reload folder contents
+            if (currentFolderId) {
+                loadFolderItems(currentFolderId);
+            }
+            loadUnorganizedItems();
+
+        } catch (error) {
+            hideLoading();
+            console.error('Error moving item:', error);
+            const message = error.responseJSON?.detail || 'Erro ao mover item';
+            showToast(message, 'error');
+        }
+    }
+
+    async function removeItemFromFolder(itemId, itemType) {
+        try {
+            showLoading('Removendo da pasta...');
+
+            const endpoint = itemType === 'audio'
+                ? `${API_BASE_URL}/folders/move/audio/${itemId}`
+                : `${API_BASE_URL}/folders/move/video/${itemId}`;
+
+            await $.ajax({
+                url: endpoint,
+                method: 'PUT',
+                headers: getAuthHeaders(),
+                data: JSON.stringify({ folder_id: null })
+            });
+
+            hideLoading();
+            showToast('Item removido da pasta!', 'success');
+
+            // Reload folder contents
+            if (currentFolderId) {
+                loadFolderItems(currentFolderId);
+            }
+            loadUnorganizedItems();
+
+        } catch (error) {
+            hideLoading();
+            console.error('Error removing item from folder:', error);
+            const message = error.responseJSON?.detail || 'Erro ao remover item da pasta';
+            showToast(message, 'error');
+        }
+    }
+
+    // ========================================
     // Helper Functions
     // ========================================
     function getStatusBadge(status) {
@@ -1217,8 +1825,19 @@ $(document).ready(function() {
             loadVideoList();
         } else if (target === '#transcription-pane') {
             loadTranscriptionMediaList();
+        } else if (target === '#folders-pane') {
+            loadFolders(currentFolderId);
         }
     });
+
+    // Folder buttons
+    $('#createFolderBtn').on('click', openCreateFolderModal);
+    $('#backToParentBtn').on('click', navigateBack);
+    $('#refreshFoldersBtn').on('click', () => {
+        loadFolders(currentFolderId);
+        showToast('Lista de pastas atualizada', 'info');
+    });
+    $('#saveFolderBtn').on('click', saveFolder);
 
     // Transcription buttons
     $('#refreshTranscriptionListBtn').on('click', () => {

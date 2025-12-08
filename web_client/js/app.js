@@ -1394,6 +1394,9 @@ $(document).ready(function() {
                             </small>
                         </div>
                         <div class="ms-2 d-flex align-items-center gap-1">
+                            <button class="btn btn-sm btn-success play-item-btn" data-id="${item.id}" data-type="${item.itemType}" title="Reproduzir">
+                                <i class="bi bi-play-fill"></i>
+                            </button>
                             <button class="btn btn-sm btn-outline-secondary move-item-btn" data-id="${item.id}" data-type="${item.itemType}" title="Mover">
                                 <i class="bi bi-arrow-right-circle"></i>
                             </button>
@@ -1409,6 +1412,12 @@ $(document).ready(function() {
                 e.stopPropagation();
                 toggleItemSelection(item.id, item.itemType, e.target.checked);
                 element.toggleClass('selected', e.target.checked);
+            });
+
+            element.find('.play-item-btn').on('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                playItemFromFolder(item, item.itemType);
             });
 
             element.find('.move-item-btn').on('click', (e) => {
@@ -1497,7 +1506,10 @@ $(document).ready(function() {
                                 <span><i class="bi bi-hdd me-1"></i>${formatFileSize(item.filesize)}</span>
                             </small>
                         </div>
-                        <div class="ms-2">
+                        <div class="ms-2 d-flex align-items-center gap-1">
+                            <button class="btn btn-sm btn-success play-item-btn" data-id="${item.id}" data-type="${item.itemType}" title="Reproduzir">
+                                <i class="bi bi-play-fill"></i>
+                            </button>
                             <button class="btn btn-sm btn-danger move-to-folder-btn" data-id="${item.id}" data-type="${item.itemType}" title="Mover para pasta">
                                 <i class="bi bi-folder-plus me-1"></i>Mover
                             </button>
@@ -1510,6 +1522,12 @@ $(document).ready(function() {
                 e.stopPropagation();
                 toggleItemSelection(item.id, item.itemType, e.target.checked);
                 element.toggleClass('selected', e.target.checked);
+            });
+
+            element.find('.play-item-btn').on('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                playItemFromFolder(item, item.itemType);
             });
 
             element.find('.move-to-folder-btn').on('click', (e) => {
@@ -1915,6 +1933,29 @@ $(document).ready(function() {
             console.error('Error removing item from folder:', error);
             const message = error.responseJSON?.detail || 'Erro ao remover item da pasta';
             showToast(message, 'error');
+        }
+    }
+
+    // Play item from folder view - switches to appropriate tab and plays
+    function playItemFromFolder(item, itemType) {
+        if (itemType === 'audio') {
+            // Switch to audio tab
+            const audioTab = document.getElementById('audio-tab');
+            const tab = new bootstrap.Tab(audioTab);
+            tab.show();
+            // Play audio after tab switch
+            setTimeout(() => {
+                playAudio(item);
+            }, 100);
+        } else {
+            // Switch to video tab
+            const videoTab = document.getElementById('video-tab');
+            const tab = new bootstrap.Tab(videoTab);
+            tab.show();
+            // Play video after tab switch
+            setTimeout(() => {
+                playVideo(item);
+            }, 100);
         }
     }
 

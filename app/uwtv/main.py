@@ -4,7 +4,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import FastAPI, HTTPException, Depends, Query, BackgroundTasks, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +20,10 @@ setup_logging(level="INFO")
 
 from app.models.video import TokenData, ClientAuth, SortOption
 from app.models.audio import AudioDownloadRequest, VideoDownloadRequest, TranscriptionRequest, TranscriptionResponse, TranscriptionProvider
+from app.models.folder import (
+    FolderCreate, FolderUpdate, FolderResponse, FolderTreeResponse,
+    FolderWithItemsResponse, FolderPathResponse, MoveItemRequest, BulkMoveRequest
+)
 from app.services.configs import video_mapping, AUDIO_DIR, audio_mapping, DOWNLOADS_DIR
 from app.services.files import scan_video_directory, generate_video_stream, generate_audio_stream
 from app.services.managers import VideoStreamManager, AudioDownloadManager, VideoDownloadManager
@@ -27,7 +31,9 @@ from app.services.securities import AUTHORIZED_CLIENTS, create_access_token, ver
 from app.services.transcription.service import TranscriptionService
 from app.services.sse_manager import sse_manager
 from app.services.download_queue import download_queue, DownloadTask
-from app.db.database import init_db, migrate_json_to_sqlite
+from app.db.database import init_db, migrate_json_to_sqlite, get_db_context
+from app.db.models import Folder
+from app.db.repositories import FolderRepository, AudioRepository, VideoRepository
 
 
 @asynccontextmanager
@@ -1269,6 +1275,478 @@ async def cleanup_queue(
         raise HTTPException(
             status_code=500,
             detail=f"Erro ao limpar fila: {str(e)}"
+        )
+
+
+# ============================================================================
+# ENDPOINTS DE PASTAS (FOLDERS)
+# ============================================================================
+
+@app.post("/folders", response_model=FolderResponse)
+async def create_folder(
+        folder_data: FolderCreate,
+        token_data: dict = Depends(verify_token)
+):
+    """Cria uma nova pasta"""
+    try:
+        logger.info(f"Criando pasta: {folder_data.name}")
+
+        async with get_db_context() as session:
+            repo = FolderRepository(session)
+
+            # Verifica se a pasta pai existe (se fornecida)
+            if folder_data.parent_id:
+                parent = await repo.get_by_id(folder_data.parent_id)
+                if not parent:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Pasta pai não encontrada: {folder_data.parent_id}"
+                    )
+
+            # Cria a pasta
+            folder = Folder(
+                name=folder_data.name,
+                parent_id=folder_data.parent_id,
+                description=folder_data.description,
+                color=folder_data.color,
+                icon=folder_data.icon
+            )
+            created = await repo.create(folder)
+            logger.success(f"Pasta criada: {created.id}")
+            return FolderResponse(**created.to_dict())
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Erro ao criar pasta: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao criar pasta: {str(e)}"
+        )
+
+
+@app.get("/folders", response_model=List[FolderTreeResponse])
+async def list_folders(
+        tree: bool = Query(True, description="Retornar como árvore hierárquica"),
+        token_data: dict = Depends(verify_token)
+):
+    """Lista todas as pastas"""
+    try:
+        async with get_db_context() as session:
+            repo = FolderRepository(session)
+
+            if tree:
+                # Retorna apenas pastas raiz com filhos
+                root_folders = await repo.get_root_folders()
+                result = []
+
+                async def build_tree(folder: Folder) -> dict:
+                    children = await repo.get_children(folder.id)
+                    item_counts = await repo.count_items(folder.id)
+                    folder_dict = folder.to_dict()
+                    folder_dict["children"] = [await build_tree(child) for child in children]
+                    folder_dict["item_count"] = item_counts["total"]
+                    return folder_dict
+
+                for folder in root_folders:
+                    result.append(await build_tree(folder))
+
+                return result
+            else:
+                # Retorna lista plana
+                folders = await repo.get_all()
+                return [FolderResponse(**f.to_dict()) for f in folders]
+
+    except Exception as e:
+        logger.exception(f"Erro ao listar pastas: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao listar pastas: {str(e)}"
+        )
+
+
+@app.get("/folders/{folder_id}", response_model=FolderWithItemsResponse)
+async def get_folder(
+        folder_id: str,
+        include_items: bool = Query(True, description="Incluir itens (áudios/vídeos) da pasta"),
+        token_data: dict = Depends(verify_token)
+):
+    """Obtém detalhes de uma pasta"""
+    try:
+        async with get_db_context() as session:
+            folder_repo = FolderRepository(session)
+            folder = await folder_repo.get_by_id(folder_id)
+
+            if not folder:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Pasta não encontrada: {folder_id}"
+                )
+
+            result = folder.to_dict()
+
+            if include_items:
+                audio_repo = AudioRepository(session)
+                video_repo = VideoRepository(session)
+
+                audios = await audio_repo.get_by_folder(folder_id)
+                videos = await video_repo.get_by_folder(folder_id)
+
+                result["audios"] = [a.to_dict() for a in audios]
+                result["videos"] = [v.to_dict() for v in videos]
+                result["item_count"] = len(audios) + len(videos)
+            else:
+                result["audios"] = []
+                result["videos"] = []
+                result["item_count"] = 0
+
+            return FolderWithItemsResponse(**result)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Erro ao obter pasta: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao obter pasta: {str(e)}"
+        )
+
+
+@app.get("/folders/{folder_id}/path", response_model=FolderPathResponse)
+async def get_folder_path(
+        folder_id: str,
+        token_data: dict = Depends(verify_token)
+):
+    """Obtém o caminho completo de uma pasta (breadcrumb)"""
+    try:
+        async with get_db_context() as session:
+            repo = FolderRepository(session)
+            path = await repo.get_path(folder_id)
+
+            if not path:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Pasta não encontrada: {folder_id}"
+                )
+
+            return FolderPathResponse(
+                path=[FolderResponse(**f.to_dict()) for f in path],
+                full_path=" / ".join([f.name for f in path])
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Erro ao obter caminho da pasta: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao obter caminho da pasta: {str(e)}"
+        )
+
+
+@app.put("/folders/{folder_id}", response_model=FolderResponse)
+async def update_folder(
+        folder_id: str,
+        folder_data: FolderUpdate,
+        token_data: dict = Depends(verify_token)
+):
+    """Atualiza uma pasta"""
+    try:
+        async with get_db_context() as session:
+            repo = FolderRepository(session)
+            folder = await repo.get_by_id(folder_id)
+
+            if not folder:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Pasta não encontrada: {folder_id}"
+                )
+
+            # Verifica se a nova pasta pai existe e não cria ciclo
+            if folder_data.parent_id is not None:
+                if folder_data.parent_id == folder_id:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Uma pasta não pode ser pai de si mesma"
+                    )
+
+                if folder_data.parent_id != "":
+                    parent = await repo.get_by_id(folder_data.parent_id)
+                    if not parent:
+                        raise HTTPException(
+                            status_code=404,
+                            detail=f"Pasta pai não encontrada: {folder_data.parent_id}"
+                        )
+
+                    # Verifica se não está tentando mover para um descendente
+                    path = await repo.get_path(folder_data.parent_id)
+                    if any(f.id == folder_id for f in path):
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Não é possível mover pasta para um descendente"
+                        )
+
+            # Prepara dados de atualização
+            update_data = {}
+            if folder_data.name is not None:
+                update_data["name"] = folder_data.name
+            if folder_data.parent_id is not None:
+                update_data["parent_id"] = folder_data.parent_id if folder_data.parent_id != "" else None
+            if folder_data.description is not None:
+                update_data["description"] = folder_data.description
+            if folder_data.color is not None:
+                update_data["color"] = folder_data.color
+            if folder_data.icon is not None:
+                update_data["icon"] = folder_data.icon
+
+            if update_data:
+                updated = await repo.update(folder_id, **update_data)
+                logger.info(f"Pasta atualizada: {folder_id}")
+                return FolderResponse(**updated.to_dict())
+
+            return FolderResponse(**folder.to_dict())
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Erro ao atualizar pasta: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao atualizar pasta: {str(e)}"
+        )
+
+
+@app.delete("/folders/{folder_id}")
+async def delete_folder(
+        folder_id: str,
+        force: bool = Query(False, description="Forçar exclusão mesmo com itens"),
+        token_data: dict = Depends(verify_token)
+):
+    """Exclui uma pasta"""
+    try:
+        async with get_db_context() as session:
+            repo = FolderRepository(session)
+            folder = await repo.get_by_id(folder_id)
+
+            if not folder:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Pasta não encontrada: {folder_id}"
+                )
+
+            # Verifica se tem subpastas
+            if await repo.has_children(folder_id):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Não é possível excluir pasta com subpastas. Exclua as subpastas primeiro."
+                )
+
+            # Verifica se tem itens
+            if not force and await repo.has_items(folder_id):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Não é possível excluir pasta com itens. Use force=true ou mova os itens."
+                )
+
+            # Se force=true, move itens para a pasta pai (ou raiz)
+            if force:
+                audio_repo = AudioRepository(session)
+                video_repo = VideoRepository(session)
+
+                audios = await audio_repo.get_by_folder(folder_id)
+                for audio in audios:
+                    await audio_repo.update_folder(audio.id, folder.parent_id)
+
+                videos = await video_repo.get_by_folder(folder_id)
+                for video in videos:
+                    await video_repo.update_folder(video.id, folder.parent_id)
+
+            await repo.delete(folder_id)
+            logger.info(f"Pasta excluída: {folder_id}")
+
+            return {"message": f"Pasta excluída com sucesso", "folder_id": folder_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Erro ao excluir pasta: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao excluir pasta: {str(e)}"
+        )
+
+
+@app.get("/folders/root/items")
+async def get_root_items(
+        token_data: dict = Depends(verify_token)
+):
+    """Lista itens sem pasta (raiz)"""
+    try:
+        async with get_db_context() as session:
+            audio_repo = AudioRepository(session)
+            video_repo = VideoRepository(session)
+
+            audios = await audio_repo.get_by_folder(None)
+            videos = await video_repo.get_by_folder(None)
+
+            return {
+                "audios": [a.to_dict() for a in audios],
+                "videos": [v.to_dict() for v in videos],
+                "item_count": len(audios) + len(videos)
+            }
+
+    except Exception as e:
+        logger.exception(f"Erro ao listar itens raiz: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao listar itens raiz: {str(e)}"
+        )
+
+
+@app.put("/audio/{audio_id}/folder")
+async def move_audio_to_folder(
+        audio_id: str,
+        request: MoveItemRequest,
+        token_data: dict = Depends(verify_token)
+):
+    """Move um áudio para uma pasta"""
+    try:
+        async with get_db_context() as session:
+            audio_repo = AudioRepository(session)
+            folder_repo = FolderRepository(session)
+
+            # Verifica se o áudio existe
+            audio = await audio_repo.get_by_id(audio_id)
+            if not audio:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Áudio não encontrado: {audio_id}"
+                )
+
+            # Verifica se a pasta destino existe
+            if request.folder_id:
+                folder = await folder_repo.get_by_id(request.folder_id)
+                if not folder:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Pasta não encontrada: {request.folder_id}"
+                    )
+
+            # Move o áudio
+            await audio_repo.update_folder(audio_id, request.folder_id)
+            logger.info(f"Áudio {audio_id} movido para pasta {request.folder_id}")
+
+            return {"message": "Áudio movido com sucesso", "audio_id": audio_id, "folder_id": request.folder_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Erro ao mover áudio: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao mover áudio: {str(e)}"
+        )
+
+
+@app.put("/video/{video_id}/folder")
+async def move_video_to_folder(
+        video_id: str,
+        request: MoveItemRequest,
+        token_data: dict = Depends(verify_token)
+):
+    """Move um vídeo para uma pasta"""
+    try:
+        async with get_db_context() as session:
+            video_repo = VideoRepository(session)
+            folder_repo = FolderRepository(session)
+
+            # Verifica se o vídeo existe
+            video = await video_repo.get_by_id(video_id)
+            if not video:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Vídeo não encontrado: {video_id}"
+                )
+
+            # Verifica se a pasta destino existe
+            if request.folder_id:
+                folder = await folder_repo.get_by_id(request.folder_id)
+                if not folder:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Pasta não encontrada: {request.folder_id}"
+                    )
+
+            # Move o vídeo
+            await video_repo.update_folder(video_id, request.folder_id)
+            logger.info(f"Vídeo {video_id} movido para pasta {request.folder_id}")
+
+            return {"message": "Vídeo movido com sucesso", "video_id": video_id, "folder_id": request.folder_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Erro ao mover vídeo: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao mover vídeo: {str(e)}"
+        )
+
+
+@app.put("/folders/bulk-move")
+async def bulk_move_items(
+        request: BulkMoveRequest,
+        token_data: dict = Depends(verify_token)
+):
+    """Move múltiplos itens para uma pasta"""
+    try:
+        async with get_db_context() as session:
+            audio_repo = AudioRepository(session)
+            video_repo = VideoRepository(session)
+            folder_repo = FolderRepository(session)
+
+            # Verifica se a pasta destino existe
+            if request.folder_id:
+                folder = await folder_repo.get_by_id(request.folder_id)
+                if not folder:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Pasta não encontrada: {request.folder_id}"
+                    )
+
+            moved_audios = 0
+            moved_videos = 0
+
+            # Move os áudios
+            for audio_id in request.audio_ids:
+                audio = await audio_repo.get_by_id(audio_id)
+                if audio:
+                    await audio_repo.update_folder(audio_id, request.folder_id)
+                    moved_audios += 1
+
+            # Move os vídeos
+            for video_id in request.video_ids:
+                video = await video_repo.get_by_id(video_id)
+                if video:
+                    await video_repo.update_folder(video_id, request.folder_id)
+                    moved_videos += 1
+
+            logger.info(f"Movidos {moved_audios} áudios e {moved_videos} vídeos para pasta {request.folder_id}")
+
+            return {
+                "message": "Itens movidos com sucesso",
+                "moved_audios": moved_audios,
+                "moved_videos": moved_videos,
+                "folder_id": request.folder_id
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Erro ao mover itens em lote: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao mover itens em lote: {str(e)}"
         )
 
 

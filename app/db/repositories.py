@@ -7,7 +7,7 @@ from loguru import logger
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Audio, Video
+from app.db.models import Audio, Video, Folder
 
 
 class AudioRepository:
@@ -132,6 +132,22 @@ class AudioRepository:
         )
         return list(result.scalars().all())
 
+    async def update_folder(self, audio_id: str, folder_id: Optional[str]) -> Optional[Audio]:
+        """Atualiza a pasta de um áudio"""
+        return await self.update(audio_id, folder_id=folder_id)
+
+    async def get_by_folder(self, folder_id: Optional[str]) -> List[Audio]:
+        """Lista áudios por pasta"""
+        if folder_id is None:
+            result = await self.session.execute(
+                select(Audio).where(Audio.folder_id.is_(None))
+            )
+        else:
+            result = await self.session.execute(
+                select(Audio).where(Audio.folder_id == folder_id)
+            )
+        return list(result.scalars().all())
+
 
 class VideoRepository:
     """Repositório para operações de vídeo no banco de dados"""
@@ -250,3 +266,130 @@ class VideoRepository:
             update_data["transcription_path"] = transcription_path
 
         return await self.update(video_id, **update_data)
+
+    async def update_folder(self, video_id: str, folder_id: Optional[str]) -> Optional[Video]:
+        """Atualiza a pasta de um vídeo"""
+        return await self.update(video_id, folder_id=folder_id)
+
+    async def get_by_folder(self, folder_id: Optional[str]) -> List[Video]:
+        """Lista vídeos por pasta"""
+        if folder_id is None:
+            result = await self.session.execute(
+                select(Video).where(Video.folder_id.is_(None))
+            )
+        else:
+            result = await self.session.execute(
+                select(Video).where(Video.folder_id == folder_id)
+            )
+        return list(result.scalars().all())
+
+
+class FolderRepository:
+    """Repositório para operações de pasta no banco de dados"""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def get_by_id(self, folder_id: str) -> Optional[Folder]:
+        """Busca pasta pelo ID"""
+        result = await self.session.execute(
+            select(Folder).where(Folder.id == folder_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_all(self, order_by_name: bool = True) -> List[Folder]:
+        """Lista todas as pastas"""
+        query = select(Folder)
+        if order_by_name:
+            query = query.order_by(Folder.name)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def get_root_folders(self) -> List[Folder]:
+        """Lista pastas raiz (sem parent)"""
+        result = await self.session.execute(
+            select(Folder).where(Folder.parent_id.is_(None)).order_by(Folder.name)
+        )
+        return list(result.scalars().all())
+
+    async def get_children(self, folder_id: str) -> List[Folder]:
+        """Lista subpastas de uma pasta"""
+        result = await self.session.execute(
+            select(Folder).where(Folder.parent_id == folder_id).order_by(Folder.name)
+        )
+        return list(result.scalars().all())
+
+    async def create(self, folder: Folder) -> Folder:
+        """Cria uma nova pasta"""
+        self.session.add(folder)
+        await self.session.flush()
+        await self.session.refresh(folder)
+        return folder
+
+    async def update(self, folder_id: str, **kwargs) -> Optional[Folder]:
+        """Atualiza uma pasta"""
+        kwargs["modified_date"] = datetime.now()
+
+        await self.session.execute(
+            update(Folder).where(Folder.id == folder_id).values(**kwargs)
+        )
+        await self.session.flush()
+        return await self.get_by_id(folder_id)
+
+    async def delete(self, folder_id: str) -> bool:
+        """Remove uma pasta"""
+        result = await self.session.execute(
+            delete(Folder).where(Folder.id == folder_id)
+        )
+        return result.rowcount > 0
+
+    async def get_path(self, folder_id: str) -> List[Folder]:
+        """Retorna o caminho completo da pasta (da raiz até a pasta)"""
+        path = []
+        current = await self.get_by_id(folder_id)
+
+        while current:
+            path.insert(0, current)
+            if current.parent_id:
+                current = await self.get_by_id(current.parent_id)
+            else:
+                current = None
+
+        return path
+
+    async def has_children(self, folder_id: str) -> bool:
+        """Verifica se a pasta tem subpastas"""
+        result = await self.session.execute(
+            select(Folder.id).where(Folder.parent_id == folder_id).limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def has_items(self, folder_id: str) -> bool:
+        """Verifica se a pasta tem itens (áudios ou vídeos)"""
+        audio_result = await self.session.execute(
+            select(Audio.id).where(Audio.folder_id == folder_id).limit(1)
+        )
+        if audio_result.scalar_one_or_none():
+            return True
+
+        video_result = await self.session.execute(
+            select(Video.id).where(Video.folder_id == folder_id).limit(1)
+        )
+        return video_result.scalar_one_or_none() is not None
+
+    async def count_items(self, folder_id: str) -> dict:
+        """Conta itens em uma pasta"""
+        from sqlalchemy import func
+
+        audio_count = await self.session.execute(
+            select(func.count(Audio.id)).where(Audio.folder_id == folder_id)
+        )
+        video_count = await self.session.execute(
+            select(func.count(Video.id)).where(Video.folder_id == folder_id)
+        )
+
+        return {
+            "audios": audio_count.scalar() or 0,
+            "videos": video_count.scalar() or 0,
+            "total": (audio_count.scalar() or 0) + (video_count.scalar() or 0)
+        }

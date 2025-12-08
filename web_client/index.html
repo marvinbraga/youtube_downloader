@@ -275,6 +275,12 @@
                     <button class="btn btn-outline-secondary" id="backToParentBtn" disabled>
                         <i class="bi bi-arrow-left me-1"></i>Voltar
                     </button>
+                    <button class="btn btn-info d-none" id="moveSelectedBtn">
+                        <i class="bi bi-folder-symlink me-1"></i>Mover Selecionados (<span id="selectedCount">0</span>)
+                    </button>
+                    <button class="btn btn-outline-secondary d-none" id="clearSelectionBtn">
+                        <i class="bi bi-x-lg me-1"></i>Limpar Seleção
+                    </button>
                     <div class="flex-grow-1"></div>
                     <button class="btn btn-outline-secondary" id="refreshFoldersBtn" title="Atualizar">
                         <i class="bi bi-arrow-clockwise"></i>
@@ -563,14 +569,15 @@
                 <div class="modal-header">
                     <h5 class="modal-title" id="moveItemModalLabel">
                         <i class="bi bi-arrow-right-circle text-info me-2"></i>
-                        Mover Item
+                        <span id="moveModalTitle">Mover Item</span>
                     </h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="mb-3">Mover "<span id="moveItemTitle" class="fw-bold"></span>" para:</p>
+                    <p class="mb-3" id="moveItemDescription">Mover "<span id="moveItemTitle" class="fw-bold"></span>" para:</p>
                     <input type="hidden" id="moveItemId">
                     <input type="hidden" id="moveItemType">
+                    <input type="hidden" id="moveBatchMode" value="false">
                     <div class="list-group" id="moveFolderList" style="max-height: 300px; overflow-y: auto;">
                         <!-- Folders will be rendered here -->
                     </div>

@@ -27,6 +27,7 @@ $(document).ready(function() {
     let currentFolders = [];
     let currentFolderId = null;  // null = root folder
     let folderPath = [];  // breadcrumb path
+    let selectedItems = [];  // {id, type} - itens selecionados para mover em lote
 
     // ========================================
     // Bootstrap Components
@@ -1373,10 +1374,15 @@ $(document).ready(function() {
             const isAudio = item.itemType === 'audio';
             const icon = isAudio ? 'bi-music-note-beamed' : 'bi-camera-video';
             const badgeClass = isAudio ? 'bg-info' : 'bg-primary';
+            const isSelected = selectedItems.some(s => s.id === item.id && s.type === item.itemType);
 
             const element = $(`
-                <div class="list-group-item list-group-item-action folder-media-item" data-id="${item.id}" data-type="${item.itemType}">
+                <div class="list-group-item list-group-item-action folder-media-item ${isSelected ? 'selected' : ''}" data-id="${item.id}" data-type="${item.itemType}">
                     <div class="d-flex w-100 align-items-center">
+                        <div class="form-check me-2">
+                            <input class="form-check-input item-checkbox" type="checkbox" ${isSelected ? 'checked' : ''}
+                                   data-id="${item.id}" data-type="${item.itemType}">
+                        </div>
                         <div class="me-3">
                             <i class="bi ${icon} text-danger fs-5"></i>
                         </div>
@@ -1398,6 +1404,12 @@ $(document).ready(function() {
                     </div>
                 </div>
             `);
+
+            element.find('.item-checkbox').on('change', (e) => {
+                e.stopPropagation();
+                toggleItemSelection(item.id, item.itemType, e.target.checked);
+                element.toggleClass('selected', e.target.checked);
+            });
 
             element.find('.move-item-btn').on('click', (e) => {
                 e.preventDefault();
@@ -1466,10 +1478,15 @@ $(document).ready(function() {
             const isAudio = item.itemType === 'audio';
             const icon = isAudio ? 'bi-music-note-beamed' : 'bi-camera-video';
             const badgeClass = isAudio ? 'bg-info' : 'bg-primary';
+            const isSelected = selectedItems.some(s => s.id === item.id && s.type === item.itemType);
 
             const element = $(`
-                <div class="list-group-item list-group-item-action unorganized-item" data-id="${item.id}" data-type="${item.itemType}">
+                <div class="list-group-item list-group-item-action unorganized-item ${isSelected ? 'selected' : ''}" data-id="${item.id}" data-type="${item.itemType}">
                     <div class="d-flex w-100 align-items-center">
+                        <div class="form-check me-2">
+                            <input class="form-check-input item-checkbox" type="checkbox" ${isSelected ? 'checked' : ''}
+                                   data-id="${item.id}" data-type="${item.itemType}">
+                        </div>
                         <div class="me-3">
                             <i class="bi ${icon} text-danger fs-5"></i>
                         </div>
@@ -1488,6 +1505,12 @@ $(document).ready(function() {
                     </div>
                 </div>
             `);
+
+            element.find('.item-checkbox').on('change', (e) => {
+                e.stopPropagation();
+                toggleItemSelection(item.id, item.itemType, e.target.checked);
+                element.toggleClass('selected', e.target.checked);
+            });
 
             element.find('.move-to-folder-btn').on('click', (e) => {
                 e.preventDefault();
@@ -1615,9 +1638,13 @@ $(document).ready(function() {
 
     // Move item functions
     async function openMoveItemModal(item, itemType) {
+        // Reset to single item mode
+        $('#moveBatchMode').val('false');
         $('#moveItemId').val(item.id);
         $('#moveItemType').val(itemType);
+        $('#moveModalTitle').text('Mover Item');
         $('#moveItemTitle').text(item.title || item.name);
+        $('#moveItemDescription').html(`Mover "<span id="moveItemTitle" class="fw-bold">${item.title || item.name}</span>" para:`);
 
         try {
             // Load all folders with hierarchy
@@ -1689,30 +1716,164 @@ $(document).ready(function() {
     }
 
     async function moveItemToFolder(folderId) {
-        const itemId = $('#moveItemId').val();
-        const itemType = $('#moveItemType').val();
+        const batchMode = $('#moveBatchMode').val() === 'true';
 
-        if (!itemId || !itemType) return;
+        if (batchMode) {
+            // Batch move mode
+            await moveSelectedItemsToFolder(folderId);
+        } else {
+            // Single item mode
+            const itemId = $('#moveItemId').val();
+            const itemType = $('#moveItemType').val();
+
+            if (!itemId || !itemType) return;
+
+            try {
+                showLoading('Movendo item...');
+
+                const endpoint = itemType === 'audio'
+                    ? `${API_BASE_URL}/audio/${itemId}/folder`
+                    : `${API_BASE_URL}/video/${itemId}/folder`;
+
+                await $.ajax({
+                    url: endpoint,
+                    method: 'PUT',
+                    headers: getAuthHeaders(),
+                    data: JSON.stringify({ folder_id: folderId })
+                });
+
+                hideLoading();
+                moveItemModal.hide();
+                showToast('Item movido com sucesso!', 'success');
+
+                // Reload folder contents
+                if (currentFolderId) {
+                    loadFolderItems(currentFolderId);
+                }
+                loadUnorganizedItems();
+
+            } catch (error) {
+                hideLoading();
+                console.error('Error moving item:', error);
+                const message = error.responseJSON?.detail || 'Erro ao mover item';
+                showToast(message, 'error');
+            }
+        }
+    }
+
+    // Selection management functions
+    function toggleItemSelection(itemId, itemType, isSelected) {
+        if (isSelected) {
+            // Add to selection if not already present
+            if (!selectedItems.some(s => s.id === itemId && s.type === itemType)) {
+                selectedItems.push({ id: itemId, type: itemType });
+            }
+        } else {
+            // Remove from selection
+            selectedItems = selectedItems.filter(s => !(s.id === itemId && s.type === itemType));
+        }
+        updateSelectionUI();
+    }
+
+    function updateSelectionUI() {
+        const count = selectedItems.length;
+        $('#selectedCount').text(count);
+
+        if (count > 0) {
+            $('#moveSelectedBtn').removeClass('d-none');
+            $('#clearSelectionBtn').removeClass('d-none');
+        } else {
+            $('#moveSelectedBtn').addClass('d-none');
+            $('#clearSelectionBtn').addClass('d-none');
+        }
+    }
+
+    function clearSelection() {
+        selectedItems = [];
+        updateSelectionUI();
+        // Uncheck all checkboxes
+        $('.item-checkbox').prop('checked', false);
+        $('.folder-media-item, .unorganized-item').removeClass('selected');
+    }
+
+    async function openBatchMoveModal() {
+        if (selectedItems.length === 0) {
+            showToast('Nenhum item selecionado', 'warning');
+            return;
+        }
+
+        $('#moveBatchMode').val('true');
+        $('#moveItemId').val('');
+        $('#moveItemType').val('');
+        $('#moveModalTitle').text(`Mover ${selectedItems.length} Itens`);
+        $('#moveItemDescription').html(`Mover <span class="fw-bold">${selectedItems.length} itens selecionados</span> para:`);
 
         try {
-            showLoading('Movendo item...');
+            const container = $('#moveFolderList');
+            container.empty();
 
-            const endpoint = itemType === 'audio'
-                ? `${API_BASE_URL}/audio/${itemId}/folder`
-                : `${API_BASE_URL}/video/${itemId}/folder`;
-
-            await $.ajax({
-                url: endpoint,
-                method: 'PUT',
-                headers: getAuthHeaders(),
-                data: JSON.stringify({ folder_id: folderId })
+            // Add root option
+            const rootItem = $(`
+                <a href="#" class="list-group-item list-group-item-action move-folder-option" data-folder-id="">
+                    <i class="bi bi-house me-2"></i>Raiz (sem pasta)
+                </a>
+            `);
+            rootItem.on('click', (e) => {
+                e.preventDefault();
+                moveItemToFolder(null);
             });
+            container.append(rootItem);
+
+            // Load root folders and recursively load children
+            await loadFoldersHierarchy(container, null, 0, null);
+
+            moveItemModal.show();
+
+        } catch (error) {
+            console.error('Error loading folders for batch move:', error);
+            showToast('Erro ao carregar pastas', 'error');
+        }
+    }
+
+    async function moveSelectedItemsToFolder(folderId) {
+        if (selectedItems.length === 0) return;
+
+        try {
+            showLoading(`Movendo ${selectedItems.length} itens...`);
+
+            let successCount = 0;
+            let errorCount = 0;
+
+            for (const item of selectedItems) {
+                try {
+                    const endpoint = item.type === 'audio'
+                        ? `${API_BASE_URL}/audio/${item.id}/folder`
+                        : `${API_BASE_URL}/video/${item.id}/folder`;
+
+                    await $.ajax({
+                        url: endpoint,
+                        method: 'PUT',
+                        headers: getAuthHeaders(),
+                        data: JSON.stringify({ folder_id: folderId })
+                    });
+                    successCount++;
+                } catch (e) {
+                    console.error(`Error moving item ${item.id}:`, e);
+                    errorCount++;
+                }
+            }
 
             hideLoading();
             moveItemModal.hide();
-            showToast('Item movido com sucesso!', 'success');
 
-            // Reload folder contents
+            if (errorCount === 0) {
+                showToast(`${successCount} itens movidos com sucesso!`, 'success');
+            } else {
+                showToast(`${successCount} movidos, ${errorCount} falharam`, 'warning');
+            }
+
+            // Clear selection and reload
+            clearSelection();
             if (currentFolderId) {
                 loadFolderItems(currentFolderId);
             }
@@ -1720,9 +1881,8 @@ $(document).ready(function() {
 
         } catch (error) {
             hideLoading();
-            console.error('Error moving item:', error);
-            const message = error.responseJSON?.detail || 'Erro ao mover item';
-            showToast(message, 'error');
+            console.error('Error in batch move:', error);
+            showToast('Erro ao mover itens', 'error');
         }
     }
 
@@ -1852,6 +2012,8 @@ $(document).ready(function() {
         showToast('Lista de pastas atualizada', 'info');
     });
     $('#saveFolderBtn').on('click', saveFolder);
+    $('#moveSelectedBtn').on('click', openBatchMoveModal);
+    $('#clearSelectionBtn').on('click', clearSelection);
 
     // Transcription buttons
     $('#refreshTranscriptionListBtn').on('click', () => {

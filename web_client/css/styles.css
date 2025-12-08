@@ -269,3 +269,19 @@ audio::-webkit-media-controls-panel {
     font-size: 2rem;
     transition: all 0.2s ease;
 }
+
+/* Selected items styling */
+.folder-media-item.selected,
+.unorganized-item.selected {
+    background-color: rgba(var(--bs-info-rgb), 0.15) !important;
+    border-left: 3px solid var(--bs-info) !important;
+}
+
+.item-checkbox {
+    cursor: pointer;
+}
+
+.item-checkbox:checked {
+    background-color: var(--bs-info);
+    border-color: var(--bs-info);
+}

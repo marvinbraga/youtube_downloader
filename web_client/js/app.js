@@ -1620,14 +1620,25 @@ $(document).ready(function() {
         $('#moveItemTitle').text(item.title || item.name);
 
         try {
-            // Load all folders
-            const response = await $.ajax({
-                url: `${API_BASE_URL}/folders`,
-                method: 'GET',
-                headers: getAuthHeaders()
-            });
+            // Load all folders with hierarchy
+            const container = $('#moveFolderList');
+            container.empty();
 
-            renderMoveFolderList(response || [], item.folder_id);
+            // Add root option
+            const rootItem = $(`
+                <a href="#" class="list-group-item list-group-item-action move-folder-option ${!item.folder_id ? 'active' : ''}" data-folder-id="">
+                    <i class="bi bi-house me-2"></i>Raiz (sem pasta)
+                </a>
+            `);
+            rootItem.on('click', (e) => {
+                e.preventDefault();
+                moveItemToFolder(null);
+            });
+            container.append(rootItem);
+
+            // Load root folders and recursively load children
+            await loadFoldersHierarchy(container, null, 0, item.folder_id);
+
             moveItemModal.show();
 
         } catch (error) {
@@ -1636,42 +1647,45 @@ $(document).ready(function() {
         }
     }
 
-    function renderMoveFolderList(folders, currentFolderIdOfItem) {
-        const container = $('#moveFolderList');
-        container.empty();
+    async function loadFoldersHierarchy(container, parentId, level, currentFolderIdOfItem) {
+        try {
+            const url = parentId
+                ? `${API_BASE_URL}/folders/${parentId}/children`
+                : `${API_BASE_URL}/folders/root`;
 
-        // Add root option
-        const rootItem = $(`
-            <a href="#" class="list-group-item list-group-item-action move-folder-option ${!currentFolderIdOfItem ? 'active' : ''}" data-folder-id="">
-                <i class="bi bi-house me-2"></i>Raiz (sem pasta)
-            </a>
-        `);
-        rootItem.on('click', (e) => {
-            e.preventDefault();
-            moveItemToFolder(null);
-        });
-        container.append(rootItem);
-
-        // Add folders
-        folders.forEach(folder => {
-            const iconClass = folder.icon || 'folder2';
-            const isCurrentFolder = folder.id === currentFolderIdOfItem;
-
-            const item = $(`
-                <a href="#" class="list-group-item list-group-item-action move-folder-option ${isCurrentFolder ? 'active' : ''}" data-folder-id="${folder.id}">
-                    <i class="bi bi-${iconClass} me-2" style="color: ${folder.color || 'var(--bs-warning)'}"></i>
-                    ${folder.name}
-                    ${isCurrentFolder ? '<span class="badge bg-secondary ms-2">Atual</span>' : ''}
-                </a>
-            `);
-            item.on('click', (e) => {
-                e.preventDefault();
-                if (!isCurrentFolder) {
-                    moveItemToFolder(folder.id);
-                }
+            const folders = await $.ajax({
+                url: url,
+                method: 'GET',
+                headers: getAuthHeaders()
             });
-            container.append(item);
-        });
+
+            for (const folder of (folders || [])) {
+                const iconClass = folder.icon || 'folder2';
+                const isCurrentFolder = folder.id === currentFolderIdOfItem;
+                const indent = level * 20; // 20px per level
+
+                const item = $(`
+                    <a href="#" class="list-group-item list-group-item-action move-folder-option ${isCurrentFolder ? 'active' : ''}"
+                       data-folder-id="${folder.id}" style="padding-left: ${16 + indent}px;">
+                        <i class="bi bi-${iconClass} me-2" style="color: ${folder.color || 'var(--bs-warning)'}"></i>
+                        ${folder.name}
+                        ${isCurrentFolder ? '<span class="badge bg-secondary ms-2">Atual</span>' : ''}
+                    </a>
+                `);
+                item.on('click', (e) => {
+                    e.preventDefault();
+                    if (!isCurrentFolder) {
+                        moveItemToFolder(folder.id);
+                    }
+                });
+                container.append(item);
+
+                // Recursively load children
+                await loadFoldersHierarchy(container, folder.id, level + 1, currentFolderIdOfItem);
+            }
+        } catch (error) {
+            console.error(`Error loading folders for parent ${parentId}:`, error);
+        }
     }
 
     async function moveItemToFolder(folderId) {

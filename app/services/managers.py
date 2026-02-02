@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import re
 import datetime
 from pathlib import Path
@@ -15,13 +16,18 @@ from app.db.database import get_db_context
 from app.db.models import Audio, Video
 from app.db.repositories import AudioRepository, VideoRepository
 
+# Caminho do Node.js para yt-dlp (versão 20+ necessária)
+NODE_PATH = os.path.expanduser('~/.nvm/versions/node/v20.19.6/bin/node')
+YDL_JS_RUNTIMES = {'node': {'path': NODE_PATH}} if os.path.exists(NODE_PATH) else {}
+
 
 class VideoStreamManager:
     def __init__(self):
         self.ydl_opts = {
             'format': 'best[ext=mp4]',
             'quiet': True,
-            'no_warnings': True
+            'no_warnings': True,
+            'js_runtimes': YDL_JS_RUNTIMES,
         }
 
     async def get_direct_url(self, url: str) -> str:
@@ -85,7 +91,8 @@ class AudioDownloadManager:
                     'quiet': True,
                     'no_warnings': True,
                     'skip_download': True,
-                    'extract_flat': True
+                    'extract_flat': True,
+                    'js_runtimes': YDL_JS_RUNTIMES,
                 }
 
                 with YoutubeDL(ydl_info_opts) as ydl:
@@ -148,6 +155,7 @@ class AudioDownloadManager:
                 'quiet': True,
                 'no_warnings': True,
                 'skip_download': True,
+                'js_runtimes': YDL_JS_RUNTIMES,
             }
 
             title = f"Video_{youtube_id}"
@@ -233,6 +241,7 @@ class AudioDownloadManager:
                 'ignoreerrors': False,
                 'verbose': True,
                 'noplaylist': True,
+                'js_runtimes': YDL_JS_RUNTIMES,
                 'http_headers': {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -472,7 +481,8 @@ class VideoDownloadManager:
                     'quiet': True,
                     'no_warnings': True,
                     'skip_download': True,
-                    'extract_flat': True
+                    'extract_flat': True,
+                    'js_runtimes': YDL_JS_RUNTIMES,
                 }
 
                 with YoutubeDL(ydl_info_opts) as ydl:
@@ -535,6 +545,7 @@ class VideoDownloadManager:
                 'quiet': True,
                 'no_warnings': True,
                 'skip_download': True,
+                'js_runtimes': YDL_JS_RUNTIMES,
             }
 
             title = f"Video_{youtube_id}"
@@ -627,6 +638,7 @@ class VideoDownloadManager:
                 'ignoreerrors': False,
                 'verbose': True,
                 'noplaylist': True,
+                'js_runtimes': YDL_JS_RUNTIMES,
                 'http_headers': {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',

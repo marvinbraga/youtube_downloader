@@ -1397,6 +1397,10 @@ $(document).ready(function() {
                             <button class="btn btn-sm btn-success play-item-btn" data-id="${item.id}" data-type="${item.itemType}" title="Reproduzir">
                                 <i class="bi bi-play-fill"></i>
                             </button>
+                            ${item.transcription_status === 'ended' ? `
+                            <button class="btn btn-sm btn-outline-info view-transcription-btn" data-id="${item.id}" data-type="${item.itemType}" title="Ver Transcrição">
+                                <i class="bi bi-eye"></i>
+                            </button>` : ''}
                             <button class="btn btn-sm btn-outline-secondary move-item-btn" data-id="${item.id}" data-type="${item.itemType}" title="Mover">
                                 <i class="bi bi-arrow-right-circle"></i>
                             </button>
@@ -1418,6 +1422,12 @@ $(document).ready(function() {
                 e.preventDefault();
                 e.stopPropagation();
                 playItemFromFolder(item, item.itemType);
+            });
+
+            element.find('.view-transcription-btn').on('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                viewTranscription(item.id, item.title || item.name);
             });
 
             element.find('.move-item-btn').on('click', (e) => {
@@ -1510,6 +1520,10 @@ $(document).ready(function() {
                             <button class="btn btn-sm btn-success play-item-btn" data-id="${item.id}" data-type="${item.itemType}" title="Reproduzir">
                                 <i class="bi bi-play-fill"></i>
                             </button>
+                            ${item.transcription_status === 'ended' ? `
+                            <button class="btn btn-sm btn-outline-info view-transcription-btn" data-id="${item.id}" data-type="${item.itemType}" title="Ver Transcrição">
+                                <i class="bi bi-eye"></i>
+                            </button>` : ''}
                             <button class="btn btn-sm btn-danger move-to-folder-btn" data-id="${item.id}" data-type="${item.itemType}" title="Mover para pasta">
                                 <i class="bi bi-folder-plus me-1"></i>Mover
                             </button>
@@ -1528,6 +1542,12 @@ $(document).ready(function() {
                 e.preventDefault();
                 e.stopPropagation();
                 playItemFromFolder(item, item.itemType);
+            });
+
+            element.find('.view-transcription-btn').on('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                viewTranscription(item.id, item.title || item.name);
             });
 
             element.find('.move-to-folder-btn').on('click', (e) => {

@@ -30,6 +30,44 @@ $(document).ready(function() {
     let selectedItems = [];  // {id, type} - itens selecionados para mover em lote
 
     // ========================================
+    // Theme Toggle
+    // ========================================
+    function initTheme() {
+        const saved = localStorage.getItem('yd-theme');
+        const theme = saved || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+        applyTheme(theme);
+    }
+
+    function applyTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+        document.documentElement.setAttribute('data-bs-theme', theme);
+        localStorage.setItem('yd-theme', theme);
+        updateThemeToggleIcon(theme);
+    }
+
+    function updateThemeToggleIcon(theme) {
+        const icon = $('#themeToggle .bi');
+        if (theme === 'dark') {
+            icon.removeClass('bi-sun-fill').addClass('bi-moon-fill');
+        } else {
+            icon.removeClass('bi-moon-fill').addClass('bi-sun-fill');
+        }
+    }
+
+    $('#themeToggle').on('click', function() {
+        const current = document.documentElement.getAttribute('data-theme');
+        const next = current === 'dark' ? 'light' : 'dark';
+        applyTheme(next);
+    });
+
+    // Listen for system theme changes
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(e) {
+        if (!localStorage.getItem('yd-theme')) {
+            applyTheme(e.matches ? 'dark' : 'light');
+        }
+    });
+
+    // ========================================
     // Bootstrap Components
     // ========================================
     const toastEl = document.getElementById('liveToast');
@@ -50,8 +88,13 @@ $(document).ready(function() {
             'info': 'bi-info-circle-fill text-info'
         };
 
+        const toastTypeClass = `toast--${type}`;
+
+        // Remove previous type classes
+        $(toastEl).removeClass('toast--success toast--error toast--warning toast--info').addClass(toastTypeClass);
+
         $('#toastIcon').attr('class', `bi ${iconMap[type]} me-2`);
-        $('#toastTitle').text(type === 'error' ? 'Erro' : type === 'success' ? 'Sucesso' : 'Informação');
+        $('#toastTitle').text(type === 'error' ? 'Erro' : type === 'success' ? 'Sucesso' : type === 'warning' ? 'Atenção' : 'Informação');
         $('#toastBody').text(message);
         toast.show();
     }
@@ -212,9 +255,10 @@ $(document).ready(function() {
 
         if (audios.length === 0) {
             container.html(`
-                <div class="text-center py-5 text-body-secondary">
-                    <i class="bi bi-music-note-beamed fs-1 mb-3 d-block opacity-50"></i>
-                    <p class="mb-0">Nenhum áudio encontrado</p>
+                <div class="yd-empty-state">
+                    <i class="bi bi-music-note-beamed yd-empty-state__icon"></i>
+                    <p class="yd-empty-state__title">Nenhum áudio encontrado</p>
+                    <p class="yd-empty-state__desc">Faça o download de um áudio na aba Download</p>
                 </div>
             `);
             return;
@@ -225,28 +269,27 @@ $(document).ready(function() {
             const statusBadge = getStatusBadge(audio.download_status);
 
             const item = $(`
-                <a href="#" class="list-group-item list-group-item-action media-item ${isActive ? 'active' : ''}"
+                <a href="#" class="yd-media-item ${isActive ? 'active' : ''}"
                    data-id="${audio.id}">
                     <div class="d-flex w-100 align-items-center">
                         <div class="me-3">
-                            <div class="bg-body-tertiary rounded d-flex align-items-center justify-content-center"
-                                 style="width: 48px; height: 48px;">
-                                <i class="bi bi-music-note-beamed text-danger fs-5"></i>
+                            <div class="yd-media-thumb yd-media-thumb--audio">
+                                <i class="bi bi-music-note-beamed"></i>
                             </div>
                         </div>
                         <div class="flex-grow-1 min-width-0">
-                            <h6 class="mb-1 text-truncate">${highlightText(audio.title || audio.name, searchTerm)}</h6>
-                            <small class="text-body-tertiary">
+                            <h6 class="yd-media-title text-truncate">${highlightText(audio.title || audio.name, searchTerm)}</h6>
+                            <div class="yd-media-meta">
                                 <span class="me-3"><i class="bi bi-hdd me-1"></i>${formatFileSize(audio.filesize)}</span>
                                 <span><i class="bi bi-calendar me-1"></i>${formatDate(audio.modified_date)}</span>
-                            </small>
+                            </div>
                         </div>
-                        <div class="ms-2 d-flex align-items-center gap-2">
+                        <div class="ms-2 yd-action-group">
                             ${statusBadge}
-                            <button class="btn btn-sm btn-danger play-audio-btn" data-id="${audio.id}" title="Reproduzir">
+                            <button class="btn btn-sm btn-danger yd-action-btn play-audio-btn" data-id="${audio.id}" title="Reproduzir">
                                 <i class="bi bi-play-fill"></i>
                             </button>
-                            <button class="btn btn-sm btn-outline-danger delete-audio-btn" data-id="${audio.id}" title="Excluir">
+                            <button class="btn btn-sm btn-outline-danger yd-action-btn delete-audio-btn" data-id="${audio.id}" title="Excluir">
                                 <i class="bi bi-trash"></i>
                             </button>
                         </div>
@@ -286,8 +329,8 @@ $(document).ready(function() {
             $('#currentAudioTitle').text(audio.title || audio.name);
 
             // Update active state in list
-            $('.media-item').removeClass('active');
-            $(`.media-item[data-id="${audio.id}"]`).addClass('active');
+            $('.yd-media-item').removeClass('active');
+            $(`.yd-media-item[data-id="${audio.id}"]`).addClass('active');
 
             // Load audio
             const audioPlayer = document.getElementById('audioPlayer');
@@ -336,9 +379,10 @@ $(document).ready(function() {
 
         if (videos.length === 0) {
             container.html(`
-                <div class="text-center py-5 text-body-secondary">
-                    <i class="bi bi-camera-video fs-1 mb-3 d-block opacity-50"></i>
-                    <p class="mb-0">Nenhum vídeo encontrado</p>
+                <div class="yd-empty-state">
+                    <i class="bi bi-camera-video yd-empty-state__icon"></i>
+                    <p class="yd-empty-state__title">Nenhum vídeo encontrado</p>
+                    <p class="yd-empty-state__desc">Faça o download de um vídeo na aba Download</p>
                 </div>
             `);
             return;
@@ -349,30 +393,29 @@ $(document).ready(function() {
             const statusBadge = getStatusBadge(video.download_status);
 
             const item = $(`
-                <a href="#" class="list-group-item list-group-item-action media-item ${isActive ? 'active' : ''}"
+                <a href="#" class="yd-media-item ${isActive ? 'active' : ''}"
                    data-id="${video.id}">
                     <div class="d-flex w-100 align-items-center">
                         <div class="me-3">
-                            <div class="bg-body-tertiary rounded d-flex align-items-center justify-content-center"
-                                 style="width: 48px; height: 48px;">
-                                <i class="bi bi-camera-video text-danger fs-5"></i>
+                            <div class="yd-media-thumb yd-media-thumb--video">
+                                <i class="bi bi-camera-video"></i>
                             </div>
                         </div>
                         <div class="flex-grow-1 min-width-0">
-                            <h6 class="mb-1 text-truncate">${highlightText(video.title || video.name, searchTerm)}</h6>
-                            <small class="text-body-tertiary">
+                            <h6 class="yd-media-title text-truncate">${highlightText(video.title || video.name, searchTerm)}</h6>
+                            <div class="yd-media-meta">
                                 <span class="me-3"><i class="bi bi-hdd me-1"></i>${formatFileSize(video.filesize)}</span>
                                 <span class="me-3"><i class="bi bi-aspect-ratio me-1"></i>${video.resolution || '-'}</span>
                                 <span><i class="bi bi-clock me-1"></i>${formatDuration(video.duration)}</span>
-                            </small>
+                            </div>
                         </div>
-                        <div class="ms-2 d-flex align-items-center gap-2">
+                        <div class="ms-2 yd-action-group">
                             ${statusBadge}
-                            <button class="btn btn-sm btn-danger play-video-btn" data-id="${video.id}"
+                            <button class="btn btn-sm btn-danger yd-action-btn play-video-btn" data-id="${video.id}"
                                     ${video.download_status !== 'ready' ? 'disabled' : ''} title="Reproduzir">
                                 <i class="bi bi-play-fill"></i>
                             </button>
-                            <button class="btn btn-sm btn-outline-danger delete-video-btn" data-id="${video.id}" title="Excluir">
+                            <button class="btn btn-sm btn-outline-danger yd-action-btn delete-video-btn" data-id="${video.id}" title="Excluir">
                                 <i class="bi bi-trash"></i>
                             </button>
                         </div>
@@ -416,8 +459,8 @@ $(document).ready(function() {
             $('#currentVideoTitle').text(video.title || video.name);
 
             // Update active state in list
-            $('.media-item').removeClass('active');
-            $(`.media-item[data-id="${video.id}"]`).addClass('active');
+            $('.yd-media-item').removeClass('active');
+            $(`.yd-media-item[data-id="${video.id}"]`).addClass('active');
 
             // Show loading overlay
             $('#videoLoadingOverlay').removeClass('d-none').addClass('d-flex');
@@ -584,35 +627,40 @@ $(document).ready(function() {
 
         activeDownloads.forEach((download, id) => {
             const icon = download.type === 'video' ? 'bi-camera-video' : 'bi-music-note';
-            const statusClass = download.status === 'ready' ? 'bg-success' :
-                               download.status === 'error' ? 'bg-danger' : 'bg-danger';
 
             // Determinar o label baseado no progresso
-            // 0-94% = Baixando, 95-99% = Convertendo, 100% = Concluído
             let statusLabel = 'Baixando...';
             let statusIcon = 'bi-arrow-down-circle';
+            let fillClass = 'yd-progress-bar__fill--active';
             if (download.progress >= 95 && download.progress < 100) {
                 statusLabel = 'Convertendo...';
                 statusIcon = 'bi-gear';
             } else if (download.progress >= 100) {
                 statusLabel = 'Concluído';
                 statusIcon = 'bi-check-circle';
+                fillClass = 'yd-progress-bar__fill--success';
+            }
+
+            if (download.status === 'error') {
+                statusLabel = 'Erro';
+                statusIcon = 'bi-x-circle';
+                fillClass = 'yd-progress-bar__fill--error';
             }
 
             const progressItem = $(`
-                <div class="mb-3" data-download-id="${id}">
+                <div class="yd-download-item" data-download-id="${id}">
                     <div class="d-flex justify-content-between align-items-center mb-2">
                         <span class="d-flex align-items-center gap-2">
-                            <i class="bi ${icon} text-danger"></i>
-                            <span class="text-truncate" style="max-width: 300px;">${download.title}</span>
+                            <i class="bi ${icon}" style="color: var(--yd-accent-primary)"></i>
+                            <span class="text-truncate yd-media-title" style="max-width: 300px;">${download.title}</span>
                         </span>
                         <span class="d-flex align-items-center gap-2">
-                            <span class="badge bg-secondary"><i class="bi ${statusIcon} me-1"></i>${statusLabel}</span>
-                            <span class="badge ${statusClass}">${download.progress}%</span>
+                            <span class="yd-badge yd-badge--pending"><i class="bi ${statusIcon} me-1"></i>${statusLabel}</span>
+                            <span class="yd-badge yd-badge--downloading">${download.progress}%</span>
                         </span>
                     </div>
-                    <div class="progress" style="height: 6px;">
-                        <div class="progress-bar ${statusClass} progress-bar-striped progress-bar-animated"
+                    <div class="yd-progress-bar">
+                        <div class="yd-progress-bar__fill ${fillClass}"
                              style="width: ${download.progress}%"></div>
                     </div>
                 </div>
@@ -854,9 +902,10 @@ $(document).ready(function() {
 
         if (mediaList.length === 0) {
             container.html(`
-                <div class="text-center py-5 text-body-secondary">
-                    <i class="bi bi-collection fs-1 mb-3 d-block opacity-50"></i>
-                    <p class="mb-0">Nenhuma mídia encontrada</p>
+                <div class="yd-empty-state">
+                    <i class="bi bi-collection yd-empty-state__icon"></i>
+                    <p class="yd-empty-state__title">Nenhuma mídia encontrada</p>
+                    <p class="yd-empty-state__desc">Faça downloads para que eles apareçam aqui</p>
                 </div>
             `);
             return;
@@ -866,39 +915,39 @@ $(document).ready(function() {
             const isAudio = media.mediaType === 'audio';
             const icon = isAudio ? 'bi-music-note-beamed' : 'bi-camera-video';
             const typeBadge = isAudio ?
-                '<span class="badge bg-info"><i class="bi bi-music-note me-1"></i>Áudio</span>' :
-                '<span class="badge bg-primary"><i class="bi bi-camera-video me-1"></i>Vídeo</span>';
+                '<span class="yd-badge yd-badge--audio"><i class="bi bi-music-note me-1"></i>Áudio</span>' :
+                '<span class="yd-badge yd-badge--video"><i class="bi bi-camera-video me-1"></i>Vídeo</span>';
 
             const transcriptionStatus = getTranscriptionStatusBadge(media.transcription_status);
+            const thumbClass = isAudio ? 'yd-media-thumb--audio' : 'yd-media-thumb--video';
 
             const item = $(`
-                <div class="list-group-item list-group-item-action transcription-media-item" data-id="${media.id}" data-type="${media.mediaType}">
+                <div class="yd-media-item" data-id="${media.id}" data-type="${media.mediaType}">
                     <div class="d-flex w-100 align-items-center">
                         <div class="me-3">
-                            <div class="bg-body-tertiary rounded d-flex align-items-center justify-content-center"
-                                 style="width: 48px; height: 48px;">
-                                <i class="bi ${icon} text-danger fs-5"></i>
+                            <div class="yd-media-thumb ${thumbClass}">
+                                <i class="bi ${icon}"></i>
                             </div>
                         </div>
                         <div class="flex-grow-1 min-width-0">
-                            <h6 class="mb-1 text-truncate">${media.title || media.name}</h6>
-                            <small class="text-body-tertiary">
+                            <h6 class="yd-media-title text-truncate">${media.title || media.name}</h6>
+                            <div class="yd-media-meta">
                                 ${typeBadge}
                                 <span class="ms-2"><i class="bi bi-hdd me-1"></i>${formatFileSize(media.filesize)}</span>
                                 <span class="ms-2"><i class="bi bi-calendar me-1"></i>${formatDate(media.modified_date)}</span>
-                            </small>
+                            </div>
                         </div>
-                        <div class="ms-2 d-flex align-items-center gap-2">
+                        <div class="ms-2 yd-action-group">
                             ${transcriptionStatus}
-                            <button class="btn btn-sm btn-outline-info view-transcription-btn" data-id="${media.id}"
+                            <button class="btn btn-sm btn-outline-info yd-action-btn view-transcription-btn" data-id="${media.id}"
                                     title="Ver Transcrição" ${media.transcription_status !== 'ended' ? 'disabled' : ''}>
                                 <i class="bi bi-eye"></i>
                             </button>
-                            <button class="btn btn-sm btn-danger start-transcription-btn" data-id="${media.id}"
+                            <button class="btn btn-sm btn-danger yd-action-btn start-transcription-btn" data-id="${media.id}"
                                     title="Transcrever" ${media.transcription_status === 'started' ? 'disabled' : ''}>
                                 <i class="bi bi-file-text"></i>
                             </button>
-                            <button class="btn btn-sm btn-outline-danger delete-transcription-btn" data-id="${media.id}"
+                            <button class="btn btn-sm btn-outline-danger yd-action-btn delete-transcription-btn" data-id="${media.id}"
                                     title="Excluir Transcrição" ${media.transcription_status !== 'ended' ? 'disabled' : ''}>
                                 <i class="bi bi-trash"></i>
                             </button>
@@ -931,10 +980,10 @@ $(document).ready(function() {
 
     function getTranscriptionStatusBadge(status) {
         const badges = {
-            'ended': '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Transcrito</span>',
-            'started': '<span class="badge bg-warning"><i class="bi bi-hourglass-split me-1"></i>Em andamento</span>',
-            'error': '<span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Erro</span>',
-            'none': '<span class="badge bg-secondary"><i class="bi bi-dash-circle me-1"></i>Não transcrito</span>'
+            'ended': '<span class="yd-badge yd-badge--transcribed"><i class="bi bi-check-circle me-1"></i>Transcrito</span>',
+            'started': '<span class="yd-badge yd-badge--processing"><i class="bi bi-hourglass-split me-1"></i>Em andamento</span>',
+            'error': '<span class="yd-badge yd-badge--error"><i class="bi bi-x-circle me-1"></i>Erro</span>',
+            'none': '<span class="yd-badge yd-badge--not-transcribed"><i class="bi bi-dash-circle me-1"></i>Não transcrito</span>'
         };
         return badges[status] || badges['none'];
     }
@@ -1128,10 +1177,11 @@ $(document).ready(function() {
                 currentTranscriptionId = null;
                 $('#currentTranscriptionTitle').text('Selecione um item para ver a transcrição');
                 $('#transcriptionContent').html(`
-                    <p class="text-body-secondary text-center py-5">
-                        <i class="bi bi-file-text fs-1 d-block mb-3 opacity-50"></i>
-                        Selecione um áudio ou vídeo e clique em "Transcrever" para gerar a transcrição.
-                    </p>
+                    <div class="yd-empty-state">
+                        <i class="bi bi-file-text yd-empty-state__icon"></i>
+                        <p class="yd-empty-state__title">Nenhuma transcrição carregada</p>
+                        <p class="yd-empty-state__desc">Selecione um áudio ou vídeo e clique em "Transcrever" para gerar a transcrição.</p>
+                    </div>
                 `);
                 $('#copyTranscriptionBtn').prop('disabled', true);
                 $('#downloadTranscriptionBtn').prop('disabled', true);
@@ -1205,10 +1255,10 @@ $(document).ready(function() {
 
         if (folders.length === 0) {
             container.html(`
-                <div class="text-center py-4 text-body-secondary">
-                    <i class="bi bi-folder2 fs-1 mb-3 d-block opacity-50"></i>
-                    <p class="mb-0">Nenhuma pasta encontrada</p>
-                    <small>Clique em "Nova Pasta" para criar</small>
+                <div class="yd-empty-state">
+                    <i class="bi bi-folder2 yd-empty-state__icon"></i>
+                    <p class="yd-empty-state__title">Nenhuma pasta encontrada</p>
+                    <p class="yd-empty-state__desc">Clique em "Nova Pasta" para criar</p>
                 </div>
             `);
             return;
@@ -1216,23 +1266,23 @@ $(document).ready(function() {
 
         folders.forEach(folder => {
             const iconClass = folder.icon || 'folder2';
-            const colorStyle = folder.color ? `color: ${folder.color}` : 'color: var(--bs-warning)';
+            const colorStyle = folder.color ? `color: ${folder.color}` : 'color: var(--yd-warning)';
 
             const item = $(`
-                <a href="#" class="list-group-item list-group-item-action folder-item" data-id="${folder.id}">
+                <a href="#" class="yd-folder-item" data-id="${folder.id}">
                     <div class="d-flex w-100 align-items-center">
                         <div class="me-3">
-                            <i class="bi bi-${iconClass} fs-4" style="${colorStyle}"></i>
+                            <i class="bi bi-${iconClass} yd-folder-icon" style="${colorStyle}"></i>
                         </div>
                         <div class="flex-grow-1 min-width-0">
-                            <h6 class="mb-0 text-truncate">${folder.name}</h6>
-                            ${folder.description ? `<small class="text-body-tertiary">${folder.description}</small>` : ''}
+                            <h6 class="yd-media-title text-truncate">${folder.name}</h6>
+                            ${folder.description ? `<small class="yd-media-meta">${folder.description}</small>` : ''}
                         </div>
-                        <div class="ms-2 d-flex align-items-center gap-1">
-                            <button class="btn btn-sm btn-outline-secondary edit-folder-btn" data-id="${folder.id}" title="Editar">
+                        <div class="ms-2 yd-action-group">
+                            <button class="btn btn-sm btn-outline-secondary yd-action-btn edit-folder-btn" data-id="${folder.id}" title="Editar">
                                 <i class="bi bi-pencil"></i>
                             </button>
-                            <button class="btn btn-sm btn-outline-danger delete-folder-btn" data-id="${folder.id}" title="Excluir">
+                            <button class="btn btn-sm btn-outline-danger yd-action-btn delete-folder-btn" data-id="${folder.id}" title="Excluir">
                                 <i class="bi bi-trash"></i>
                             </button>
                         </div>
@@ -1362,9 +1412,10 @@ $(document).ready(function() {
 
         if (allItems.length === 0) {
             container.html(`
-                <div class="text-center py-5 text-body-secondary">
-                    <i class="bi bi-inbox fs-1 mb-3 d-block opacity-50"></i>
-                    <p class="mb-0">Pasta vazia</p>
+                <div class="yd-empty-state">
+                    <i class="bi bi-inbox yd-empty-state__icon"></i>
+                    <p class="yd-empty-state__title">Pasta vazia</p>
+                    <p class="yd-empty-state__desc">Mova itens para esta pasta</p>
                 </div>
             `);
             return;
@@ -1373,38 +1424,43 @@ $(document).ready(function() {
         allItems.forEach(item => {
             const isAudio = item.itemType === 'audio';
             const icon = isAudio ? 'bi-music-note-beamed' : 'bi-camera-video';
-            const badgeClass = isAudio ? 'bg-info' : 'bg-primary';
+            const thumbClass = isAudio ? 'yd-media-thumb--audio' : 'yd-media-thumb--video';
+            const typeBadge = isAudio ?
+                '<span class="yd-badge yd-badge--audio">Áudio</span>' :
+                '<span class="yd-badge yd-badge--video">Vídeo</span>';
             const isSelected = selectedItems.some(s => s.id === item.id && s.type === item.itemType);
 
             const element = $(`
-                <div class="list-group-item list-group-item-action folder-media-item ${isSelected ? 'selected' : ''}" data-id="${item.id}" data-type="${item.itemType}">
+                <div class="yd-media-item folder-media-item ${isSelected ? 'selected' : ''}" data-id="${item.id}" data-type="${item.itemType}">
                     <div class="d-flex w-100 align-items-center">
                         <div class="form-check me-2">
                             <input class="form-check-input item-checkbox" type="checkbox" ${isSelected ? 'checked' : ''}
                                    data-id="${item.id}" data-type="${item.itemType}">
                         </div>
                         <div class="me-3">
-                            <i class="bi ${icon} text-danger fs-5"></i>
+                            <div class="yd-media-thumb ${thumbClass}">
+                                <i class="bi ${icon}"></i>
+                            </div>
                         </div>
                         <div class="flex-grow-1 min-width-0">
-                            <h6 class="mb-1 text-truncate">${item.title || item.name}</h6>
-                            <small class="text-body-tertiary">
-                                <span class="badge ${badgeClass} me-2">${isAudio ? 'Áudio' : 'Vídeo'}</span>
-                                <span><i class="bi bi-hdd me-1"></i>${formatFileSize(item.filesize)}</span>
-                            </small>
+                            <h6 class="yd-media-title text-truncate">${item.title || item.name}</h6>
+                            <div class="yd-media-meta">
+                                ${typeBadge}
+                                <span class="ms-2"><i class="bi bi-hdd me-1"></i>${formatFileSize(item.filesize)}</span>
+                            </div>
                         </div>
-                        <div class="ms-2 d-flex align-items-center gap-1">
-                            <button class="btn btn-sm btn-success play-item-btn" data-id="${item.id}" data-type="${item.itemType}" title="Reproduzir">
+                        <div class="ms-2 yd-action-group">
+                            <button class="btn btn-sm btn-success yd-action-btn play-item-btn" data-id="${item.id}" data-type="${item.itemType}" title="Reproduzir">
                                 <i class="bi bi-play-fill"></i>
                             </button>
                             ${item.transcription_status === 'ended' ? `
-                            <button class="btn btn-sm btn-outline-info view-transcription-btn" data-id="${item.id}" data-type="${item.itemType}" title="Ver Transcrição">
+                            <button class="btn btn-sm btn-outline-info yd-action-btn view-transcription-btn" data-id="${item.id}" data-type="${item.itemType}" title="Ver Transcrição">
                                 <i class="bi bi-eye"></i>
                             </button>` : ''}
-                            <button class="btn btn-sm btn-outline-secondary move-item-btn" data-id="${item.id}" data-type="${item.itemType}" title="Mover">
+                            <button class="btn btn-sm btn-outline-secondary yd-action-btn move-item-btn" data-id="${item.id}" data-type="${item.itemType}" title="Mover">
                                 <i class="bi bi-arrow-right-circle"></i>
                             </button>
-                            <button class="btn btn-sm btn-outline-warning remove-from-folder-btn" data-id="${item.id}" data-type="${item.itemType}" title="Remover da pasta">
+                            <button class="btn btn-sm btn-outline-warning yd-action-btn remove-from-folder-btn" data-id="${item.id}" data-type="${item.itemType}" title="Remover da pasta">
                                 <i class="bi bi-x-circle"></i>
                             </button>
                         </div>
@@ -1485,9 +1541,9 @@ $(document).ready(function() {
 
         if (allItems.length === 0) {
             container.html(`
-                <div class="text-center py-4 text-body-secondary">
-                    <i class="bi bi-check-circle fs-1 mb-3 d-block opacity-50"></i>
-                    <p class="mb-0">Todos os itens estão organizados em pastas</p>
+                <div class="yd-empty-state">
+                    <i class="bi bi-check-circle yd-empty-state__icon"></i>
+                    <p class="yd-empty-state__desc">Todos os itens estão organizados em pastas</p>
                 </div>
             `);
             return;
@@ -1496,36 +1552,41 @@ $(document).ready(function() {
         allItems.forEach(item => {
             const isAudio = item.itemType === 'audio';
             const icon = isAudio ? 'bi-music-note-beamed' : 'bi-camera-video';
-            const badgeClass = isAudio ? 'bg-info' : 'bg-primary';
+            const thumbClass = isAudio ? 'yd-media-thumb--audio' : 'yd-media-thumb--video';
+            const typeBadge = isAudio ?
+                '<span class="yd-badge yd-badge--audio">Áudio</span>' :
+                '<span class="yd-badge yd-badge--video">Vídeo</span>';
             const isSelected = selectedItems.some(s => s.id === item.id && s.type === item.itemType);
 
             const element = $(`
-                <div class="list-group-item list-group-item-action unorganized-item ${isSelected ? 'selected' : ''}" data-id="${item.id}" data-type="${item.itemType}">
+                <div class="yd-media-item unorganized-item ${isSelected ? 'selected' : ''}" data-id="${item.id}" data-type="${item.itemType}">
                     <div class="d-flex w-100 align-items-center">
                         <div class="form-check me-2">
                             <input class="form-check-input item-checkbox" type="checkbox" ${isSelected ? 'checked' : ''}
                                    data-id="${item.id}" data-type="${item.itemType}">
                         </div>
                         <div class="me-3">
-                            <i class="bi ${icon} text-danger fs-5"></i>
+                            <div class="yd-media-thumb ${thumbClass}">
+                                <i class="bi ${icon}"></i>
+                            </div>
                         </div>
                         <div class="flex-grow-1 min-width-0">
-                            <h6 class="mb-1 text-truncate">${item.title || item.name}</h6>
-                            <small class="text-body-tertiary">
-                                <span class="badge ${badgeClass} me-2">${isAudio ? 'Áudio' : 'Vídeo'}</span>
-                                <span><i class="bi bi-hdd me-1"></i>${formatFileSize(item.filesize)}</span>
-                            </small>
+                            <h6 class="yd-media-title text-truncate">${item.title || item.name}</h6>
+                            <div class="yd-media-meta">
+                                ${typeBadge}
+                                <span class="ms-2"><i class="bi bi-hdd me-1"></i>${formatFileSize(item.filesize)}</span>
+                            </div>
                         </div>
-                        <div class="ms-2 d-flex align-items-center gap-1">
-                            <button class="btn btn-sm btn-success play-item-btn" data-id="${item.id}" data-type="${item.itemType}" title="Reproduzir">
+                        <div class="ms-2 yd-action-group">
+                            <button class="btn btn-sm btn-success yd-action-btn play-item-btn" data-id="${item.id}" data-type="${item.itemType}" title="Reproduzir">
                                 <i class="bi bi-play-fill"></i>
                             </button>
                             ${item.transcription_status === 'ended' ? `
-                            <button class="btn btn-sm btn-outline-info view-transcription-btn" data-id="${item.id}" data-type="${item.itemType}" title="Ver Transcrição">
+                            <button class="btn btn-sm btn-outline-info yd-action-btn view-transcription-btn" data-id="${item.id}" data-type="${item.itemType}" title="Ver Transcrição">
                                 <i class="bi bi-eye"></i>
                             </button>` : ''}
-                            <button class="btn btn-sm btn-danger move-to-folder-btn" data-id="${item.id}" data-type="${item.itemType}" title="Mover para pasta">
-                                <i class="bi bi-folder-plus me-1"></i>Mover
+                            <button class="btn btn-sm btn-danger yd-action-btn move-to-folder-btn" data-id="${item.id}" data-type="${item.itemType}" title="Mover para pasta">
+                                <i class="bi bi-folder-plus"></i>
                             </button>
                         </div>
                     </div>
@@ -1732,9 +1793,9 @@ $(document).ready(function() {
                 const item = $(`
                     <a href="#" class="list-group-item list-group-item-action move-folder-option ${isCurrentFolder ? 'active' : ''}"
                        data-folder-id="${folder.id}" style="padding-left: ${16 + indent}px;">
-                        <i class="bi bi-${iconClass} me-2" style="color: ${folder.color || 'var(--bs-warning)'}"></i>
+                        <i class="bi bi-${iconClass} me-2" style="color: ${folder.color || 'var(--yd-warning)'}"></i>
                         ${folder.name}
-                        ${isCurrentFolder ? '<span class="badge bg-secondary ms-2">Atual</span>' : ''}
+                        ${isCurrentFolder ? '<span class="yd-badge yd-badge--pending ms-2">Atual</span>' : ''}
                     </a>
                 `);
                 item.on('click', (e) => {
@@ -1984,10 +2045,10 @@ $(document).ready(function() {
     // ========================================
     function getStatusBadge(status) {
         const badges = {
-            'ready': '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Pronto</span>',
-            'downloading': '<span class="badge bg-warning"><i class="bi bi-arrow-down-circle me-1"></i>Baixando</span>',
-            'pending': '<span class="badge bg-secondary"><i class="bi bi-clock me-1"></i>Pendente</span>',
-            'error': '<span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Erro</span>'
+            'ready': '<span class="yd-badge yd-badge--ready"><i class="bi bi-check-circle me-1"></i>Pronto</span>',
+            'downloading': '<span class="yd-badge yd-badge--downloading"><i class="bi bi-arrow-down-circle me-1"></i>Baixando</span>',
+            'pending': '<span class="yd-badge yd-badge--pending"><i class="bi bi-clock me-1"></i>Pendente</span>',
+            'error': '<span class="yd-badge yd-badge--error"><i class="bi bi-x-circle me-1"></i>Erro</span>'
         };
         return badges[status] || '';
     }
@@ -2107,5 +2168,6 @@ $(document).ready(function() {
     // ========================================
     // Initialize
     // ========================================
+    initTheme();
     authenticate();
 });

@@ -1,5 +1,4 @@
 # main.py
-import os
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import timedelta
@@ -8,7 +7,7 @@ from typing import Optional, List
 
 from fastapi import FastAPI, HTTPException, Depends, Query, BackgroundTasks, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 from loguru import logger
@@ -16,18 +15,45 @@ import uuid
 
 # Configura logging antes de qualquer outro import
 from app.core.logging import setup_logging
+
 setup_logging(level="INFO")
 
 from app.models.video import TokenData, ClientAuth, SortOption
-from app.models.audio import AudioDownloadRequest, VideoDownloadRequest, TranscriptionRequest, TranscriptionResponse, TranscriptionProvider
+from app.models.audio import (
+    AudioDownloadRequest,
+    VideoDownloadRequest,
+    TranscriptionRequest,
+    TranscriptionResponse,
+    TranscriptionProvider,
+)
 from app.models.folder import (
-    FolderCreate, FolderUpdate, FolderResponse, FolderTreeResponse,
-    FolderWithItemsResponse, FolderPathResponse, MoveItemRequest, BulkMoveRequest
+    FolderCreate,
+    FolderUpdate,
+    FolderResponse,
+    FolderTreeResponse,
+    FolderWithItemsResponse,
+    FolderPathResponse,
+    MoveItemRequest,
+    BulkMoveRequest,
 )
 from app.services.configs import video_mapping, AUDIO_DIR, audio_mapping, DOWNLOADS_DIR
-from app.services.files import scan_video_directory, generate_video_stream, generate_audio_stream
-from app.services.managers import VideoStreamManager, AudioDownloadManager, VideoDownloadManager
-from app.services.securities import AUTHORIZED_CLIENTS, create_access_token, verify_token, verify_token_sync, ACCESS_TOKEN_EXPIRE_MINUTES
+from app.services.files import (
+    scan_video_directory,
+    generate_video_stream,
+    generate_audio_stream,
+)
+from app.services.managers import (
+    VideoStreamManager,
+    AudioDownloadManager,
+    VideoDownloadManager,
+)
+from app.services.securities import (
+    AUTHORIZED_CLIENTS,
+    create_access_token,
+    verify_token,
+    verify_token_sync,
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+)
 from app.services.transcription.service import TranscriptionService
 from app.services.sse_manager import sse_manager
 from app.services.download_queue import download_queue, DownloadTask
@@ -82,7 +108,9 @@ video_manager = VideoDownloadManager()
 
 # Callbacks da fila de downloads
 async def on_download_started_callback(task: DownloadTask):
-    await sse_manager.download_started(task.audio_id, f"Download iniciado na fila (posição: {task.priority})")
+    await sse_manager.download_started(
+        task.audio_id, f"Download iniciado na fila (posição: {task.priority})"
+    )
 
 
 async def on_download_progress_callback(task: DownloadTask, progress: int):
@@ -90,7 +118,7 @@ async def on_download_progress_callback(task: DownloadTask, progress: int):
 
 
 async def on_download_completed_callback(task: DownloadTask):
-    await sse_manager.download_completed(task.audio_id, f"Download concluído pela fila")
+    await sse_manager.download_completed(task.audio_id, "Download concluído pela fila")
 
 
 async def on_download_failed_callback(task: DownloadTask, error: str):
@@ -104,18 +132,16 @@ async def on_download_cancelled_callback(task: DownloadTask):
 @app.post("/auth/token", response_model=TokenData)
 async def login_for_access_token(client: ClientAuth):
     """Endpoint para autenticação do cliente"""
-    if (client.client_id not in AUTHORIZED_CLIENTS or
-            AUTHORIZED_CLIENTS[client.client_id]["secret"] != client.client_secret):
+    if (
+        client.client_id not in AUTHORIZED_CLIENTS
+        or AUTHORIZED_CLIENTS[client.client_id]["secret"] != client.client_secret
+    ):
         logger.error("Credenciais inválidas.")
-        raise HTTPException(
-            status_code=401,
-            detail="Credenciais inválidas"
-        )
+        raise HTTPException(status_code=401, detail="Credenciais inválidas")
 
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": client.client_id},
-        expires_delta=access_token_expires
+        data={"sub": client.client_id}, expires_delta=access_token_expires
     )
 
     result = {"access_token": access_token, "token_type": "bearer"}
@@ -125,8 +151,8 @@ async def login_for_access_token(client: ClientAuth):
 
 @app.get("/videos")
 async def list_videos(
-        sort_by: SortOption = Query(SortOption.NONE),
-        token_data: dict = Depends(verify_token)
+    sort_by: SortOption = Query(SortOption.NONE),
+    token_data: dict = Depends(verify_token),
 ):
     """Lista todos os vídeos (requer autenticação)"""
     logger.debug(f"Listando vídeos. Token: {token_data}")
@@ -139,9 +165,7 @@ async def list_videos(
 
 
 @app.get("/video/list-downloads")
-async def list_video_downloads(
-        token_data: dict = Depends(verify_token)
-):
+async def list_video_downloads(token_data: dict = Depends(verify_token)):
     """Lista todos os vídeos baixados"""
     try:
         logger.debug("Listando vídeos do banco de dados")
@@ -152,17 +176,11 @@ async def list_video_downloads(
         return {"videos": videos}
     except Exception as e:
         logger.exception(f"Erro ao listar vídeos: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao listar vídeos: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Erro ao listar vídeos: {str(e)}")
 
 
 @app.get("/video/{video_id}")
-async def stream_video(
-        video_id: str,
-        token_data: dict = Depends(verify_token)
-):
+async def stream_video(video_id: str, token_data: dict = Depends(verify_token)):
     """Stream de vídeo (requer autenticação)"""
     if video_id not in video_mapping:
         logger.error("Vídeo não encontrado.")
@@ -171,36 +189,26 @@ async def stream_video(
     video_source = video_mapping[video_id]
 
     # Se for uma URL do YouTube
-    if isinstance(video_source, str) and video_source.startswith('http'):
+    if isinstance(video_source, str) and video_source.startswith("http"):
         logger.debug(f"Iniciando streaming do YouTube: {video_source}")
         return StreamingResponse(
-            stream_manager.stream_youtube_video(video_source),
-            media_type='video/mp4'
+            stream_manager.stream_youtube_video(video_source), media_type="video/mp4"
         )
 
     # Para vídeos locais
     video_path = video_source
-    content_types = {
-        '.mp4': 'video/mp4',
-        '.webm': 'video/webm'
-    }
+    content_types = {".mp4": "video/mp4", ".webm": "video/webm"}
 
     content_type = content_types.get(video_path.suffix.lower())
     if not content_type:
         logger.error("Formato de vídeo não suportado.")
         raise HTTPException(status_code=400, detail="Formato de vídeo não suportado")
 
-    return StreamingResponse(
-        generate_video_stream(video_path),
-        media_type=content_type
-    )
+    return StreamingResponse(generate_video_stream(video_path), media_type=content_type)
 
 
 @app.get("/audios/{audio_id}/stream/")
-async def stream_audio(
-        audio_id: str,
-        token_data: dict = Depends(verify_token)
-):
+async def stream_audio(audio_id: str, token_data: dict = Depends(verify_token)):
     """Endpoint para streaming de áudio (requer autenticação)"""
     try:
         logger.debug(f"Solicitado streaming do áudio: {audio_id}")
@@ -215,24 +223,25 @@ async def stream_audio(
         # Verifica se o arquivo existe
         if not audio_path.exists():
             logger.warning(f"Arquivo de áudio não encontrado: {audio_path}")
-            raise HTTPException(status_code=404, detail="Arquivo de áudio não encontrado")
+            raise HTTPException(
+                status_code=404, detail="Arquivo de áudio não encontrado"
+            )
 
         # Determina o tipo de mídia
         content_type = "audio/mp4"
-        if audio_path.suffix.lower() == '.m4a':
+        if audio_path.suffix.lower() == ".m4a":
             content_type = "audio/mp4"
-        elif audio_path.suffix.lower() == '.mp3':
+        elif audio_path.suffix.lower() == ".mp3":
             content_type = "audio/mpeg"
-        elif audio_path.suffix.lower() == '.wav':
+        elif audio_path.suffix.lower() == ".wav":
             content_type = "audio/wav"
-        elif audio_path.suffix.lower() == '.ogg':
+        elif audio_path.suffix.lower() == ".ogg":
             content_type = "audio/ogg"
 
         logger.info(f"Streaming áudio {audio_id}: {audio_path} ({content_type})")
 
         return StreamingResponse(
-            generate_audio_stream(audio_path),
-            media_type=content_type
+            generate_audio_stream(audio_path), media_type=content_type
         )
 
     except HTTPException:
@@ -241,14 +250,13 @@ async def stream_audio(
         logger.error(f"Erro ao fazer streaming do áudio {audio_id}: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"Erro interno ao fazer streaming do áudio: {str(e)}"
+            detail=f"Erro interno ao fazer streaming do áudio: {str(e)}",
         )
 
 
 @app.get("/audio/check_exists")
 async def check_audio_exists(
-        youtube_url: str,
-        token_data: dict = Depends(verify_token)
+    youtube_url: str, token_data: dict = Depends(verify_token)
 ):
     """Verifica se um áudio de um vídeo do YouTube já foi baixado"""
     try:
@@ -257,7 +265,9 @@ async def check_audio_exists(
         youtube_id = audio_manager.extract_youtube_id(youtube_url)
 
         if not youtube_id:
-            logger.warning(f"Não foi possível extrair o ID do YouTube da URL: {youtube_url}")
+            logger.warning(
+                f"Não foi possível extrair o ID do YouTube da URL: {youtube_url}"
+            )
             return {"exists": False, "message": "URL inválida ou não reconhecida"}
 
         # Busca no banco de dados
@@ -270,11 +280,13 @@ async def check_audio_exists(
         download_status = audio_info.get("download_status", "unknown")
 
         if download_status not in ["ready", "completed"]:
-            logger.info(f"Áudio com ID '{youtube_id}' existe mas não foi baixado. Status: {download_status}")
+            logger.info(
+                f"Áudio com ID '{youtube_id}' existe mas não foi baixado. Status: {download_status}"
+            )
             return {
                 "exists": False,
                 "message": f"Áudio existe mas não foi baixado completamente (status: {download_status})",
-                "audio_info": audio_info
+                "audio_info": audio_info,
             }
 
         # Verifica se o arquivo existe
@@ -285,7 +297,7 @@ async def check_audio_exists(
                 return {
                     "exists": False,
                     "message": "Áudio registrado mas arquivo não encontrado",
-                    "audio_info": audio_info
+                    "audio_info": audio_info,
                 }
 
             file_size = audio_file_path.stat().st_size
@@ -294,36 +306,35 @@ async def check_audio_exists(
                 return {
                     "exists": False,
                     "message": "Áudio existe mas o arquivo está vazio",
-                    "audio_info": audio_info
+                    "audio_info": audio_info,
                 }
         else:
-            logger.warning(f"Áudio sem caminho definido")
+            logger.warning("Áudio sem caminho definido")
             return {
                 "exists": False,
                 "message": "Áudio registrado mas caminho não definido",
-                "audio_info": audio_info
+                "audio_info": audio_info,
             }
 
         logger.info(f"Áudio com ID '{youtube_id}' já existe e foi baixado")
         return {
             "exists": True,
             "message": "Este áudio já foi baixado com sucesso",
-            "audio_info": audio_info
+            "audio_info": audio_info,
         }
 
     except Exception as e:
         logger.exception(f"Erro ao verificar existência do áudio: {str(e)}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao verificar existência do áudio: {str(e)}"
+            status_code=500, detail=f"Erro ao verificar existência do áudio: {str(e)}"
         )
 
 
 @app.post("/audio/download")
 async def download_audio(
-        request: AudioDownloadRequest,
-        background_tasks: BackgroundTasks,
-        token_data: dict = Depends(verify_token)
+    request: AudioDownloadRequest,
+    background_tasks: BackgroundTasks,
+    token_data: dict = Depends(verify_token),
 ):
     """Faz o download apenas do áudio de um vídeo do YouTube"""
     try:
@@ -336,8 +347,7 @@ async def download_audio(
         except Exception as e:
             logger.error(f"Erro ao registrar áudio: {str(e)}")
             raise HTTPException(
-                status_code=500,
-                detail=f"Erro ao registrar áudio: {str(e)}"
+                status_code=500, detail=f"Erro ao registrar áudio: {str(e)}"
             )
 
         # Adicionar à fila de downloads
@@ -345,7 +355,7 @@ async def download_audio(
             audio_id=audio_id,
             url=str(request.url),
             high_quality=request.high_quality,
-            priority=0
+            priority=0,
         )
 
         return {
@@ -353,38 +363,37 @@ async def download_audio(
             "message": "O áudio foi registrado e adicionado à fila de downloads",
             "audio_id": audio_id,
             "task_id": task_id,
-            "url": str(request.url)
+            "url": str(request.url),
         }
     except Exception as e:
         logger.exception(f"Erro ao iniciar download de áudio: {str(e)}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao iniciar download de áudio: {str(e)}"
+            status_code=500, detail=f"Erro ao iniciar download de áudio: {str(e)}"
         )
 
 
 @app.post("/video/download")
 async def download_video(
-        request: VideoDownloadRequest,
-        background_tasks: BackgroundTasks,
-        token_data: dict = Depends(verify_token)
+    request: VideoDownloadRequest,
+    background_tasks: BackgroundTasks,
+    token_data: dict = Depends(verify_token),
 ):
     """Faz o download de um vídeo do YouTube"""
     try:
-        logger.info(f"Solicitação de download de vídeo: {request.url} (resolução: {request.resolution})")
+        logger.info(
+            f"Solicitação de download de vídeo: {request.url} (resolução: {request.resolution})"
+        )
 
         # Registra o vídeo com status 'downloading'
         try:
             video_id = await video_manager.register_video_for_download(
-                str(request.url),
-                resolution=request.resolution
+                str(request.url), resolution=request.resolution
             )
             logger.info(f"Vídeo registrado com ID: {video_id}")
         except Exception as e:
             logger.error(f"Erro ao registrar vídeo: {str(e)}")
             raise HTTPException(
-                status_code=500,
-                detail=f"Erro ao registrar vídeo: {str(e)}"
+                status_code=500, detail=f"Erro ao registrar vídeo: {str(e)}"
             )
 
         # Inicia o download em background
@@ -393,7 +402,7 @@ async def download_video(
             video_id,
             str(request.url),
             request.resolution,
-            sse_manager
+            sse_manager,
         )
 
         return {
@@ -401,20 +410,18 @@ async def download_video(
             "message": "O vídeo foi registrado e o download foi iniciado",
             "video_id": video_id,
             "resolution": request.resolution,
-            "url": str(request.url)
+            "url": str(request.url),
         }
     except Exception as e:
         logger.exception(f"Erro ao iniciar download de vídeo: {str(e)}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao iniciar download de vídeo: {str(e)}"
+            status_code=500, detail=f"Erro ao iniciar download de vídeo: {str(e)}"
         )
 
 
 @app.get("/video/download-status/{video_id}")
 async def get_video_download_status(
-        video_id: str,
-        token_data: dict = Depends(verify_token)
+    video_id: str, token_data: dict = Depends(verify_token)
 ):
     """Obtém o status de download de um vídeo"""
     try:
@@ -422,8 +429,7 @@ async def get_video_download_status(
 
         if not video_info:
             raise HTTPException(
-                status_code=404,
-                detail=f"Vídeo não encontrado: {video_id}"
+                status_code=404, detail=f"Vídeo não encontrado: {video_id}"
             )
 
         return {
@@ -439,16 +445,12 @@ async def get_video_download_status(
         raise
     except Exception as e:
         logger.exception(f"Erro ao obter status de download: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao obter status: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Erro ao obter status: {str(e)}")
 
 
 @app.get("/video/stream/{video_id}")
 async def stream_downloaded_video(
-        video_id: str,
-        token_data: dict = Depends(verify_token)
+    video_id: str, token_data: dict = Depends(verify_token)
 ):
     """Streaming de vídeo baixado do YouTube"""
     try:
@@ -464,7 +466,7 @@ async def stream_downloaded_video(
             logger.warning(f"Vídeo ainda não está pronto: {video_id}")
             raise HTTPException(
                 status_code=400,
-                detail=f"Vídeo ainda não está pronto. Status: {video_info.get('download_status')}"
+                detail=f"Vídeo ainda não está pronto. Status: {video_info.get('download_status')}",
             )
 
         # O path no banco é relativo (ex: videos/id/file.mp4), construir caminho absoluto
@@ -473,20 +475,21 @@ async def stream_downloaded_video(
 
         if not video_path.exists():
             logger.error(f"Arquivo de vídeo não encontrado: {video_path}")
-            raise HTTPException(status_code=404, detail="Arquivo de vídeo não encontrado")
+            raise HTTPException(
+                status_code=404, detail="Arquivo de vídeo não encontrado"
+            )
 
         content_types = {
-            '.mp4': 'video/mp4',
-            '.webm': 'video/webm',
-            '.mkv': 'video/x-matroska'
+            ".mp4": "video/mp4",
+            ".webm": "video/webm",
+            ".mkv": "video/x-matroska",
         }
 
-        content_type = content_types.get(video_path.suffix.lower(), 'video/mp4')
+        content_type = content_types.get(video_path.suffix.lower(), "video/mp4")
 
         logger.info(f"Iniciando streaming do vídeo: {video_path}")
         return StreamingResponse(
-            generate_video_stream(video_path),
-            media_type=content_type
+            generate_video_stream(video_path), media_type=content_type
         )
 
     except HTTPException:
@@ -495,14 +498,12 @@ async def stream_downloaded_video(
         logger.exception(f"Erro ao fazer streaming do vídeo {video_id}: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"Erro interno ao fazer streaming do vídeo: {str(e)}"
+            detail=f"Erro interno ao fazer streaming do vídeo: {str(e)}",
         )
 
 
 @app.get("/audio/list")
-async def list_audio_files(
-        token_data: dict = Depends(verify_token)
-):
+async def list_audio_files(token_data: dict = Depends(verify_token)):
     """Lista todos os arquivos de áudio disponíveis"""
     try:
         logger.debug("Listando arquivos de áudio do banco de dados")
@@ -515,16 +516,15 @@ async def list_audio_files(
     except Exception as e:
         logger.exception(f"Erro ao listar arquivos de áudio: {str(e)}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao listar arquivos de áudio: {str(e)}"
+            status_code=500, detail=f"Erro ao listar arquivos de áudio: {str(e)}"
         )
 
 
 @app.post("/audio/transcribe", response_model=TranscriptionResponse)
 async def transcribe_audio(
-        request: TranscriptionRequest,
-        background_tasks: BackgroundTasks,
-        token_data: dict = Depends(verify_token)
+    request: TranscriptionRequest,
+    background_tasks: BackgroundTasks,
+    token_data: dict = Depends(verify_token),
 ):
     """Transcreve um arquivo de áudio ou vídeo"""
     try:
@@ -534,7 +534,6 @@ async def transcribe_audio(
         audio_info = await audio_manager.get_audio_info(request.file_id)
         video_info = None
         media_path = None
-        is_video = False
 
         if audio_info:
             logger.debug(f"Áudio encontrado: {audio_info['id']}")
@@ -544,7 +543,7 @@ async def transcribe_audio(
                 logger.error(f"Arquivo de áudio não encontrado: {media_path}")
                 raise HTTPException(
                     status_code=404,
-                    detail=f"Arquivo de áudio não encontrado: {media_path}"
+                    detail=f"Arquivo de áudio não encontrado: {media_path}",
                 )
 
             transcription_status = audio_info.get("transcription_status", "none")
@@ -557,7 +556,7 @@ async def transcribe_audio(
                         file_id=request.file_id,
                         transcription_path=str(transcription_path),
                         status="success",
-                        message="Transcrição já existe"
+                        message="Transcrição já existe",
                     )
 
             elif transcription_status == "started":
@@ -566,61 +565,70 @@ async def transcribe_audio(
                     file_id=request.file_id,
                     transcription_path="",
                     status="processing",
-                    message="A transcrição já está em andamento"
+                    message="A transcrição já está em andamento",
                 )
 
             elif transcription_status == "error":
-                logger.warning(f"Erro anterior na transcrição. Tentando novamente.")
+                logger.warning("Erro anterior na transcrição. Tentando novamente.")
         else:
             # Se não encontrou como áudio, tenta como vídeo
             video_info = await video_manager.get_video_info(request.file_id)
 
             if video_info:
                 logger.debug(f"Vídeo encontrado: {video_info['id']}")
-                is_video = True
                 media_path = AUDIO_DIR.parent / video_info["path"]
 
                 if not media_path.exists():
                     logger.error(f"Arquivo de vídeo não encontrado: {media_path}")
                     raise HTTPException(
                         status_code=404,
-                        detail=f"Arquivo de vídeo não encontrado: {media_path}"
+                        detail=f"Arquivo de vídeo não encontrado: {media_path}",
                     )
 
                 transcription_status = video_info.get("transcription_status", "none")
 
-                if transcription_status == "ended" and video_info.get("transcription_path"):
-                    transcription_path = AUDIO_DIR.parent / video_info["transcription_path"]
+                if transcription_status == "ended" and video_info.get(
+                    "transcription_path"
+                ):
+                    transcription_path = (
+                        AUDIO_DIR.parent / video_info["transcription_path"]
+                    )
                     if transcription_path.exists():
                         logger.info(f"Transcrição já existe: {transcription_path}")
                         return TranscriptionResponse(
                             file_id=request.file_id,
                             transcription_path=str(transcription_path),
                             status="success",
-                            message="Transcrição já existe"
+                            message="Transcrição já existe",
                         )
 
                 elif transcription_status == "started":
-                    logger.info(f"Transcrição já está em andamento para: {request.file_id}")
+                    logger.info(
+                        f"Transcrição já está em andamento para: {request.file_id}"
+                    )
                     return TranscriptionResponse(
                         file_id=request.file_id,
                         transcription_path="",
                         status="processing",
-                        message="A transcrição já está em andamento"
+                        message="A transcrição já está em andamento",
                     )
 
                 elif transcription_status == "error":
-                    logger.warning(f"Erro anterior na transcrição. Tentando novamente.")
+                    logger.warning("Erro anterior na transcrição. Tentando novamente.")
             else:
                 # Tenta encontrar o arquivo por busca
                 try:
-                    media_path = await TranscriptionService.find_audio_file(request.file_id)
+                    media_path = await TranscriptionService.find_audio_file(
+                        request.file_id
+                    )
                     logger.debug(f"Arquivo encontrado por busca: {media_path}")
                 except FileNotFoundError:
-                    logger.error(f"Arquivo de áudio/vídeo não encontrado: '{request.file_id}'")
+                    logger.error(
+                        f"Arquivo de áudio/vídeo não encontrado: '{request.file_id}'"
+                    )
                     raise HTTPException(
                         status_code=404,
-                        detail=f"Arquivo de áudio/vídeo não encontrado: {request.file_id}"
+                        detail=f"Arquivo de áudio/vídeo não encontrado: {request.file_id}",
                     )
 
         transcription_file = media_path.with_suffix(".md")
@@ -631,23 +639,19 @@ async def transcribe_audio(
             if audio_info:
                 rel_path = str(transcription_file.relative_to(AUDIO_DIR.parent))
                 await audio_manager.update_transcription_status(
-                    audio_info["id"],
-                    "ended",
-                    rel_path
+                    audio_info["id"], "ended", rel_path
                 )
             elif video_info:
                 rel_path = str(transcription_file.relative_to(AUDIO_DIR.parent))
                 await video_manager.update_transcription_status(
-                    video_info["id"],
-                    "ended",
-                    rel_path
+                    video_info["id"], "ended", rel_path
                 )
 
             return TranscriptionResponse(
                 file_id=request.file_id,
                 transcription_path=str(transcription_file),
                 status="success",
-                message="Transcrição já existe"
+                message="Transcrição já existe",
             )
 
         # Atualiza o status para "started"
@@ -669,40 +673,62 @@ async def transcribe_audio(
                 docs = TranscriptionService.transcribe_audio(
                     file_path=str(_media_path),
                     provider=provider,
-                    language=request.language
+                    language=request.language,
                 )
 
                 if docs:
                     output_path = str(transcription_file)
-                    transcription_path = TranscriptionService.save_transcription(docs, output_path)
+                    transcription_path = TranscriptionService.save_transcription(
+                        docs, output_path
+                    )
 
                     if _audio_info:
-                        rel_path = Path(transcription_path).relative_to(AUDIO_DIR.parent)
-                        asyncio.run(audio_manager.update_transcription_status(
-                            _audio_info["id"],
-                            "ended",
-                            str(rel_path)
-                        ))
+                        rel_path = Path(transcription_path).relative_to(
+                            AUDIO_DIR.parent
+                        )
+                        asyncio.run(
+                            audio_manager.update_transcription_status(
+                                _audio_info["id"], "ended", str(rel_path)
+                            )
+                        )
                     elif _video_info:
-                        rel_path = Path(transcription_path).relative_to(AUDIO_DIR.parent)
-                        asyncio.run(video_manager.update_transcription_status(
-                            _video_info["id"],
-                            "ended",
-                            str(rel_path)
-                        ))
+                        rel_path = Path(transcription_path).relative_to(
+                            AUDIO_DIR.parent
+                        )
+                        asyncio.run(
+                            video_manager.update_transcription_status(
+                                _video_info["id"], "ended", str(rel_path)
+                            )
+                        )
 
                     logger.success(f"Transcrição concluída: {output_path}")
                 else:
                     if _audio_info:
-                        asyncio.run(audio_manager.update_transcription_status(_audio_info["id"], "error"))
+                        asyncio.run(
+                            audio_manager.update_transcription_status(
+                                _audio_info["id"], "error"
+                            )
+                        )
                     elif _video_info:
-                        asyncio.run(video_manager.update_transcription_status(_video_info["id"], "error"))
-                    logger.error(f"Falha na transcrição: nenhum conteúdo gerado")
+                        asyncio.run(
+                            video_manager.update_transcription_status(
+                                _video_info["id"], "error"
+                            )
+                        )
+                    logger.error("Falha na transcrição: nenhum conteúdo gerado")
             except Exception as e:
                 if _audio_info:
-                    asyncio.run(audio_manager.update_transcription_status(_audio_info["id"], "error"))
+                    asyncio.run(
+                        audio_manager.update_transcription_status(
+                            _audio_info["id"], "error"
+                        )
+                    )
                 elif _video_info:
-                    asyncio.run(video_manager.update_transcription_status(_video_info["id"], "error"))
+                    asyncio.run(
+                        video_manager.update_transcription_status(
+                            _video_info["id"], "error"
+                        )
+                    )
                 logger.exception(f"Erro na tarefa de transcrição: {str(e)}")
 
         background_tasks.add_task(transcribe_task)
@@ -711,23 +737,19 @@ async def transcribe_audio(
             file_id=request.file_id,
             transcription_path=str(transcription_file),
             status="processing",
-            message="A transcrição foi iniciada em segundo plano"
+            message="A transcrição foi iniciada em segundo plano",
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.exception(f"Erro ao iniciar transcrição: {str(e)}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao iniciar transcrição: {str(e)}"
+            status_code=500, detail=f"Erro ao iniciar transcrição: {str(e)}"
         )
 
 
 @app.get("/audio/transcription/{file_id}")
-async def get_transcription(
-        file_id: str,
-        token_data: dict = Depends(verify_token)
-):
+async def get_transcription(file_id: str, token_data: dict = Depends(verify_token)):
     """Obtém o arquivo de transcrição"""
     try:
         logger.info(f"Solicitação de obtenção de transcrição para ID: {file_id}")
@@ -742,10 +764,12 @@ async def get_transcription(
                 return FileResponse(
                     path=transcription_path,
                     media_type="text/markdown",
-                    filename=transcription_path.name
+                    filename=transcription_path.name,
                 )
             else:
-                logger.warning(f"Caminho de transcrição não existe: {transcription_path}")
+                logger.warning(
+                    f"Caminho de transcrição não existe: {transcription_path}"
+                )
 
         try:
             audio_file = await TranscriptionService.find_audio_file(file_id)
@@ -755,14 +779,16 @@ async def get_transcription(
                 logger.error(f"Transcrição não encontrada para: {file_id}")
                 raise HTTPException(
                     status_code=404,
-                    detail=f"Transcrição não encontrada para: {file_id}"
+                    detail=f"Transcrição não encontrada para: {file_id}",
                 )
 
             logger.debug(f"Transcrição encontrada: {transcription_file}")
 
             if audio_info and audio_info.get("transcription_status") != "ended":
                 rel_path = str(transcription_file.relative_to(AUDIO_DIR.parent))
-                await audio_manager.update_transcription_status(audio_info["id"], "ended", rel_path)
+                await audio_manager.update_transcription_status(
+                    audio_info["id"], "ended", rel_path
+                )
 
         except FileNotFoundError:
             transcription_files = list(AUDIO_DIR.glob("**/*.md"))
@@ -775,8 +801,7 @@ async def get_transcription(
             if not matching_transcriptions:
                 logger.error(f"Arquivo não encontrado: {file_id}")
                 raise HTTPException(
-                    status_code=404,
-                    detail=f"Arquivo não encontrado: {file_id}"
+                    status_code=404, detail=f"Arquivo não encontrado: {file_id}"
                 )
 
             transcription_file = matching_transcriptions[0]
@@ -784,28 +809,26 @@ async def get_transcription(
 
             if audio_info:
                 rel_path = str(transcription_file.relative_to(AUDIO_DIR.parent))
-                await audio_manager.update_transcription_status(audio_info["id"], "ended", rel_path)
+                await audio_manager.update_transcription_status(
+                    audio_info["id"], "ended", rel_path
+                )
 
         return FileResponse(
             path=transcription_file,
             media_type="text/markdown",
-            filename=transcription_file.name
+            filename=transcription_file.name,
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.exception(f"Erro ao obter transcrição: {str(e)}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao obter transcrição: {str(e)}"
+            status_code=500, detail=f"Erro ao obter transcrição: {str(e)}"
         )
 
 
 @app.get("/audio/stream/{audio_id}")
-async def stream_audio_file(
-        audio_id: str,
-        token: str = Query(None)
-):
+async def stream_audio_file(audio_id: str, token: str = Query(None)):
     """Endpoint para servir arquivos de áudio com autenticação opcional"""
     try:
         if token:
@@ -828,14 +851,16 @@ async def stream_audio_file(
 
         if not audio_file_path.exists():
             logger.warning(f"Arquivo não encontrado: {audio_file_path}")
-            raise HTTPException(status_code=404, detail="Arquivo de áudio não encontrado")
+            raise HTTPException(
+                status_code=404, detail="Arquivo de áudio não encontrado"
+            )
 
         content_type = "audio/mp4"
-        if audio_file_path.suffix.lower() == '.m4a':
+        if audio_file_path.suffix.lower() == ".m4a":
             content_type = "audio/mp4"
-        elif audio_file_path.suffix.lower() == '.mp3':
+        elif audio_file_path.suffix.lower() == ".mp3":
             content_type = "audio/mpeg"
-        elif audio_file_path.suffix.lower() == '.wav':
+        elif audio_file_path.suffix.lower() == ".wav":
             content_type = "audio/wav"
 
         logger.info(f"Servindo áudio {audio_id}: {audio_file_path} ({content_type})")
@@ -843,23 +868,19 @@ async def stream_audio_file(
         return FileResponse(
             path=str(audio_file_path),
             media_type=content_type,
-            filename=f"{audio['name']}"
+            filename=f"{audio['name']}",
         )
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Erro ao servir áudio {audio_id}: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao servir áudio: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Erro ao servir áudio: {str(e)}")
 
 
 @app.get("/audio/transcription_status/{file_id}")
 async def get_transcription_status(
-        file_id: str,
-        token_data: dict = Depends(verify_token)
+    file_id: str, token_data: dict = Depends(verify_token)
 ):
     """Obtém o status atual da transcrição de áudio ou vídeo"""
     try:
@@ -883,8 +904,7 @@ async def get_transcription_status(
         if not media_info:
             logger.warning(f"Áudio/vídeo não encontrado: {file_id}")
             raise HTTPException(
-                status_code=404,
-                detail=f"Áudio/vídeo não encontrado: {file_id}"
+                status_code=404, detail=f"Áudio/vídeo não encontrado: {file_id}"
             )
 
         transcription_status = media_info.get("transcription_status", "none")
@@ -897,7 +917,7 @@ async def get_transcription_status(
             "file_id": file_id,
             "status": transcription_status,
             "transcription_path": transcription_path,
-            "media_type": media_type
+            "media_type": media_type,
         }
 
     except HTTPException:
@@ -905,16 +925,12 @@ async def get_transcription_status(
     except Exception as e:
         logger.exception(f"Erro ao obter status da transcrição: {str(e)}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao obter status da transcrição: {str(e)}"
+            status_code=500, detail=f"Erro ao obter status da transcrição: {str(e)}"
         )
 
 
 @app.delete("/audio/transcription/{file_id}")
-async def delete_transcription(
-        file_id: str,
-        token_data: dict = Depends(verify_token)
-):
+async def delete_transcription(file_id: str, token_data: dict = Depends(verify_token)):
     """Exclui a transcrição de um áudio"""
     try:
         logger.info(f"Solicitação de exclusão de transcrição para ID: {file_id}")
@@ -924,8 +940,7 @@ async def delete_transcription(
         if not audio_info:
             logger.warning(f"Áudio não encontrado: {file_id}")
             raise HTTPException(
-                status_code=404,
-                detail=f"Áudio não encontrado: {file_id}"
+                status_code=404, detail=f"Áudio não encontrado: {file_id}"
             )
 
         transcription_status = audio_info.get("transcription_status", "none")
@@ -934,8 +949,7 @@ async def delete_transcription(
         if transcription_status != "ended" or not transcription_path:
             logger.warning(f"Transcrição não encontrada para: {file_id}")
             raise HTTPException(
-                status_code=404,
-                detail=f"Transcrição não encontrada para: {file_id}"
+                status_code=404, detail=f"Transcrição não encontrada para: {file_id}"
             )
 
         # Caminho completo do arquivo de transcrição
@@ -955,8 +969,8 @@ async def delete_transcription(
 
         return {
             "status": "success",
-            "message": f"Transcrição excluída com sucesso",
-            "file_id": file_id
+            "message": "Transcrição excluída com sucesso",
+            "file_id": file_id,
         }
 
     except HTTPException:
@@ -964,17 +978,17 @@ async def delete_transcription(
     except Exception as e:
         logger.exception(f"Erro ao excluir transcrição: {str(e)}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao excluir transcrição: {str(e)}"
+            status_code=500, detail=f"Erro ao excluir transcrição: {str(e)}"
         )
 
 
 # SSE e status de download
 
+
 @app.get("/audio/download-events")
 async def download_events_stream(
     token: str = Query(None, description="Token de autenticação"),
-    authorization: Optional[str] = Header(None, alias="Authorization")
+    authorization: Optional[str] = Header(None, alias="Authorization"),
 ):
     """Stream de eventos SSE para atualizações de download"""
     auth_token = None
@@ -1011,10 +1025,7 @@ async def download_events_stream(
 
 
 @app.get("/audio/download-status/{audio_id}")
-async def get_download_status(
-    audio_id: str,
-    token_data: dict = Depends(verify_token)
-):
+async def get_download_status(audio_id: str, token_data: dict = Depends(verify_token)):
     """Obtém o status atual de um download específico"""
     try:
         audio_info = await audio_manager.get_audio_info(audio_id)
@@ -1022,12 +1033,13 @@ async def get_download_status(
 
         if not audio_info and not sse_status:
             raise HTTPException(
-                status_code=404,
-                detail=f"Áudio não encontrado: {audio_id}"
+                status_code=404, detail=f"Áudio não encontrado: {audio_id}"
             )
 
         # Banco de dados é a fonte da verdade
-        db_status = audio_info.get("download_status", "unknown") if audio_info else "unknown"
+        db_status = (
+            audio_info.get("download_status", "unknown") if audio_info else "unknown"
+        )
         db_progress = audio_info.get("download_progress", 0) if audio_info else 0
         db_error = audio_info.get("download_error", "") if audio_info else ""
 
@@ -1036,7 +1048,7 @@ async def get_download_status(
             "download_status": db_status,
             "download_progress": db_progress,
             "download_error": db_error,
-            "live_updates": sse_status is not None
+            "live_updates": sse_status is not None,
         }
 
         # Só usa SSE se o banco ainda não marcou como pronto/erro
@@ -1060,73 +1072,57 @@ async def get_download_status(
     except Exception as e:
         logger.exception(f"Erro ao obter status do download: {str(e)}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao obter status do download: {str(e)}"
+            status_code=500, detail=f"Erro ao obter status do download: {str(e)}"
         )
 
 
 @app.delete("/audio/{audio_id}")
-async def delete_audio(
-    audio_id: str,
-    token_data: dict = Depends(verify_token)
-):
+async def delete_audio(audio_id: str, token_data: dict = Depends(verify_token)):
     """Exclui um áudio do banco de dados e remove os arquivos físicos"""
     try:
         result = await audio_manager.delete_audio(audio_id)
         if result:
             return {
                 "status": "success",
-                "message": f"Áudio {audio_id} excluído com sucesso"
+                "message": f"Áudio {audio_id} excluído com sucesso",
             }
         else:
             raise HTTPException(
-                status_code=404,
-                detail=f"Áudio não encontrado: {audio_id}"
+                status_code=404, detail=f"Áudio não encontrado: {audio_id}"
             )
     except HTTPException:
         raise
     except Exception as e:
         logger.exception(f"Erro ao excluir áudio: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao excluir áudio: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Erro ao excluir áudio: {str(e)}")
 
 
 @app.delete("/video/{video_id}")
-async def delete_video(
-    video_id: str,
-    token_data: dict = Depends(verify_token)
-):
+async def delete_video(video_id: str, token_data: dict = Depends(verify_token)):
     """Exclui um vídeo do banco de dados e remove os arquivos físicos"""
     try:
         result = await video_manager.delete_video(video_id)
         if result:
             return {
                 "status": "success",
-                "message": f"Vídeo {video_id} excluído com sucesso"
+                "message": f"Vídeo {video_id} excluído com sucesso",
             }
         else:
             raise HTTPException(
-                status_code=404,
-                detail=f"Vídeo não encontrado: {video_id}"
+                status_code=404, detail=f"Vídeo não encontrado: {video_id}"
             )
     except HTTPException:
         raise
     except Exception as e:
         logger.exception(f"Erro ao excluir vídeo: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao excluir vídeo: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Erro ao excluir vídeo: {str(e)}")
 
 
 # Endpoints para gerenciamento da fila
 
+
 @app.get("/downloads/queue/status")
-async def get_queue_status(
-    token_data: dict = Depends(verify_token)
-):
+async def get_queue_status(token_data: dict = Depends(verify_token)):
     """Obtém o status atual da fila de downloads"""
     try:
         status = await download_queue.get_queue_status()
@@ -1134,8 +1130,7 @@ async def get_queue_status(
     except Exception as e:
         logger.exception(f"Erro ao obter status da fila: {str(e)}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao obter status da fila: {str(e)}"
+            status_code=500, detail=f"Erro ao obter status da fila: {str(e)}"
         )
 
 
@@ -1143,7 +1138,7 @@ async def get_queue_status(
 async def get_queue_tasks(
     status: Optional[str] = None,
     audio_id: Optional[str] = None,
-    token_data: dict = Depends(verify_token)
+    token_data: dict = Depends(verify_token),
 ):
     """Lista tasks na fila com filtros opcionais"""
     try:
@@ -1167,12 +1162,16 @@ async def get_queue_tasks(
                 "priority": task.priority,
                 "created_at": task.created_at.isoformat(),
                 "started_at": task.started_at.isoformat() if task.started_at else None,
-                "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+                "completed_at": task.completed_at.isoformat()
+                if task.completed_at
+                else None,
                 "error_message": task.error_message,
                 "retry_count": task.retry_count,
                 "max_retries": task.max_retries,
-                "next_retry_at": task.next_retry_at.isoformat() if task.next_retry_at else None,
-                "progress": task.progress
+                "next_retry_at": task.next_retry_at.isoformat()
+                if task.next_retry_at
+                else None,
+                "progress": task.progress,
             }
             task_list.append(task_dict)
 
@@ -1181,16 +1180,12 @@ async def get_queue_tasks(
     except Exception as e:
         logger.exception(f"Erro ao listar tasks da fila: {str(e)}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao listar tasks da fila: {str(e)}"
+            status_code=500, detail=f"Erro ao listar tasks da fila: {str(e)}"
         )
 
 
 @app.post("/downloads/queue/cancel/{task_id}")
-async def cancel_download_task(
-    task_id: str,
-    token_data: dict = Depends(verify_token)
-):
+async def cancel_download_task(task_id: str, token_data: dict = Depends(verify_token)):
     """Cancela um download específico na fila"""
     try:
         success = await download_queue.cancel_download(task_id)
@@ -1198,12 +1193,11 @@ async def cancel_download_task(
         if success:
             return {
                 "success": True,
-                "message": f"Download {task_id} cancelado com sucesso"
+                "message": f"Download {task_id} cancelado com sucesso",
             }
         else:
             raise HTTPException(
-                status_code=404,
-                detail=f"Task {task_id} não encontrada"
+                status_code=404, detail=f"Task {task_id} não encontrada"
             )
 
     except HTTPException:
@@ -1211,30 +1205,24 @@ async def cancel_download_task(
     except Exception as e:
         logger.exception(f"Erro ao cancelar download: {str(e)}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao cancelar download: {str(e)}"
+            status_code=500, detail=f"Erro ao cancelar download: {str(e)}"
         )
 
 
 @app.post("/downloads/queue/retry/{task_id}")
-async def retry_download_task(
-    task_id: str,
-    token_data: dict = Depends(verify_token)
-):
+async def retry_download_task(task_id: str, token_data: dict = Depends(verify_token)):
     """Força retry de um download falhado"""
     try:
         task = await download_queue.get_task_status(task_id)
 
         if not task:
             raise HTTPException(
-                status_code=404,
-                detail=f"Task {task_id} não encontrada"
+                status_code=404, detail=f"Task {task_id} não encontrada"
             )
 
         if task.status != "failed":
             raise HTTPException(
-                status_code=400,
-                detail=f"Task {task_id} não está em estado de falha"
+                status_code=400, detail=f"Task {task_id} não está em estado de falha"
             )
 
         async with download_queue.queue_lock:
@@ -1242,50 +1230,42 @@ async def retry_download_task(
             task.error_message = None
             task.next_retry_at = None
 
-        return {
-            "success": True,
-            "message": f"Download {task_id} recolocado na fila"
-        }
+        return {"success": True, "message": f"Download {task_id} recolocado na fila"}
 
     except HTTPException:
         raise
     except Exception as e:
         logger.exception(f"Erro ao fazer retry do download: {str(e)}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao fazer retry do download: {str(e)}"
+            status_code=500, detail=f"Erro ao fazer retry do download: {str(e)}"
         )
 
 
 @app.delete("/downloads/queue/cleanup")
 async def cleanup_queue(
-    max_age_hours: int = 24,
-    token_data: dict = Depends(verify_token)
+    max_age_hours: int = 24, token_data: dict = Depends(verify_token)
 ):
     """Remove tasks antigas da fila para limpeza"""
     try:
         await download_queue.cleanup_old_tasks(max_age_hours)
         return {
             "success": True,
-            "message": f"Limpeza da fila concluída (tasks mais antigas que {max_age_hours}h)"
+            "message": f"Limpeza da fila concluída (tasks mais antigas que {max_age_hours}h)",
         }
 
     except Exception as e:
         logger.exception(f"Erro ao limpar fila: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao limpar fila: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Erro ao limpar fila: {str(e)}")
 
 
 # ============================================================================
 # ENDPOINTS DE PASTAS (FOLDERS)
 # ============================================================================
 
+
 @app.post("/folders", response_model=FolderResponse)
 async def create_folder(
-        folder_data: FolderCreate,
-        token_data: dict = Depends(verify_token)
+    folder_data: FolderCreate, token_data: dict = Depends(verify_token)
 ):
     """Cria uma nova pasta"""
     try:
@@ -1300,7 +1280,7 @@ async def create_folder(
                 if not parent:
                     raise HTTPException(
                         status_code=404,
-                        detail=f"Pasta pai não encontrada: {folder_data.parent_id}"
+                        detail=f"Pasta pai não encontrada: {folder_data.parent_id}",
                     )
 
             # Cria a pasta
@@ -1309,7 +1289,7 @@ async def create_folder(
                 parent_id=folder_data.parent_id,
                 description=folder_data.description,
                 color=folder_data.color,
-                icon=folder_data.icon
+                icon=folder_data.icon,
             )
             created = await repo.create(folder)
             logger.success(f"Pasta criada: {created.id}")
@@ -1319,16 +1299,11 @@ async def create_folder(
         raise
     except Exception as e:
         logger.exception(f"Erro ao criar pasta: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao criar pasta: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Erro ao criar pasta: {str(e)}")
 
 
 @app.get("/folders/root", response_model=List[FolderResponse])
-async def list_root_folders(
-        token_data: dict = Depends(verify_token)
-):
+async def list_root_folders(token_data: dict = Depends(verify_token)):
     """Lista apenas pastas raiz (sem parent)"""
     try:
         async with get_db_context() as session:
@@ -1339,15 +1314,13 @@ async def list_root_folders(
     except Exception as e:
         logger.exception(f"Erro ao listar pastas raiz: {str(e)}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao listar pastas raiz: {str(e)}"
+            status_code=500, detail=f"Erro ao listar pastas raiz: {str(e)}"
         )
 
 
 @app.get("/folders/{folder_id}/children", response_model=List[FolderResponse])
 async def list_folder_children(
-        folder_id: str,
-        token_data: dict = Depends(verify_token)
+    folder_id: str, token_data: dict = Depends(verify_token)
 ):
     """Lista subpastas de uma pasta"""
     try:
@@ -1358,8 +1331,7 @@ async def list_folder_children(
             folder = await repo.get_by_id(folder_id)
             if not folder:
                 raise HTTPException(
-                    status_code=404,
-                    detail=f"Pasta não encontrada: {folder_id}"
+                    status_code=404, detail=f"Pasta não encontrada: {folder_id}"
                 )
 
             children = await repo.get_children(folder_id)
@@ -1370,16 +1342,12 @@ async def list_folder_children(
     except Exception as e:
         logger.exception(f"Erro ao listar subpastas: {str(e)}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao listar subpastas: {str(e)}"
+            status_code=500, detail=f"Erro ao listar subpastas: {str(e)}"
         )
 
 
 @app.get("/folders/{folder_id}/items")
-async def get_folder_items(
-        folder_id: str,
-        token_data: dict = Depends(verify_token)
-):
+async def get_folder_items(folder_id: str, token_data: dict = Depends(verify_token)):
     """Lista itens (áudios e vídeos) de uma pasta"""
     try:
         async with get_db_context() as session:
@@ -1391,8 +1359,7 @@ async def get_folder_items(
             folder = await folder_repo.get_by_id(folder_id)
             if not folder:
                 raise HTTPException(
-                    status_code=404,
-                    detail=f"Pasta não encontrada: {folder_id}"
+                    status_code=404, detail=f"Pasta não encontrada: {folder_id}"
                 )
 
             audios = await audio_repo.get_by_folder(folder_id)
@@ -1401,7 +1368,7 @@ async def get_folder_items(
             return {
                 "audios": [a.to_dict() for a in audios],
                 "videos": [v.to_dict() for v in videos],
-                "item_count": len(audios) + len(videos)
+                "item_count": len(audios) + len(videos),
             }
 
     except HTTPException:
@@ -1409,15 +1376,14 @@ async def get_folder_items(
     except Exception as e:
         logger.exception(f"Erro ao listar itens da pasta: {str(e)}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao listar itens da pasta: {str(e)}"
+            status_code=500, detail=f"Erro ao listar itens da pasta: {str(e)}"
         )
 
 
 @app.get("/folders", response_model=List[FolderTreeResponse])
 async def list_folders(
-        tree: bool = Query(True, description="Retornar como árvore hierárquica"),
-        token_data: dict = Depends(verify_token)
+    tree: bool = Query(True, description="Retornar como árvore hierárquica"),
+    token_data: dict = Depends(verify_token),
 ):
     """Lista todas as pastas"""
     try:
@@ -1433,7 +1399,9 @@ async def list_folders(
                     children = await repo.get_children(folder.id)
                     item_counts = await repo.count_items(folder.id)
                     folder_dict = folder.to_dict()
-                    folder_dict["children"] = [await build_tree(child) for child in children]
+                    folder_dict["children"] = [
+                        await build_tree(child) for child in children
+                    ]
                     folder_dict["item_count"] = item_counts["total"]
                     return folder_dict
 
@@ -1448,17 +1416,16 @@ async def list_folders(
 
     except Exception as e:
         logger.exception(f"Erro ao listar pastas: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao listar pastas: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Erro ao listar pastas: {str(e)}")
 
 
 @app.get("/folders/{folder_id}", response_model=FolderWithItemsResponse)
 async def get_folder(
-        folder_id: str,
-        include_items: bool = Query(True, description="Incluir itens (áudios/vídeos) da pasta"),
-        token_data: dict = Depends(verify_token)
+    folder_id: str,
+    include_items: bool = Query(
+        True, description="Incluir itens (áudios/vídeos) da pasta"
+    ),
+    token_data: dict = Depends(verify_token),
 ):
     """Obtém detalhes de uma pasta"""
     try:
@@ -1468,8 +1435,7 @@ async def get_folder(
 
             if not folder:
                 raise HTTPException(
-                    status_code=404,
-                    detail=f"Pasta não encontrada: {folder_id}"
+                    status_code=404, detail=f"Pasta não encontrada: {folder_id}"
                 )
 
             result = folder.to_dict()
@@ -1495,17 +1461,11 @@ async def get_folder(
         raise
     except Exception as e:
         logger.exception(f"Erro ao obter pasta: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao obter pasta: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Erro ao obter pasta: {str(e)}")
 
 
 @app.get("/folders/{folder_id}/path", response_model=FolderPathResponse)
-async def get_folder_path(
-        folder_id: str,
-        token_data: dict = Depends(verify_token)
-):
+async def get_folder_path(folder_id: str, token_data: dict = Depends(verify_token)):
     """Obtém o caminho completo de uma pasta (breadcrumb)"""
     try:
         async with get_db_context() as session:
@@ -1514,13 +1474,12 @@ async def get_folder_path(
 
             if not path:
                 raise HTTPException(
-                    status_code=404,
-                    detail=f"Pasta não encontrada: {folder_id}"
+                    status_code=404, detail=f"Pasta não encontrada: {folder_id}"
                 )
 
             return FolderPathResponse(
                 path=[FolderResponse(**f.to_dict()) for f in path],
-                full_path=" / ".join([f.name for f in path])
+                full_path=" / ".join([f.name for f in path]),
             )
 
     except HTTPException:
@@ -1528,16 +1487,13 @@ async def get_folder_path(
     except Exception as e:
         logger.exception(f"Erro ao obter caminho da pasta: {str(e)}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao obter caminho da pasta: {str(e)}"
+            status_code=500, detail=f"Erro ao obter caminho da pasta: {str(e)}"
         )
 
 
 @app.put("/folders/{folder_id}", response_model=FolderResponse)
 async def update_folder(
-        folder_id: str,
-        folder_data: FolderUpdate,
-        token_data: dict = Depends(verify_token)
+    folder_id: str, folder_data: FolderUpdate, token_data: dict = Depends(verify_token)
 ):
     """Atualiza uma pasta"""
     try:
@@ -1547,16 +1503,14 @@ async def update_folder(
 
             if not folder:
                 raise HTTPException(
-                    status_code=404,
-                    detail=f"Pasta não encontrada: {folder_id}"
+                    status_code=404, detail=f"Pasta não encontrada: {folder_id}"
                 )
 
             # Verifica se a nova pasta pai existe e não cria ciclo
             if folder_data.parent_id is not None:
                 if folder_data.parent_id == folder_id:
                     raise HTTPException(
-                        status_code=400,
-                        detail="Uma pasta não pode ser pai de si mesma"
+                        status_code=400, detail="Uma pasta não pode ser pai de si mesma"
                     )
 
                 if folder_data.parent_id != "":
@@ -1564,7 +1518,7 @@ async def update_folder(
                     if not parent:
                         raise HTTPException(
                             status_code=404,
-                            detail=f"Pasta pai não encontrada: {folder_data.parent_id}"
+                            detail=f"Pasta pai não encontrada: {folder_data.parent_id}",
                         )
 
                     # Verifica se não está tentando mover para um descendente
@@ -1572,7 +1526,7 @@ async def update_folder(
                     if any(f.id == folder_id for f in path):
                         raise HTTPException(
                             status_code=400,
-                            detail="Não é possível mover pasta para um descendente"
+                            detail="Não é possível mover pasta para um descendente",
                         )
 
             # Prepara dados de atualização
@@ -1580,7 +1534,9 @@ async def update_folder(
             if folder_data.name is not None:
                 update_data["name"] = folder_data.name
             if folder_data.parent_id is not None:
-                update_data["parent_id"] = folder_data.parent_id if folder_data.parent_id != "" else None
+                update_data["parent_id"] = (
+                    folder_data.parent_id if folder_data.parent_id != "" else None
+                )
             if folder_data.description is not None:
                 update_data["description"] = folder_data.description
             if folder_data.color is not None:
@@ -1600,16 +1556,15 @@ async def update_folder(
     except Exception as e:
         logger.exception(f"Erro ao atualizar pasta: {str(e)}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao atualizar pasta: {str(e)}"
+            status_code=500, detail=f"Erro ao atualizar pasta: {str(e)}"
         )
 
 
 @app.delete("/folders/{folder_id}")
 async def delete_folder(
-        folder_id: str,
-        force: bool = Query(False, description="Forçar exclusão mesmo com itens"),
-        token_data: dict = Depends(verify_token)
+    folder_id: str,
+    force: bool = Query(False, description="Forçar exclusão mesmo com itens"),
+    token_data: dict = Depends(verify_token),
 ):
     """Exclui uma pasta"""
     try:
@@ -1619,22 +1574,21 @@ async def delete_folder(
 
             if not folder:
                 raise HTTPException(
-                    status_code=404,
-                    detail=f"Pasta não encontrada: {folder_id}"
+                    status_code=404, detail=f"Pasta não encontrada: {folder_id}"
                 )
 
             # Verifica se tem subpastas
             if await repo.has_children(folder_id):
                 raise HTTPException(
                     status_code=400,
-                    detail="Não é possível excluir pasta com subpastas. Exclua as subpastas primeiro."
+                    detail="Não é possível excluir pasta com subpastas. Exclua as subpastas primeiro.",
                 )
 
             # Verifica se tem itens
             if not force and await repo.has_items(folder_id):
                 raise HTTPException(
                     status_code=400,
-                    detail="Não é possível excluir pasta com itens. Use force=true ou mova os itens."
+                    detail="Não é possível excluir pasta com itens. Use force=true ou mova os itens.",
                 )
 
             # Se force=true, move itens para a pasta pai (ou raiz)
@@ -1653,22 +1607,17 @@ async def delete_folder(
             await repo.delete(folder_id)
             logger.info(f"Pasta excluída: {folder_id}")
 
-            return {"message": f"Pasta excluída com sucesso", "folder_id": folder_id}
+            return {"message": "Pasta excluída com sucesso", "folder_id": folder_id}
 
     except HTTPException:
         raise
     except Exception as e:
         logger.exception(f"Erro ao excluir pasta: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao excluir pasta: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Erro ao excluir pasta: {str(e)}")
 
 
 @app.get("/folders/root/items")
-async def get_root_items(
-        token_data: dict = Depends(verify_token)
-):
+async def get_root_items(token_data: dict = Depends(verify_token)):
     """Lista itens sem pasta (raiz)"""
     try:
         async with get_db_context() as session:
@@ -1681,22 +1630,19 @@ async def get_root_items(
             return {
                 "audios": [a.to_dict() for a in audios],
                 "videos": [v.to_dict() for v in videos],
-                "item_count": len(audios) + len(videos)
+                "item_count": len(audios) + len(videos),
             }
 
     except Exception as e:
         logger.exception(f"Erro ao listar itens raiz: {str(e)}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao listar itens raiz: {str(e)}"
+            status_code=500, detail=f"Erro ao listar itens raiz: {str(e)}"
         )
 
 
 @app.put("/audio/{audio_id}/folder")
 async def move_audio_to_folder(
-        audio_id: str,
-        request: MoveItemRequest,
-        token_data: dict = Depends(verify_token)
+    audio_id: str, request: MoveItemRequest, token_data: dict = Depends(verify_token)
 ):
     """Move um áudio para uma pasta"""
     try:
@@ -1708,8 +1654,7 @@ async def move_audio_to_folder(
             audio = await audio_repo.get_by_id(audio_id)
             if not audio:
                 raise HTTPException(
-                    status_code=404,
-                    detail=f"Áudio não encontrado: {audio_id}"
+                    status_code=404, detail=f"Áudio não encontrado: {audio_id}"
                 )
 
             # Verifica se a pasta destino existe
@@ -1718,30 +1663,29 @@ async def move_audio_to_folder(
                 if not folder:
                     raise HTTPException(
                         status_code=404,
-                        detail=f"Pasta não encontrada: {request.folder_id}"
+                        detail=f"Pasta não encontrada: {request.folder_id}",
                     )
 
             # Move o áudio
             await audio_repo.update_folder(audio_id, request.folder_id)
             logger.info(f"Áudio {audio_id} movido para pasta {request.folder_id}")
 
-            return {"message": "Áudio movido com sucesso", "audio_id": audio_id, "folder_id": request.folder_id}
+            return {
+                "message": "Áudio movido com sucesso",
+                "audio_id": audio_id,
+                "folder_id": request.folder_id,
+            }
 
     except HTTPException:
         raise
     except Exception as e:
         logger.exception(f"Erro ao mover áudio: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao mover áudio: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Erro ao mover áudio: {str(e)}")
 
 
 @app.put("/video/{video_id}/folder")
 async def move_video_to_folder(
-        video_id: str,
-        request: MoveItemRequest,
-        token_data: dict = Depends(verify_token)
+    video_id: str, request: MoveItemRequest, token_data: dict = Depends(verify_token)
 ):
     """Move um vídeo para uma pasta"""
     try:
@@ -1753,8 +1697,7 @@ async def move_video_to_folder(
             video = await video_repo.get_by_id(video_id)
             if not video:
                 raise HTTPException(
-                    status_code=404,
-                    detail=f"Vídeo não encontrado: {video_id}"
+                    status_code=404, detail=f"Vídeo não encontrado: {video_id}"
                 )
 
             # Verifica se a pasta destino existe
@@ -1763,29 +1706,29 @@ async def move_video_to_folder(
                 if not folder:
                     raise HTTPException(
                         status_code=404,
-                        detail=f"Pasta não encontrada: {request.folder_id}"
+                        detail=f"Pasta não encontrada: {request.folder_id}",
                     )
 
             # Move o vídeo
             await video_repo.update_folder(video_id, request.folder_id)
             logger.info(f"Vídeo {video_id} movido para pasta {request.folder_id}")
 
-            return {"message": "Vídeo movido com sucesso", "video_id": video_id, "folder_id": request.folder_id}
+            return {
+                "message": "Vídeo movido com sucesso",
+                "video_id": video_id,
+                "folder_id": request.folder_id,
+            }
 
     except HTTPException:
         raise
     except Exception as e:
         logger.exception(f"Erro ao mover vídeo: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao mover vídeo: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Erro ao mover vídeo: {str(e)}")
 
 
 @app.put("/folders/bulk-move")
 async def bulk_move_items(
-        request: BulkMoveRequest,
-        token_data: dict = Depends(verify_token)
+    request: BulkMoveRequest, token_data: dict = Depends(verify_token)
 ):
     """Move múltiplos itens para uma pasta"""
     try:
@@ -1800,7 +1743,7 @@ async def bulk_move_items(
                 if not folder:
                     raise HTTPException(
                         status_code=404,
-                        detail=f"Pasta não encontrada: {request.folder_id}"
+                        detail=f"Pasta não encontrada: {request.folder_id}",
                     )
 
             moved_audios = 0
@@ -1820,13 +1763,15 @@ async def bulk_move_items(
                     await video_repo.update_folder(video_id, request.folder_id)
                     moved_videos += 1
 
-            logger.info(f"Movidos {moved_audios} áudios e {moved_videos} vídeos para pasta {request.folder_id}")
+            logger.info(
+                f"Movidos {moved_audios} áudios e {moved_videos} vídeos para pasta {request.folder_id}"
+            )
 
             return {
                 "message": "Itens movidos com sucesso",
                 "moved_audios": moved_audios,
                 "moved_videos": moved_videos,
-                "folder_id": request.folder_id
+                "folder_id": request.folder_id,
             }
 
     except HTTPException:
@@ -1834,8 +1779,7 @@ async def bulk_move_items(
     except Exception as e:
         logger.exception(f"Erro ao mover itens em lote: {str(e)}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao mover itens em lote: {str(e)}"
+            status_code=500, detail=f"Erro ao mover itens em lote: {str(e)}"
         )
 
 

@@ -1,7 +1,6 @@
 # app/db/database.py
 import json
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import AsyncGenerator
 
 from loguru import logger
@@ -16,9 +15,7 @@ DATABASE_URL = f"sqlite+aiosqlite:///{DATABASE_PATH}"
 
 # Engine assíncrono
 engine = create_async_engine(
-    DATABASE_URL,
-    echo=False,
-    connect_args={"check_same_thread": False}
+    DATABASE_URL, echo=False, connect_args={"check_same_thread": False}
 )
 
 # Session factory
@@ -27,7 +24,7 @@ AsyncSessionLocal = async_sessionmaker(
     class_=AsyncSession,
     expire_on_commit=False,
     autocommit=False,
-    autoflush=False
+    autoflush=False,
 )
 
 
@@ -75,11 +72,14 @@ async def migrate_json_to_sqlite() -> None:
     async with get_db_context() as session:
         # Verifica se já existem dados
         from sqlalchemy import select, func
+
         result = await session.execute(select(func.count()).select_from(Audio))
         count = result.scalar()
 
         if count > 0:
-            logger.info(f"Banco já contém {count} registros de áudio. Migração ignorada.")
+            logger.info(
+                f"Banco já contém {count} registros de áudio. Migração ignorada."
+            )
             return
 
         # Carrega dados do JSON
@@ -88,7 +88,7 @@ async def migrate_json_to_sqlite() -> None:
             return
 
         try:
-            with open(AUDIO_CONFIG_PATH, 'r', encoding='utf-8') as f:
+            with open(AUDIO_CONFIG_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
             audios = data.get("audios", [])
@@ -118,22 +118,29 @@ async def migrate_json_to_sqlite() -> None:
 
                 # Parse das datas
                 from datetime import datetime
+
                 if audio_data.get("created_date"):
                     try:
-                        audio.created_date = datetime.fromisoformat(audio_data["created_date"])
-                    except:
+                        audio.created_date = datetime.fromisoformat(
+                            audio_data["created_date"]
+                        )
+                    except (ValueError, TypeError):
                         audio.created_date = datetime.now()
 
                 if audio_data.get("modified_date"):
                     try:
-                        audio.modified_date = datetime.fromisoformat(audio_data["modified_date"])
-                    except:
+                        audio.modified_date = datetime.fromisoformat(
+                            audio_data["modified_date"]
+                        )
+                    except (ValueError, TypeError):
                         audio.modified_date = datetime.now()
 
                 session.add(audio)
 
             await session.commit()
-            logger.success(f"Migração concluída: {len(audios)} áudios migrados do JSON para SQLite")
+            logger.success(
+                f"Migração concluída: {len(audios)} áudios migrados do JSON para SQLite"
+            )
 
         except Exception as e:
             logger.error(f"Erro durante migração JSON -> SQLite: {str(e)}")

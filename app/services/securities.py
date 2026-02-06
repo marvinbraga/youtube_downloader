@@ -16,10 +16,7 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 AUTHORIZED_CLIENTS = {
-    "your_client_id": {
-        "secret": "your_client_secret",
-        "name": "Your Application"
-    }
+    "your_client_id": {"secret": "your_client_secret", "name": "Your Application"}
 }
 
 
@@ -36,7 +33,7 @@ def create_access_token(data: dict, expires_delta: timedelta = None) -> str:
 
     logger.debug("encoded_jwt: {}".format(encoded_jwt))
     if isinstance(encoded_jwt, bytes):
-        return encoded_jwt.decode('utf-8')
+        return encoded_jwt.decode("utf-8")
     return encoded_jwt
 
 
@@ -48,24 +45,15 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) 
         client_id: str = payload.get("sub")
 
         if client_id not in AUTHORIZED_CLIENTS:
-            raise HTTPException(
-                status_code=401,
-                detail="Cliente não autorizado"
-            )
+            raise HTTPException(status_code=401, detail="Cliente não autorizado")
 
         return payload
     except PyJWT.ExpiredSignatureError:
         logger.error("Token expirado.")
-        raise HTTPException(
-            status_code=401,
-            detail="Token expirado"
-        )
+        raise HTTPException(status_code=401, detail="Token expirado")
     except PyJWT.PyJWTError:
         logger.error("Token invalido.")
-        raise HTTPException(
-            status_code=401,
-            detail="Token inválido"
-        )
+        raise HTTPException(status_code=401, detail="Token inválido")
 
 
 def verify_token_sync(token: str) -> dict:
@@ -77,21 +65,12 @@ def verify_token_sync(token: str) -> dict:
         client_id: str = payload.get("sub")
 
         if client_id not in AUTHORIZED_CLIENTS:
-            raise HTTPException(
-                status_code=401,
-                detail="Cliente não autorizado"
-            )
+            raise HTTPException(status_code=401, detail="Cliente não autorizado")
 
         return payload
     except PyJWT.ExpiredSignatureError:
         logger.error("Token expirado.")
-        raise HTTPException(
-            status_code=401,
-            detail="Token expirado"
-        )
+        raise HTTPException(status_code=401, detail="Token expirado")
     except PyJWT.PyJWTError:
         logger.error("Token invalido.")
-        raise HTTPException(
-            status_code=401,
-            detail="Token inválido"
-        )
+        raise HTTPException(status_code=401, detail="Token inválido")

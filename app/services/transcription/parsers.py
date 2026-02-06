@@ -2,7 +2,7 @@ import os
 import io
 import time
 from pathlib import Path
-from typing import Iterator, Optional, List, Union, Literal
+from typing import Iterator, Optional
 from enum import Enum
 
 from loguru import logger
@@ -33,15 +33,13 @@ class GroqWhisperParser(BaseBlobParser):
             from groq import Groq
         except ImportError:
             raise ImportError(
-                "groq package not found, please install it with "
-                "`pip install groq`"
+                "groq package not found, please install it with `pip install groq`"
             )
         try:
             from pydub import AudioSegment
         except ImportError:
             raise ImportError(
-                "pydub package not found, please install it with "
-                "`pip install pydub`"
+                "pydub package not found, please install it with `pip install pydub`"
             )
 
         if not self.api_key:
@@ -60,7 +58,7 @@ class GroqWhisperParser(BaseBlobParser):
         # Split the audio into chunk_duration_ms chunks
         for split_number, i in enumerate(range(0, len(audio), chunk_duration_ms)):
             # Audio chunk
-            chunk = audio[i: i + chunk_duration_ms]
+            chunk = audio[i : i + chunk_duration_ms]
             file_obj = io.BytesIO(chunk.export(format="mp3").read())
             if blob.source is not None:
                 file_obj.name = f"{Path(blob.source).stem}_part_{split_number}.mp3"
@@ -94,7 +92,7 @@ class GroqWhisperParser(BaseBlobParser):
 
 class TranscriptionFactory:
     """Factory para criar parsers de transcrição baseados no provedor escolhido."""
-    
+
     @staticmethod
     def get_parser_groq(**kwargs) -> GroqWhisperParser:
         api_key = kwargs.pop("api_key", os.environ.get("GROQ_API_KEY"))
@@ -109,6 +107,7 @@ class TranscriptionFactory:
     def get_parser_openai(**kwargs):
         try:
             from langchain_community.document_loaders.parsers import OpenAIWhisperParser
+
             api_key = kwargs.pop("api_key", os.environ.get("OPENAI_API_KEY"))
             language = kwargs.pop("lang", "pt")
             logger.debug(f"Criando parser OpenAI com idioma: {language}")
@@ -125,10 +124,15 @@ class TranscriptionFactory:
     @staticmethod
     def get_parser_fast(**kwargs):
         try:
-            from langchain_community.document_loaders.parsers.audio import FasterWhisperParser
+            from langchain_community.document_loaders.parsers.audio import (
+                FasterWhisperParser,
+            )
+
             model_size = kwargs.pop("model_size", "base")
             device = kwargs.pop("device", "cpu")
-            logger.debug(f"Criando parser Faster Whisper com tamanho do modelo: {model_size}, dispositivo: {device}")
+            logger.debug(
+                f"Criando parser Faster Whisper com tamanho do modelo: {model_size}, dispositivo: {device}"
+            )
             return FasterWhisperParser(
                 model_size=model_size,
                 device=device,
@@ -142,7 +146,10 @@ class TranscriptionFactory:
     @staticmethod
     def get_parser_local(**kwargs):
         try:
-            from langchain_community.document_loaders.parsers.audio import OpenAIWhisperParserLocal
+            from langchain_community.document_loaders.parsers.audio import (
+                OpenAIWhisperParserLocal,
+            )
+
             language = kwargs.pop("lang", "pt")
             logger.debug(f"Criando parser Local Whisper com idioma: {language}")
             return OpenAIWhisperParserLocal(

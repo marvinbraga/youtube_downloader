@@ -1,6 +1,7 @@
 """
 Módulo de locks compartilhados para sincronização de acesso a recursos críticos
 """
+
 import threading
 
 # Lock global para proteção do arquivo audios.json

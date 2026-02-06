@@ -2,7 +2,7 @@
 from enum import Enum
 from typing import Optional, List
 
-from pydantic import BaseModel, HttpUrl, Field
+from pydantic import BaseModel, HttpUrl
 
 
 class AudioSource(str, Enum):

@@ -11,7 +11,13 @@ from fastapi import HTTPException
 from loguru import logger
 from yt_dlp import YoutubeDL
 
-from app.services.configs import AUDIO_DIR, VIDEO_DIR, audio_mapping, video_mapping
+from app.services.configs import (
+    AUDIO_DIR,
+    VIDEO_DIR,
+    audio_mapping,
+    video_mapping,
+    get_yt_dlp_cookies_opts,
+)
 from app.db.database import get_db_context
 from app.db.models import Audio, Video
 from app.db.repositories import AudioRepository, VideoRepository
@@ -33,7 +39,8 @@ class VideoStreamManager:
     async def get_direct_url(self, url: str) -> str:
         """Obtém a URL direta do stream do YouTube"""
         try:
-            with YoutubeDL(self.ydl_opts) as ydl:
+            ydl_opts = {**self.ydl_opts, **get_yt_dlp_cookies_opts()}
+            with YoutubeDL(ydl_opts) as ydl:
                 info = await asyncio.get_event_loop().run_in_executor(
                     None, lambda: ydl.extract_info(url, download=False)
                 )
@@ -92,6 +99,7 @@ class AudioDownloadManager:
                     "skip_download": True,
                     "extract_flat": True,
                     "js_runtimes": YDL_JS_RUNTIMES,
+                    **get_yt_dlp_cookies_opts(),
                 }
 
                 with YoutubeDL(ydl_info_opts) as ydl:
@@ -157,6 +165,7 @@ class AudioDownloadManager:
                 "no_warnings": True,
                 "skip_download": True,
                 "js_runtimes": YDL_JS_RUNTIMES,
+                **get_yt_dlp_cookies_opts(),
             }
 
             title = f"Video_{youtube_id}"
@@ -248,7 +257,8 @@ class AudioDownloadManager:
                 "fragment_retries": 10,
                 "nocheckcertificate": True,
                 "ignoreerrors": False,
-                "verbose": True,
+                "verbose": os.environ.get("YT_DLP_VERBOSE", "").lower()
+                in ("1", "true", "yes"),
                 "noplaylist": True,
                 "js_runtimes": YDL_JS_RUNTIMES,
                 "http_headers": {
@@ -257,6 +267,7 @@ class AudioDownloadManager:
                     "Accept-Language": "en-US,en;q=0.5",
                     "DNT": "1",
                 },
+                **get_yt_dlp_cookies_opts(),
             }
 
             try:
@@ -504,6 +515,7 @@ class VideoDownloadManager:
                     "skip_download": True,
                     "extract_flat": True,
                     "js_runtimes": YDL_JS_RUNTIMES,
+                    **get_yt_dlp_cookies_opts(),
                 }
 
                 with YoutubeDL(ydl_info_opts) as ydl:
@@ -571,6 +583,7 @@ class VideoDownloadManager:
                 "no_warnings": True,
                 "skip_download": True,
                 "js_runtimes": YDL_JS_RUNTIMES,
+                **get_yt_dlp_cookies_opts(),
             }
 
             title = f"Video_{youtube_id}"
@@ -663,7 +676,8 @@ class VideoDownloadManager:
                 "fragment_retries": 10,
                 "nocheckcertificate": True,
                 "ignoreerrors": False,
-                "verbose": True,
+                "verbose": os.environ.get("YT_DLP_VERBOSE", "").lower()
+                in ("1", "true", "yes"),
                 "noplaylist": True,
                 "js_runtimes": YDL_JS_RUNTIMES,
                 "http_headers": {
@@ -672,6 +686,7 @@ class VideoDownloadManager:
                     "Accept-Language": "en-US,en;q=0.5",
                     "DNT": "1",
                 },
+                **get_yt_dlp_cookies_opts(),
             }
 
             try:

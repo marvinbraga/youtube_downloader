@@ -80,6 +80,16 @@ async def lifespan(app: FastAPI):
     download_queue.on_download_failed = on_download_failed_callback
     download_queue.on_download_cancelled = on_download_cancelled_callback
 
+    # Validate cookie configuration at startup
+    try:
+        from app.services.configs import get_yt_dlp_cookies_opts
+
+        get_yt_dlp_cookies_opts()
+        logger.info("Cookie configuration validated successfully.")
+    except ValueError as exc:
+        logger.error(f"Invalid cookie configuration, cannot start: {exc}")
+        raise RuntimeError(f"Invalid cookie configuration: {exc}") from exc
+
     # Iniciar processamento da fila
     download_queue.start_processing()
 

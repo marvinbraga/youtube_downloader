@@ -309,6 +309,15 @@ class DownloadQueue:
             logger.info(f"Download cancelado: {task.audio_id}")
             raise
 
+        except ValueError as config_err:
+            # Configuration errors are permanent — do not retry
+            logger.error(f"Configuration error (will not retry): {config_err}")
+            task.status = DownloadStatus.FAILED
+            task.error_message = str(config_err)
+            task.completed_at = datetime.now()
+            if self.on_download_failed:
+                await self.on_download_failed(task, str(config_err))
+
         except Exception as e:
             error_msg = str(e)
             task.error_message = error_msg

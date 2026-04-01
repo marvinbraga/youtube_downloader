@@ -10,8 +10,16 @@ from loguru import logger
 from app.services.configs import security
 
 load_dotenv(find_dotenv())
-# Altere para uma chave segura em produção
-SECRET_KEY = os.environ.get("SECRET_KEY", "seu_secret_key_muito_secreto")
+# Altere para uma chave segura em produção (mínimo 32 bytes para HS256)
+SECRET_KEY = os.environ.get(
+    "SECRET_KEY",
+    "seu_secret_key_muito_secreto_configure_no_env_para_producao",
+)
+if len(SECRET_KEY.encode()) < 32:
+    logger.warning(
+        f"SECRET_KEY tem apenas {len(SECRET_KEY.encode())} bytes. "
+        "Mínimo recomendado: 32 bytes. Gere com: openssl rand -hex 32"
+    )
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 

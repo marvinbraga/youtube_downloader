@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+import shutil
 import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -22,9 +23,15 @@ from app.db.database import get_db_context
 from app.db.models import Audio, Video
 from app.db.repositories import AudioRepository, VideoRepository
 
-# Caminho do Node.js para yt-dlp (versão 20+ necessária)
-NODE_PATH = os.path.expanduser("~/.nvm/versions/node/v20.19.6/bin/node")
-YDL_JS_RUNTIMES = {"node": {"path": NODE_PATH}} if os.path.exists(NODE_PATH) else {}
+# Detecta o Node.js automaticamente; fallback para caminho nvm local
+_node_path = shutil.which("node") or os.path.expanduser(
+    "~/.nvm/versions/node/v20.19.6/bin/node"
+)
+YDL_JS_RUNTIMES = (
+    {"node": {"path": _node_path}} if _node_path and os.path.exists(_node_path) else {}
+)
+if not YDL_JS_RUNTIMES:
+    logger.warning("Node.js não encontrado. Downloads com age-gate podem falhar.")
 
 
 class VideoStreamManager:
@@ -156,7 +163,22 @@ class AudioDownloadManager:
             # Verifica se já existe
             existing = await self.get_audio_by_youtube_id(youtube_id)
             if existing:
-                logger.info(f"Áudio já existe com ID: {youtube_id}")
+                existing_status = existing.get("download_status", "")
+                if existing_status not in ("error", ""):
+                    logger.info(f"Áudio já existe com ID: {youtube_id}")
+                    return youtube_id
+                # Reprocessar áudios com erro: resetar status para 'downloading'
+                logger.info(
+                    f"Áudio {youtube_id} tinha status '{existing_status}', resetando para nova tentativa"
+                )
+                async with get_db_context() as session:
+                    repo = AudioRepository(session)
+                    await repo.update(
+                        youtube_id,
+                        download_status="downloading",
+                        download_progress=0,
+                        download_error="",
+                    )
                 return youtube_id
 
             # Obter informações básicas sem baixar
@@ -574,7 +596,22 @@ class VideoDownloadManager:
             # Verifica se já existe
             existing = await self.get_video_by_youtube_id(youtube_id)
             if existing:
-                logger.info(f"Vídeo já existe com ID: {youtube_id}")
+                existing_status = existing.get("download_status", "")
+                if existing_status not in ("error", ""):
+                    logger.info(f"Vídeo já existe com ID: {youtube_id}")
+                    return youtube_id
+                # Reprocessar vídeos com erro: resetar status para 'downloading'
+                logger.info(
+                    f"Vídeo {youtube_id} tinha status '{existing_status}', resetando para nova tentativa"
+                )
+                async with get_db_context() as session:
+                    repo = VideoRepository(session)
+                    await repo.update(
+                        youtube_id,
+                        download_status="downloading",
+                        download_progress=0,
+                        download_error="",
+                    )
                 return youtube_id
 
             # Obter informações básicas sem baixar

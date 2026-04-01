@@ -94,7 +94,8 @@ class AudioDownloadManager:
             youtube_id = None
 
             match = re.search(
-                r"(?:youtube\.com/watch\?v=|youtu\.be/)([a-zA-Z0-9_-]+)", url
+                r"(?:youtube\.com/(?:watch\?v=|live/|shorts/)|youtu\.be/)([a-zA-Z0-9_-]{11})",
+                url,
             )
             if match:
                 youtube_id = match.group(1)
@@ -525,7 +526,8 @@ class VideoDownloadManager:
             youtube_id = None
 
             match = re.search(
-                r"(?:youtube\.com/watch\?v=|youtu\.be/)([a-zA-Z0-9_-]+)", url
+                r"(?:youtube\.com/(?:watch\?v=|live/|shorts/)|youtu\.be/)([a-zA-Z0-9_-]{11})",
+                url,
             )
             if match:
                 youtube_id = match.group(1)

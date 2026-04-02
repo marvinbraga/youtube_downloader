@@ -39,7 +39,7 @@ if not YDL_JS_RUNTIMES:
     logger.warning("Nenhum runtime JS encontrado (deno/node). Downloads podem falhar.")
 
 # Script de challenge solver baixado do GitHub (equivalente a --remote-components ejs:github)
-YDL_REMOTE_COMPONENTS = "ejs:github"
+YDL_REMOTE_COMPONENTS = ["ejs:github"]
 
 
 class VideoStreamManager:

@@ -23,15 +23,23 @@ from app.db.database import get_db_context
 from app.db.models import Audio, Video
 from app.db.repositories import AudioRepository, VideoRepository
 
-# Detecta o Node.js automaticamente; fallback para caminho nvm local
+# Detecta deno e node para resolver JS challenges do YouTube
+_deno_path = shutil.which("deno") or os.path.expanduser("~/.deno/bin/deno")
 _node_path = shutil.which("node") or os.path.expanduser(
     "~/.nvm/versions/node/v20.19.6/bin/node"
 )
-YDL_JS_RUNTIMES = (
-    {"node": {"path": _node_path}} if _node_path and os.path.exists(_node_path) else {}
-)
+
+YDL_JS_RUNTIMES = {}
+if _deno_path and os.path.exists(_deno_path):
+    YDL_JS_RUNTIMES["deno"] = {"path": _deno_path}
+if _node_path and os.path.exists(_node_path):
+    YDL_JS_RUNTIMES["node"] = {"path": _node_path}
+
 if not YDL_JS_RUNTIMES:
-    logger.warning("Node.js não encontrado. Downloads com age-gate podem falhar.")
+    logger.warning("Nenhum runtime JS encontrado (deno/node). Downloads podem falhar.")
+
+# Script de challenge solver baixado do GitHub (equivalente a --remote-components ejs:github)
+YDL_REMOTE_COMPONENTS = "ejs:github"
 
 
 class VideoStreamManager:
@@ -107,6 +115,7 @@ class AudioDownloadManager:
                     "skip_download": True,
                     "extract_flat": True,
                     "js_runtimes": YDL_JS_RUNTIMES,
+                    "remote_components": YDL_REMOTE_COMPONENTS,
                     **get_yt_dlp_cookies_opts(),
                 }
 
@@ -188,6 +197,7 @@ class AudioDownloadManager:
                 "no_warnings": True,
                 "skip_download": True,
                 "js_runtimes": YDL_JS_RUNTIMES,
+                "remote_components": YDL_REMOTE_COMPONENTS,
                 **get_yt_dlp_cookies_opts(),
             }
 
@@ -284,6 +294,7 @@ class AudioDownloadManager:
                 in ("1", "true", "yes"),
                 "noplaylist": True,
                 "js_runtimes": YDL_JS_RUNTIMES,
+                "remote_components": YDL_REMOTE_COMPONENTS,
                 "http_headers": {
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -539,6 +550,7 @@ class VideoDownloadManager:
                     "skip_download": True,
                     "extract_flat": True,
                     "js_runtimes": YDL_JS_RUNTIMES,
+                    "remote_components": YDL_REMOTE_COMPONENTS,
                     **get_yt_dlp_cookies_opts(),
                 }
 
@@ -622,6 +634,7 @@ class VideoDownloadManager:
                 "no_warnings": True,
                 "skip_download": True,
                 "js_runtimes": YDL_JS_RUNTIMES,
+                "remote_components": YDL_REMOTE_COMPONENTS,
                 **get_yt_dlp_cookies_opts(),
             }
 
@@ -719,6 +732,7 @@ class VideoDownloadManager:
                 in ("1", "true", "yes"),
                 "noplaylist": True,
                 "js_runtimes": YDL_JS_RUNTIMES,
+                "remote_components": YDL_REMOTE_COMPONENTS,
                 "http_headers": {
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",

@@ -338,6 +338,7 @@ class AudioDownloadManager:
                 )
 
             # Atualizar no banco
+            actual_title = info.get("title", "").strip()
             async with get_db_context() as session:
                 repo = AudioRepository(session)
                 await repo.complete_download(
@@ -346,6 +347,13 @@ class AudioDownloadManager:
                     directory=str(download_dir.relative_to(self.download_dir.parent)),
                     filesize=filename.stat().st_size if filename.exists() else 0,
                 )
+                # Corrige o título se ficou como fallback (Video_{id})
+                if actual_title and actual_title != f"Video_{audio_id}":
+                    await repo.update(
+                        audio_id,
+                        title=actual_title,
+                        name=f"{actual_title}.m4a",
+                    )
 
             # Atualizar mapeamento em memória
             self._add_audio_mappings(filename, info, audio_id)
@@ -786,6 +794,7 @@ class VideoDownloadManager:
             # Obtém a resolução real do vídeo baixado
             actual_resolution = info.get("resolution", resolution)
             duration = info.get("duration")
+            actual_title = info.get("title", "").strip()
 
             # Atualizar no banco
             async with get_db_context() as session:
@@ -798,6 +807,13 @@ class VideoDownloadManager:
                     duration=duration,
                     resolution=actual_resolution,
                 )
+                # Corrige o título se ficou como fallback (Video_{id})
+                if actual_title and actual_title != f"Video_{video_id}":
+                    await repo.update(
+                        video_id,
+                        title=actual_title,
+                        name=f"{actual_title}.mp4",
+                    )
 
             # Atualizar mapeamento em memória
             self._add_video_mappings(filename, info, video_id)

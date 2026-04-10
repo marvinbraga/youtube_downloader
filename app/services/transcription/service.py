@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import List, Optional, Dict, Iterable
 
 from loguru import logger
-from langchain_community.document_loaders.blob_loaders import FileSystemBlobLoader
 from langchain_community.document_loaders.blob_loaders.schema import Blob, BlobLoader
 from langchain_community.document_loaders.generic import GenericLoader
 
@@ -31,27 +30,11 @@ class AudioLoader(BlobLoader):
             logger.error(f"Arquivo não encontrado: {self.file_path}")
             raise FileNotFoundError(f"Arquivo não encontrado: {self.file_path}")
 
-        directory = file.parent
-        filename = file.name
-
-        logger.debug(f"Buscando arquivo em: {directory} com padrão: {filename}")
-
-        # Simplificando a busca para exatamente o arquivo especificado
-        loader = FileSystemBlobLoader(
-            directory.as_posix(),
-            glob=filename,
-        )
-
-        blobs = list(loader.yield_blobs())
-        logger.debug(f"Encontrados {len(blobs)} blobs")
-
-        if not blobs:
-            logger.error(
-                f"Nenhum blob encontrado para o padrão: {filename} em {directory}"
-            )
-            raise FileNotFoundError(f"Nenhum blob encontrado para o arquivo: {file}")
-
-        return blobs
+        # Cria o Blob diretamente para evitar problemas com caracteres especiais
+        # no nome do arquivo (ex: colchetes) que são interpretados como glob patterns
+        blob = Blob.from_path(file.as_posix())
+        logger.debug(f"Blob criado diretamente para: {file}")
+        return [blob]
 
 
 class TranscriptionService:

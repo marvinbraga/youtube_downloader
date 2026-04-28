@@ -135,3 +135,80 @@ async def test_title_fallback_uses_video_id(mock_ydl_cls):
     )
 
     assert result["entries"][0]["title"] == "Video_abc1234567a"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://youtube.com/playlist?list=PL1",
+        "https://youtu.be/abc1234567a",
+        "https://music.youtube.com/playlist?list=PL1",
+    ],
+)
+@patch("app.services.managers.YoutubeDL")
+async def test_all_allowed_hosts_are_accepted(mock_ydl_cls, url):
+    """All four YouTube hosts in the allowlist accept without raising."""
+    mock_ydl = MagicMock()
+    mock_ydl_cls.return_value.__enter__.return_value = mock_ydl
+    mock_ydl.extract_info.return_value = {
+        "title": "PL",
+        "webpage_url": url,
+        "entries": [{"id": "abc1234567a", "title": "T"}],
+    }
+    mgr = _make_manager()
+    result = await mgr.extract_playlist_info(url)
+    assert len(result["entries"]) == 1
+
+
+@pytest.mark.anyio
+@patch("app.services.managers.YoutubeDL")
+async def test_raises_value_error_when_all_entries_filtered(mock_ydl_cls):
+    """extract_playlist_info raises ValueError when all entries lack valid IDs."""
+    mock_ydl = MagicMock()
+    mock_ydl_cls.return_value.__enter__.return_value = mock_ydl
+    mock_ydl.extract_info.return_value = {
+        "title": "PL",
+        "webpage_url": "https://www.youtube.com/playlist?list=PL1",
+        "entries": [
+            None,
+            {"id": None, "title": "[Private video]"},
+            {"id": "", "title": "[Deleted]"},
+        ],
+    }
+    mgr = _make_manager()
+    with pytest.raises(ValueError, match="Nenhuma entrada com ID válido"):
+        await mgr.extract_playlist_info("https://www.youtube.com/playlist?list=PL1")
+
+
+@pytest.mark.anyio
+@patch("app.services.managers.YoutubeDL")
+async def test_playlist_title_falls_back_to_playlist_string(mock_ydl_cls):
+    """extract_playlist_info falls back to 'Playlist' when title fields absent."""
+    mock_ydl = MagicMock()
+    mock_ydl_cls.return_value.__enter__.return_value = mock_ydl
+    mock_ydl.extract_info.return_value = {
+        "entries": [{"id": "abc1234567a", "title": "T"}],
+    }
+    mgr = _make_manager()
+    result = await mgr.extract_playlist_info(
+        "https://www.youtube.com/playlist?list=PL1"
+    )
+    assert result["title"] == "Playlist"
+
+
+@pytest.mark.anyio
+@patch("app.services.managers.YoutubeDL")
+async def test_webpage_url_falls_back_to_input_url(mock_ydl_cls):
+    """extract_playlist_info falls back to input URL when webpage_url absent."""
+    mock_ydl = MagicMock()
+    mock_ydl_cls.return_value.__enter__.return_value = mock_ydl
+    mock_ydl.extract_info.return_value = {
+        "title": "PL",
+        "entries": [{"id": "abc1234567a", "title": "T"}],
+    }
+    mgr = _make_manager()
+    result = await mgr.extract_playlist_info(
+        "https://www.youtube.com/playlist?list=PL1"
+    )
+    assert "youtube.com" in result["webpage_url"]

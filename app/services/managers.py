@@ -519,6 +519,10 @@ class AudioDownloadManager:
         """Migração não necessária com SQLite - mantida para compatibilidade"""
         logger.info("Migração de has_transcription não necessária com SQLite")
 
+    # Design decision: playlist extraction lives on AudioDownloadManager because playlist
+    # metadata feeds the audio download queue. VideoDownloadManager receives an identical
+    # copy (Task 3) since both share the same yt-dlp extraction pattern. Future refactor
+    # could extract a shared _extract_playlist_info() module-level helper.
     async def extract_playlist_info(self, url: str) -> dict:
         """Extrai informações de uma playlist do YouTube sem baixar.
 
@@ -602,6 +606,12 @@ class AudioDownloadManager:
             )
             watch_url = f"https://www.youtube.com/watch?v={video_id}"
             entries.append({"id": video_id, "title": title, "url": watch_url})
+
+        if not entries:
+            raise ValueError(
+                "Nenhuma entrada com ID válido encontrada na playlist "
+                "(todos os vídeos podem ser privados ou excluídos)."
+            )
 
         logger.info(
             "Playlist '%s': %d entradas encontradas.",

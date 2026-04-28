@@ -529,9 +529,31 @@ class AudioDownloadManager:
                 "entries": [{"id": str, "title": str, "url": str}, ...]
             }
 
-        Raises ValueError if the URL yields no entries.
+        Raises ValueError if:
+        - URL host is not in the YouTube allowlist
+        - yt-dlp returns no information
+        - URL yields no entries (e.g. single video URL)
+
         Runs yt-dlp in executor to avoid blocking the event loop.
         """
+        import urllib.parse
+
+        _ALLOWED_HOSTS = {
+            "youtube.com",
+            "www.youtube.com",
+            "youtu.be",
+            "music.youtube.com",
+        }
+
+        parsed = urllib.parse.urlparse(str(url))
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(f"Esquema de URL não suportado: {parsed.scheme!r}")
+        host = parsed.hostname or ""
+        if host not in _ALLOWED_HOSTS:
+            raise ValueError(
+                "Host da URL não está na lista permitida para extração de playlist."
+            )
+
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
@@ -546,23 +568,46 @@ class AudioDownloadManager:
             with YoutubeDL(ydl_opts) as ydl:
                 return ydl.extract_info(str(url), download=False)
 
-        loop = asyncio.get_event_loop()
-        info = await loop.run_in_executor(None, _extract)
+        logger.info(f"Extraindo informações de playlist: {url}")
+
+        try:
+            loop = asyncio.get_running_loop()
+            info = await loop.run_in_executor(None, _extract)
+        except Exception as exc:
+            logger.error(f"Erro ao extrair playlist: {exc}")
+            raise
+
+        if info is None:
+            raise ValueError("yt-dlp não retornou informações para a URL fornecida.")
 
         entries_raw = info.get("entries") or []
         if not entries_raw:
             raise ValueError(
-                f"URL does not appear to be a playlist or returned no entries: {url}"
+                "URL não parece ser uma playlist ou não retornou entradas."
             )
 
         entries = []
         for entry in entries_raw:
-            video_id = entry.get("id", "")
+            if entry is None:
+                continue
+            video_id = entry.get("id") or ""
+            if not video_id:
+                logger.warning(
+                    "Entrada de playlist sem ID ignorada: %s",
+                    entry.get("title", "desconhecido"),
+                )
+                continue
             title = (
                 entry.get("title") or entry.get("webpage_title") or f"Video_{video_id}"
             )
             watch_url = f"https://www.youtube.com/watch?v={video_id}"
             entries.append({"id": video_id, "title": title, "url": watch_url})
+
+        logger.info(
+            "Playlist '%s': %d entradas encontradas.",
+            info.get("title") or "sem título",
+            len(entries),
+        )
 
         return {
             "title": info.get("title") or info.get("webpage_title") or "Playlist",

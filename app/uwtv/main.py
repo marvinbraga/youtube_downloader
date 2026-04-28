@@ -560,6 +560,162 @@ async def download_video(
         )
 
 
+@app.post("/video/playlist", response_model=PlaylistDownloadResponse)
+async def download_video_playlist(
+    request: PlaylistDownloadRequest,
+    background_tasks: BackgroundTasks,
+    token_data: dict = Depends(verify_token),
+):
+    try:
+        logger.info(f"Video playlist download requested: {request.url}")
+
+        try:
+            playlist_info = await video_manager.extract_playlist_info(str(request.url))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+        entries = playlist_info["entries"]
+        playlist_title = playlist_info["title"]
+        playlist_url = playlist_info["webpage_url"]
+
+        logger.info(
+            f"Video playlist '{playlist_title}' found with {len(entries)} entries"
+        )
+
+        async with get_db_context() as session:
+            folder_repo = FolderRepository(session)
+            folder = Folder(
+                name=playlist_title[:255],
+                description=f"Playlist: {playlist_url}",
+                icon="playlist",
+            )
+            created_folder = await folder_repo.create(folder)
+            folder_id = created_folder.id
+
+        logger.info(f"Video playlist folder created: {folder_id} ('{playlist_title}')")
+
+        tasks: List[PlaylistTaskItem] = []
+        to_download: list = []
+        skipped_count = 0
+
+        for entry in entries:
+            video_id = entry["id"]
+            title = entry["title"]
+            watch_url = entry["url"]
+
+            existing = await video_manager.get_video_by_youtube_id(video_id)
+            already_exists = existing is not None and existing.get(
+                "download_status"
+            ) not in ("error", "")
+
+            if already_exists and request.skip_existing:
+                async with get_db_context() as session:
+                    repo = VideoRepository(session)
+                    await repo.update_folder(existing["id"], folder_id)
+
+                tasks.append(
+                    PlaylistTaskItem(
+                        item_id=existing["id"],
+                        item_type="video",
+                        task_id=None,
+                        title=title,
+                        url=watch_url,
+                        skipped=True,
+                    )
+                )
+                skipped_count += 1
+                logger.debug(f"Skipped existing video: {video_id}")
+                continue
+
+            try:
+                registered_id = await video_manager.register_video_for_download(
+                    watch_url, resolution=request.resolution
+                )
+            except Exception as reg_err:
+                logger.error(
+                    "Failed to register video %s: %s", video_id, str(reg_err)[:200]
+                )
+                tasks.append(
+                    PlaylistTaskItem(
+                        item_id=video_id,
+                        item_type="video",
+                        task_id=None,
+                        title=title,
+                        url=watch_url,
+                        skipped=False,
+                    )
+                )
+                continue
+
+            async with get_db_context() as session:
+                repo = VideoRepository(session)
+                await repo.update_folder(registered_id, folder_id)
+
+            tasks.append(
+                PlaylistTaskItem(
+                    item_id=registered_id,
+                    item_type="video",
+                    task_id=None,
+                    title=title,
+                    url=watch_url,
+                    skipped=False,
+                )
+            )
+            to_download.append(
+                {
+                    "video_id": registered_id,
+                    "url": watch_url,
+                    "resolution": request.resolution,
+                }
+            )
+
+        queued_count = len(to_download)
+
+        async def _download_playlist_serially(items: list):
+            for item in items:
+                try:
+                    await video_manager.download_video_with_status_async(
+                        item["video_id"],
+                        item["url"],
+                        resolution=item["resolution"],
+                        sse_manager=sse_manager,
+                    )
+                    logger.success(f"Playlist video done: {item['video_id']}")
+                except Exception as exc:
+                    logger.error(
+                        "Playlist video failed: %s — %s",
+                        item["video_id"],
+                        str(exc)[:200],
+                    )
+
+        if to_download:
+            background_tasks.add_task(_download_playlist_serially, to_download)
+
+        logger.info(
+            f"Video playlist '{playlist_title}': {queued_count} scheduled, "
+            f"{skipped_count} skipped, folder={folder_id}"
+        )
+
+        return PlaylistDownloadResponse(
+            playlist_title=playlist_title,
+            playlist_url=playlist_url,
+            folder_id=folder_id,
+            total_items=len(entries),
+            queued_items=queued_count,
+            skipped_items=skipped_count,
+            tasks=tasks,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception(f"Error processing video playlist: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing video playlist: {exc}",
+        )
+
+
 @app.get("/video/download-status/{video_id}")
 async def get_video_download_status(
     video_id: str, token_data: dict = Depends(verify_token)

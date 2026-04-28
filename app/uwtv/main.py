@@ -25,6 +25,9 @@ from app.models.audio import (
     TranscriptionRequest,
     TranscriptionResponse,
     TranscriptionProvider,
+    PlaylistDownloadRequest,
+    PlaylistTaskItem,
+    PlaylistDownloadResponse,
 )
 from app.models.folder import (
     FolderCreate,
@@ -379,6 +382,134 @@ async def download_audio(
         logger.exception(f"Erro ao iniciar download de áudio: {str(e)}")
         raise HTTPException(
             status_code=500, detail=f"Erro ao iniciar download de áudio: {str(e)}"
+        )
+
+
+@app.post("/audio/playlist", response_model=PlaylistDownloadResponse)
+async def download_audio_playlist(
+    request: PlaylistDownloadRequest,
+    token_data: dict = Depends(verify_token),
+):
+    try:
+        logger.info(f"Audio playlist download requested: {request.url}")
+
+        try:
+            playlist_info = await audio_manager.extract_playlist_info(str(request.url))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+        entries = playlist_info["entries"]
+        playlist_title = playlist_info["title"]
+        playlist_url = playlist_info["webpage_url"]
+
+        logger.info(f"Playlist '{playlist_title}' found with {len(entries)} entries")
+
+        async with get_db_context() as session:
+            folder_repo = FolderRepository(session)
+            folder = Folder(
+                name=playlist_title[:255],
+                description=f"Playlist: {playlist_url}",
+                icon="playlist",
+            )
+            created_folder = await folder_repo.create(folder)
+            folder_id = created_folder.id
+
+        logger.info(f"Folder created: {folder_id} ('{playlist_title}')")
+
+        tasks: List[PlaylistTaskItem] = []
+        queued_count = 0
+        skipped_count = 0
+
+        for entry in entries:
+            video_id = entry["id"]
+            title = entry["title"]
+            watch_url = entry["url"]
+
+            existing = await audio_manager.get_audio_by_youtube_id(video_id)
+            already_exists = existing is not None and existing.get(
+                "download_status"
+            ) not in ("error", "")
+
+            if already_exists and request.skip_existing:
+                async with get_db_context() as session:
+                    repo = AudioRepository(session)
+                    await repo.update_folder(existing["id"], folder_id)
+
+                tasks.append(
+                    PlaylistTaskItem(
+                        item_id=existing["id"],
+                        item_type="audio",
+                        task_id=None,
+                        title=title,
+                        url=watch_url,
+                        skipped=True,
+                    )
+                )
+                skipped_count += 1
+                logger.debug(f"Skipped existing audio: {video_id}")
+                continue
+
+            try:
+                audio_id = await audio_manager.register_audio_for_download(watch_url)
+            except Exception as reg_err:
+                logger.error("Failed to register %s: %s", video_id, str(reg_err)[:200])
+                tasks.append(
+                    PlaylistTaskItem(
+                        item_id=video_id,
+                        item_type="audio",
+                        task_id=None,
+                        title=title,
+                        url=watch_url,
+                        skipped=False,
+                    )
+                )
+                continue
+
+            async with get_db_context() as session:
+                repo = AudioRepository(session)
+                await repo.update_folder(audio_id, folder_id)
+
+            task_id = await download_queue.add_download(
+                audio_id=audio_id,
+                url=watch_url,
+                high_quality=request.high_quality,
+                priority=0,
+            )
+
+            tasks.append(
+                PlaylistTaskItem(
+                    item_id=audio_id,
+                    item_type="audio",
+                    task_id=task_id,
+                    title=title,
+                    url=watch_url,
+                    skipped=False,
+                )
+            )
+            queued_count += 1
+
+        logger.info(
+            f"Playlist '{playlist_title}': {queued_count} queued, "
+            f"{skipped_count} skipped, folder={folder_id}"
+        )
+
+        return PlaylistDownloadResponse(
+            playlist_title=playlist_title,
+            playlist_url=playlist_url,
+            folder_id=folder_id,
+            total_items=len(entries),
+            queued_items=queued_count,
+            skipped_items=skipped_count,
+            tasks=tasks,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception(f"Error processing audio playlist: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing audio playlist: {exc}",
         )
 
 

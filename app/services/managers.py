@@ -41,6 +41,9 @@ if not YDL_JS_RUNTIMES:
 # Script de challenge solver baixado do GitHub (equivalente a --remote-components ejs:github)
 YDL_REMOTE_COMPONENTS = ["ejs:github"]
 
+# YouTube video IDs são sempre 11 caracteres alfanuméricos (inclui _ e -)
+_YOUTUBE_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{11}$")
+
 
 class VideoStreamManager:
     def __init__(self):
@@ -551,11 +554,14 @@ class AudioDownloadManager:
             "www.youtube.com",
             "youtu.be",
             "music.youtube.com",
+            "m.youtube.com",
         }
 
         parsed = urllib.parse.urlparse(str(url))
         if parsed.scheme not in ("http", "https"):
             raise ValueError(f"Esquema de URL não suportado: {parsed.scheme!r}")
+        if parsed.username or parsed.password:
+            raise ValueError("URL com credenciais embutidas não é permitida.")
         host = parsed.hostname or ""
         if host not in _ALLOWED_HOSTS:
             raise ValueError(
@@ -582,7 +588,9 @@ class AudioDownloadManager:
             loop = asyncio.get_running_loop()
             info = await loop.run_in_executor(None, _extract)
         except Exception as exc:
-            logger.error(f"Erro ao extrair playlist: {exc}")
+            logger.error(
+                "Erro ao extrair playlist '%s': %s", type(exc).__name__, str(exc)[:200]
+            )
             raise
 
         if info is None:
@@ -602,6 +610,12 @@ class AudioDownloadManager:
             if not video_id:
                 logger.warning(
                     "Entrada de playlist sem ID ignorada: %s",
+                    entry.get("title", "desconhecido"),
+                )
+                continue
+            if not _YOUTUBE_ID_RE.match(video_id):
+                logger.warning(
+                    "Entrada de playlist com ID inválido ignorada: %s",
                     entry.get("title", "desconhecido"),
                 )
                 continue
@@ -1103,11 +1117,14 @@ class VideoDownloadManager:
             "www.youtube.com",
             "youtu.be",
             "music.youtube.com",
+            "m.youtube.com",
         }
 
         parsed = urllib.parse.urlparse(str(url))
         if parsed.scheme not in ("http", "https"):
             raise ValueError(f"Esquema de URL não suportado: {parsed.scheme!r}")
+        if parsed.username or parsed.password:
+            raise ValueError("URL com credenciais embutidas não é permitida.")
         host = parsed.hostname or ""
         if host not in _ALLOWED_HOSTS:
             raise ValueError(
@@ -1134,7 +1151,9 @@ class VideoDownloadManager:
             loop = asyncio.get_running_loop()
             info = await loop.run_in_executor(None, _extract)
         except Exception as exc:
-            logger.error(f"Erro ao extrair playlist: {exc}")
+            logger.error(
+                "Erro ao extrair playlist '%s': %s", type(exc).__name__, str(exc)[:200]
+            )
             raise
 
         if info is None:
@@ -1154,6 +1173,12 @@ class VideoDownloadManager:
             if not video_id:
                 logger.warning(
                     "Entrada de playlist sem ID ignorada: %s",
+                    entry.get("title", "desconhecido"),
+                )
+                continue
+            if not _YOUTUBE_ID_RE.match(video_id):
+                logger.warning(
+                    "Entrada de playlist com ID inválido ignorada: %s",
                     entry.get("title", "desconhecido"),
                 )
                 continue

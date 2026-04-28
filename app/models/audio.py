@@ -96,10 +96,11 @@ class PlaylistDownloadResponse(BaseModel):
     """Resposta do endpoint de playlist"""
 
     playlist_title: str
-    playlist_url: str
+    playlist_url: HttpUrl
     folder_id: str
     total_items: int
     queued_items: int
     skipped_items: int
     failed_items: int = 0
+    # TODO(review): add Field(ge=0) to counter fields - business-logic-reviewer, 2026-04-28, Severity: Low
     tasks: List[PlaylistTaskItem]

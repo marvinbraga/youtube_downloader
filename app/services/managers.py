@@ -1070,3 +1070,113 @@ class VideoDownloadManager:
 
         logger.warning(f"Vídeo não encontrado: {video_id}")
         return False
+
+    # Design decision: playlist extraction lives on VideoDownloadManager (identical to
+    # AudioDownloadManager.extract_playlist_info) because both managers need to extract
+    # YouTube playlist metadata using the same yt-dlp flat-extract pattern. A shared
+    # module-level helper is a future refactor opportunity (see TODO in AudioDownloadManager).
+    async def extract_playlist_info(self, url: str) -> dict:
+        """Extrai informações de uma playlist do YouTube sem baixar.
+
+        Returns:
+            {
+                "title": str,
+                "webpage_url": str,
+                "entries": [{"id": str, "title": str, "url": str}, ...]
+            }
+
+        Raises ValueError if:
+        - URL host is not in the YouTube allowlist
+        - yt-dlp returns no information
+        - URL yields no entries (e.g. single video URL)
+
+        Runs yt-dlp in executor to avoid blocking the event loop.
+
+        Also propagates yt-dlp exceptions (e.g. DownloadError) after logging.
+        """
+        # TODO(review): move import urllib.parse to module top-level - code-reviewer, 2026-04-28, Severity: Low
+        import urllib.parse
+
+        # TODO(review): move _ALLOWED_HOSTS to module-level constant to avoid per-call allocation - code-reviewer, 2026-04-28, Severity: Low
+        _ALLOWED_HOSTS = {
+            "youtube.com",
+            "www.youtube.com",
+            "youtu.be",
+            "music.youtube.com",
+        }
+
+        parsed = urllib.parse.urlparse(str(url))
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(f"Esquema de URL não suportado: {parsed.scheme!r}")
+        host = parsed.hostname or ""
+        if host not in _ALLOWED_HOSTS:
+            raise ValueError(
+                "Host da URL não está na lista permitida para extração de playlist."
+            )
+
+        ydl_opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "extract_flat": True,
+            "js_runtimes": YDL_JS_RUNTIMES,
+            "remote_components": YDL_REMOTE_COMPONENTS,
+            **get_yt_dlp_cookies_opts(),
+        }
+
+        def _extract():
+            with YoutubeDL(ydl_opts) as ydl:
+                return ydl.extract_info(str(url), download=False)
+
+        logger.info(f"Extraindo informações de playlist: {url}")
+
+        try:
+            loop = asyncio.get_running_loop()
+            info = await loop.run_in_executor(None, _extract)
+        except Exception as exc:
+            logger.error(f"Erro ao extrair playlist: {exc}")
+            raise
+
+        if info is None:
+            raise ValueError("yt-dlp não retornou informações para a URL fornecida.")
+
+        entries_raw = info.get("entries") or []
+        if not entries_raw:
+            raise ValueError(
+                "URL não parece ser uma playlist ou não retornou entradas."
+            )
+
+        entries = []
+        for entry in entries_raw:
+            if entry is None:
+                continue
+            video_id = entry.get("id") or ""
+            if not video_id:
+                logger.warning(
+                    "Entrada de playlist sem ID ignorada: %s",
+                    entry.get("title", "desconhecido"),
+                )
+                continue
+            title = (
+                entry.get("title") or entry.get("webpage_title") or f"Video_{video_id}"
+            )
+            watch_url = f"https://www.youtube.com/watch?v={video_id}"
+            entries.append({"id": video_id, "title": title, "url": watch_url})
+
+        if not entries:
+            raise ValueError(
+                "Nenhuma entrada com ID válido encontrada na playlist "
+                "(todos os vídeos podem ser privados ou excluídos)."
+            )
+
+        logger.info(
+            "Playlist '%s': %d entradas encontradas.",
+            info.get("title") or "sem título",
+            len(entries),
+        )
+
+        return {
+            "title": info.get("title") or info.get("webpage_title") or "Playlist",
+            "webpage_url": info.get("webpage_url") or str(url),
+            "entries": entries,
+        }

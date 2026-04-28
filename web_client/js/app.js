@@ -266,7 +266,7 @@ $(document).ready(function() {
 
         audios.forEach(audio => {
             const isActive = audio.id === currentAudioId;
-            const statusBadge = getStatusBadge(audio.download_status);
+            const statusBadge = getStatusBadge(audio.download_status, audio.id);
 
             const item = $(`
                 <a href="#" class="yd-media-item ${isActive ? 'active' : ''}"
@@ -390,7 +390,7 @@ $(document).ready(function() {
 
         videos.forEach(video => {
             const isActive = video.id === currentVideoId;
-            const statusBadge = getStatusBadge(video.download_status);
+            const statusBadge = getStatusBadge(video.download_status, video.id);
 
             const item = $(`
                 <a href="#" class="yd-media-item ${isActive ? 'active' : ''}"
@@ -686,6 +686,14 @@ $(document).ready(function() {
             `);
 
             container.append(progressItem);
+        });
+
+        // Atualiza o anel nos itens da lista de áudio/vídeo in-place
+        activeDownloads.forEach((download, id) => {
+            const badge = $(`[data-badge-id="${id}"]`);
+            if (badge.length) {
+                badge.html(buildRingProgress(download.progress, download.status));
+            }
         });
     }
 
@@ -2062,7 +2070,13 @@ $(document).ready(function() {
     // ========================================
     // Helper Functions
     // ========================================
-    function getStatusBadge(status) {
+    function getStatusBadge(status, id) {
+        if (status === 'downloading' && id) {
+            const dl = activeDownloads.get(id);
+            const progress = dl ? dl.progress : 0;
+            const dlStatus = dl ? dl.status : 'downloading';
+            return `<span class="yd-status-badge" data-badge-id="${id}">${buildRingProgress(progress, dlStatus)}</span>`;
+        }
         const badges = {
             'ready': '<span class="yd-badge yd-badge--ready"><i class="bi bi-check-circle me-1"></i>Pronto</span>',
             'downloading': '<span class="yd-badge yd-badge--downloading"><i class="bi bi-arrow-down-circle me-1"></i>Baixando</span>',

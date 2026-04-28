@@ -419,6 +419,7 @@ async def download_audio_playlist(
         tasks: List[PlaylistTaskItem] = []
         queued_count = 0
         skipped_count = 0
+        failed_count = 0
 
         for entry in entries:
             video_id = entry["id"]
@@ -463,6 +464,7 @@ async def download_audio_playlist(
                         skipped=False,
                     )
                 )
+                failed_count += 1
                 continue
 
             async with get_db_context() as session:
@@ -500,6 +502,7 @@ async def download_audio_playlist(
             total_items=len(entries),
             queued_items=queued_count,
             skipped_items=skipped_count,
+            failed_items=failed_count,
             tasks=tasks,
         )
 
@@ -597,6 +600,7 @@ async def download_video_playlist(
         tasks: List[PlaylistTaskItem] = []
         to_download: list = []
         skipped_count = 0
+        failed_count = 0
 
         for entry in entries:
             video_id = entry["id"]
@@ -645,6 +649,7 @@ async def download_video_playlist(
                         skipped=False,
                     )
                 )
+                failed_count += 1
                 continue
 
             async with get_db_context() as session:
@@ -703,6 +708,7 @@ async def download_video_playlist(
             total_items=len(entries),
             queued_items=queued_count,
             skipped_items=skipped_count,
+            failed_items=failed_count,
             tasks=tasks,
         )
 

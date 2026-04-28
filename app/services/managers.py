@@ -539,9 +539,13 @@ class AudioDownloadManager:
         - URL yields no entries (e.g. single video URL)
 
         Runs yt-dlp in executor to avoid blocking the event loop.
+
+        Also propagates yt-dlp exceptions (e.g. DownloadError) after logging.
         """
+        # TODO(review): move import urllib.parse to module top-level - code-reviewer, 2026-04-28, Severity: Low
         import urllib.parse
 
+        # TODO(review): move _ALLOWED_HOSTS to module-level constant to avoid per-call allocation - code-reviewer, 2026-04-28, Severity: Low
         _ALLOWED_HOSTS = {
             "youtube.com",
             "www.youtube.com",

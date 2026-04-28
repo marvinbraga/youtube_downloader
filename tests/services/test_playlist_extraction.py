@@ -59,7 +59,7 @@ async def test_raises_value_error_on_no_entries_key(mock_ydl_cls):
     mock_ydl.extract_info.return_value = {"title": "PL"}
 
     mgr = _make_manager()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="não retornou entradas"):
         await mgr.extract_playlist_info("https://www.youtube.com/playlist?list=PL1")
 
 
@@ -148,7 +148,7 @@ async def test_title_fallback_uses_video_id(mock_ydl_cls):
 )
 @patch("app.services.managers.YoutubeDL")
 async def test_all_allowed_hosts_are_accepted(mock_ydl_cls, url):
-    """All four YouTube hosts in the allowlist accept without raising."""
+    """All non-default allowed YouTube hosts accept without raising (www.youtube.com covered by other tests)."""
     mock_ydl = MagicMock()
     mock_ydl_cls.return_value.__enter__.return_value = mock_ydl
     mock_ydl.extract_info.return_value = {

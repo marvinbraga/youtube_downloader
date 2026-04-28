@@ -80,6 +80,7 @@ def test_audio_playlist_happy_path_queues_all_entries(client):
     assert len(body["tasks"]) == 2
     assert body["tasks"][0]["item_type"] == "audio"
     assert body["tasks"][0]["skipped"] is False
+    assert body["tasks"][0]["youtube_id"] == "video1234567"
 
 
 def test_audio_playlist_non_playlist_url_raises_400(client):
@@ -381,3 +382,65 @@ def test_video_playlist_non_playlist_url_raises_400(client):
         resp = client.post("/video/playlist", json={"url": PLAYLIST_URL})
 
     assert resp.status_code == 400
+
+
+def test_audio_playlist_max_entries_limit_returns_400(client):
+    many_entries = [
+        {
+            "id": f"vid{i:011d}",
+            "title": f"Video {i}",
+            "url": f"https://www.youtube.com/watch?v=vid{i:011d}",
+        }
+        for i in range(201)
+    ]
+    mock_db, folder_repo, audio_repo, _ = _make_db_mock()
+    with (
+        patch(
+            "app.uwtv.main.audio_manager.extract_playlist_info",
+            new=AsyncMock(
+                return_value={
+                    "title": "Huge Playlist",
+                    "webpage_url": PLAYLIST_URL,
+                    "entries": many_entries,
+                }
+            ),
+        ),
+        patch("app.uwtv.main.get_db_context", mock_db),
+        patch("app.uwtv.main.FolderRepository", return_value=folder_repo),
+        patch("app.uwtv.main.AudioRepository", return_value=audio_repo),
+    ):
+        resp = client.post("/audio/playlist", json={"url": PLAYLIST_URL})
+
+    assert resp.status_code == 400
+    assert "máximo" in resp.json()["detail"]
+
+
+def test_video_playlist_max_entries_limit_returns_400(client):
+    many_entries = [
+        {
+            "id": f"vid{i:011d}",
+            "title": f"Video {i}",
+            "url": f"https://www.youtube.com/watch?v=vid{i:011d}",
+        }
+        for i in range(201)
+    ]
+    mock_db, folder_repo, _, video_repo = _make_db_mock()
+    with (
+        patch(
+            "app.uwtv.main.video_manager.extract_playlist_info",
+            new=AsyncMock(
+                return_value={
+                    "title": "Huge Playlist",
+                    "webpage_url": PLAYLIST_URL,
+                    "entries": many_entries,
+                }
+            ),
+        ),
+        patch("app.uwtv.main.get_db_context", mock_db),
+        patch("app.uwtv.main.FolderRepository", return_value=folder_repo),
+        patch("app.uwtv.main.VideoRepository", return_value=video_repo),
+    ):
+        resp = client.post("/video/playlist", json={"url": PLAYLIST_URL})
+
+    assert resp.status_code == 400
+    assert "máximo" in resp.json()["detail"]

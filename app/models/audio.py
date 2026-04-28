@@ -82,7 +82,10 @@ class PlaylistDownloadRequest(BaseModel):
 class PlaylistTaskItem(BaseModel):
     """Representa um item enfileirado/iniciado durante o download de uma playlist"""
 
-    item_id: str
+    item_id: Optional[str] = (
+        None  # DB record ID (YouTube ID); None when registration failed
+    )
+    youtube_id: str  # YouTube video ID — always populated
     item_type: Literal["audio", "video"]
     task_id: Optional[str] = (
         None  # populated for audio (queue); None for video (background)

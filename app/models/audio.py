@@ -1,6 +1,6 @@
 # app/models/audio.py
 from enum import Enum
-from typing import Optional, List
+from typing import Literal, Optional, List
 
 from pydantic import BaseModel, HttpUrl
 
@@ -62,12 +62,19 @@ class TranscriptionResponse(BaseModel):
 
 
 class PlaylistDownloadRequest(BaseModel):
-    """Request para download de playlist completa (áudio ou vídeo)"""
+    """Request para download de playlist completa.
+
+    Use com POST /audio/playlist (somente high_quality é relevante)
+    ou POST /video/playlist (somente resolution é relevante).
+    O endpoint de destino é o discriminador de mídia.
+    """
 
     url: HttpUrl
-    high_quality: bool = False  # audio only
-    resolution: str = (
-        "1080p"  # video only; valid values: 360p 480p 720p 1080p 1440p 2160p best
+    high_quality: bool = (
+        False  # audio only; False por padrão para conservar banda em playlists
+    )
+    resolution: Literal["360p", "480p", "720p", "1080p", "1440p", "2160p", "best"] = (
+        "1080p"  # video only
     )
     skip_existing: bool = True  # skip items that already exist in DB
 
@@ -75,13 +82,13 @@ class PlaylistDownloadRequest(BaseModel):
 class PlaylistTaskItem(BaseModel):
     """Representa um item enfileirado/iniciado durante o download de uma playlist"""
 
-    item_id: str  # audio_id or video_id (youtube_id)
-    item_type: str  # "audio" or "video"
+    item_id: str
+    item_type: Literal["audio", "video"]
     task_id: Optional[str] = (
         None  # populated for audio (queue); None for video (background)
     )
     title: str
-    url: str
+    url: HttpUrl
     skipped: bool = False  # True if item already existed and skip_existing=True
 
 
@@ -94,4 +101,5 @@ class PlaylistDownloadResponse(BaseModel):
     total_items: int
     queued_items: int
     skipped_items: int
+    failed_items: int = 0
     tasks: List[PlaylistTaskItem]

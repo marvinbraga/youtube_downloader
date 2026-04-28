@@ -519,6 +519,57 @@ class AudioDownloadManager:
         """Migração não necessária com SQLite - mantida para compatibilidade"""
         logger.info("Migração de has_transcription não necessária com SQLite")
 
+    async def extract_playlist_info(self, url: str) -> dict:
+        """Extrai informações de uma playlist do YouTube sem baixar.
+
+        Returns:
+            {
+                "title": str,
+                "webpage_url": str,
+                "entries": [{"id": str, "title": str, "url": str}, ...]
+            }
+
+        Raises ValueError if the URL yields no entries.
+        Runs yt-dlp in executor to avoid blocking the event loop.
+        """
+        ydl_opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "extract_flat": True,
+            "js_runtimes": YDL_JS_RUNTIMES,
+            "remote_components": YDL_REMOTE_COMPONENTS,
+            **get_yt_dlp_cookies_opts(),
+        }
+
+        def _extract():
+            with YoutubeDL(ydl_opts) as ydl:
+                return ydl.extract_info(str(url), download=False)
+
+        loop = asyncio.get_event_loop()
+        info = await loop.run_in_executor(None, _extract)
+
+        entries_raw = info.get("entries") or []
+        if not entries_raw:
+            raise ValueError(
+                f"URL does not appear to be a playlist or returned no entries: {url}"
+            )
+
+        entries = []
+        for entry in entries_raw:
+            video_id = entry.get("id", "")
+            title = (
+                entry.get("title") or entry.get("webpage_title") or f"Video_{video_id}"
+            )
+            watch_url = f"https://www.youtube.com/watch?v={video_id}"
+            entries.append({"id": video_id, "title": title, "url": watch_url})
+
+        return {
+            "title": info.get("title") or info.get("webpage_title") or "Playlist",
+            "webpage_url": info.get("webpage_url") or str(url),
+            "entries": entries,
+        }
+
 
 class VideoDownloadManager:
     """Gerencia o download de vídeo do YouTube usando SQLite."""

@@ -613,6 +613,26 @@ $(document).ready(function() {
         updateProgressUI();
     }
 
+    function buildRingProgress(progress, status) {
+        const p = Math.min(100, Math.max(0, progress));
+        let fillClass = '';
+        if (status === 'error')   fillClass = 'yd-ring__fill--error';
+        else if (p >= 100)        fillClass = 'yd-ring__fill--success';
+        else if (p >= 95)         fillClass = 'yd-ring__fill--converting';
+        const label = p >= 100 ? '✓' : `${p}%`;
+        // r=15.9 → circunferência ≈ 100, então stroke-dasharray usa o próprio percentual
+        return `<div class="yd-ring-progress" title="${p}%">
+                    <svg class="yd-ring" viewBox="0 0 36 36">
+                        <circle class="yd-ring__track" cx="18" cy="18" r="15.9" stroke-width="2.5"/>
+                        <circle class="yd-ring__fill ${fillClass}" cx="18" cy="18" r="15.9"
+                                stroke-width="2.5"
+                                stroke-dasharray="${p} 100"
+                                transform="rotate(-90 18 18)"/>
+                    </svg>
+                    <span class="yd-ring__text">${label}</span>
+                </div>`;
+    }
+
     function updateProgressUI() {
         const container = $('#progressContainer');
         const card = $('#progressCard');
@@ -628,7 +648,6 @@ $(document).ready(function() {
         activeDownloads.forEach((download, id) => {
             const icon = download.type === 'video' ? 'bi-camera-video' : 'bi-music-note';
 
-            // Determinar o label baseado no progresso
             let statusLabel = 'Baixando...';
             let statusIcon = 'bi-arrow-down-circle';
             let fillClass = 'yd-progress-bar__fill--active';
@@ -656,7 +675,7 @@ $(document).ready(function() {
                         </span>
                         <span class="d-flex align-items-center gap-2">
                             <span class="yd-badge yd-badge--pending"><i class="bi ${statusIcon} me-1"></i>${statusLabel}</span>
-                            <span class="yd-badge yd-badge--downloading">${download.progress}%</span>
+                            ${buildRingProgress(download.progress, download.status)}
                         </span>
                     </div>
                     <div class="yd-progress-bar">

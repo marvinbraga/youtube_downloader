@@ -1219,10 +1219,12 @@ audio::-webkit-media-controls-panel {
 
 .yd-scroll-container--sm {
     max-height: 300px;
+    overflow-y: auto;
 }
 
 .yd-scroll-container--lg {
     max-height: 600px;
+    overflow-y: auto;
 }
 
 /* ----------------------------------------

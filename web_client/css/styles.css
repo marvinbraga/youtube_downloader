@@ -38,20 +38,27 @@
     --yd-info-muted: rgba(96, 165, 250, 0.15);
 
     /* Borders & Dividers */
-    --yd-border: rgba(255, 255, 255, 0.08);
+    --yd-border: rgba(255,255,255,0.08);
+    --yd-border-strong: rgba(255,255,255,0.14);
     --yd-border-hover: rgba(255, 255, 255, 0.15);
     --yd-divider: rgba(255, 255, 255, 0.06);
 
-    /* Shadows */
-    --yd-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
-    --yd-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
-    --yd-shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.6);
+    /* Shadows (dark overrides) */
+    --yd-shadow-sm: 0 1px 2px rgba(0,0,0,0.3), 0 1px 0 rgba(255,255,255,0.06) inset;
+    --yd-shadow-md: 0 12px 32px -8px rgba(0,0,0,0.5), 0 1px 0 rgba(255,255,255,0.08) inset;
+    --yd-shadow-lg: 0 30px 80px -20px rgba(0,0,0,0.7), 0 1px 0 rgba(255,255,255,0.1) inset;
     --yd-shadow-glow: 0 0 20px rgba(230, 57, 70, 0.3);
 
     /* Glassmorphism */
     --yd-glass-bg: rgba(20, 22, 25, 0.85);
     --yd-glass-border: rgba(255, 255, 255, 0.08);
-    --yd-glass-blur: 20px;
+    --yd-surface-glass: rgba(255,255,255,0.04);
+    --yd-surface-glass-strong: rgba(255,255,255,0.07);
+
+    /* Aurora */
+    --yd-aurora-1: #7B3FD4;
+    --yd-aurora-2: #3B5FBE;
+    --yd-aurora-3: #A83B7E;
 
     /* Gradients */
     --yd-gradient-surface: linear-gradient(135deg, #141619 0%, #1A1D22 100%);
@@ -94,20 +101,27 @@
     --yd-info-muted: rgba(37, 99, 235, 0.1);
 
     /* Borders & Dividers */
-    --yd-border: rgba(0, 0, 0, 0.1);
+    --yd-border: rgba(80,70,110,0.12);
+    --yd-border-strong: rgba(80,70,110,0.22);
     --yd-border-hover: rgba(0, 0, 0, 0.18);
     --yd-divider: rgba(0, 0, 0, 0.06);
 
     /* Shadows */
-    --yd-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
-    --yd-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
-    --yd-shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.12);
+    --yd-shadow-sm: 0 1px 2px rgba(0,0,0,0.06), 0 1px 0 rgba(255,255,255,0.5) inset;
+    --yd-shadow-md: 0 8px 24px -8px rgba(0,0,0,0.18), 0 1px 0 rgba(255,255,255,0.6) inset;
+    --yd-shadow-lg: 0 30px 60px -20px rgba(0,0,0,0.25), 0 1px 0 rgba(255,255,255,0.7) inset;
     --yd-shadow-glow: 0 0 20px rgba(220, 38, 38, 0.15);
 
     /* Glassmorphism */
     --yd-glass-bg: rgba(255, 255, 255, 0.85);
     --yd-glass-border: rgba(0, 0, 0, 0.08);
-    --yd-glass-blur: 20px;
+    --yd-surface-glass: rgba(255,255,255,0.55);
+    --yd-surface-glass-strong: rgba(255,255,255,0.75);
+
+    /* Aurora */
+    --yd-aurora-1: #D4BEF0;
+    --yd-aurora-2: #B8CCEF;
+    --yd-aurora-3: #EFD8C8;
 
     /* Gradients */
     --yd-gradient-surface: linear-gradient(135deg, #FFFFFF 0%, #FAFBFC 100%);
@@ -149,13 +163,74 @@
     --yd-radius-md: 10px;
     --yd-radius-lg: 14px;
     --yd-radius-xl: 20px;
+    --yd-radius-2xl: 28px;
     --yd-radius-full: 9999px;
 
     /* Transitions */
-    --yd-transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
-    --yd-transition-base: 250ms cubic-bezier(0.4, 0, 0.2, 1);
-    --yd-transition-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
+    --yd-transition-fast: 150ms cubic-bezier(.2,.8,.2,1);
+    --yd-transition-base: 250ms cubic-bezier(.2,.8,.2,1);
+    --yd-transition-slow: 400ms cubic-bezier(.2,.8,.2,1);
     --yd-transition-spring: 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+
+    /* Glass (blur only — surface values live in each [data-theme] block) */
+    --yd-glass-blur: 28px;
+}
+
+/* ----------------------------------------
+   1b. Aurora Background
+   ---------------------------------------- */
+.yd-aurora-stage {
+    position: relative;
+    isolation: isolate;
+}
+
+.yd-aurora-stage::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+        radial-gradient(50% 50% at 25% 30%, var(--yd-aurora-1), transparent),
+        radial-gradient(50% 50% at 80% 70%, var(--yd-aurora-2), transparent),
+        radial-gradient(40% 40% at 60% 20%, var(--yd-aurora-3), transparent);
+    filter: blur(80px) saturate(1.3);
+    opacity: 0.7;
+    z-index: -1;
+    pointer-events: none;
+}
+
+[data-theme="dark"] .yd-aurora-stage::before {
+    opacity: 0.85;
+}
+
+/* ----------------------------------------
+   1c. Grain Texture
+   ---------------------------------------- */
+body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4'/><feColorMatrix type='saturate' values='0'/></filter><rect width='200' height='200' filter='url(%23n)' opacity='0.4'/></svg>");
+    opacity: 0.035;
+    mix-blend-mode: overlay;
+    pointer-events: none;
+    z-index: 9999;
+}
+
+/* ----------------------------------------
+   1d. Glass Classes
+   ---------------------------------------- */
+.yd-glass {
+    background: var(--yd-surface-glass);
+    backdrop-filter: blur(var(--yd-glass-blur));
+    -webkit-backdrop-filter: blur(var(--yd-glass-blur));
+    border: 1px solid var(--yd-border);
+}
+
+.yd-glass-strong {
+    background: var(--yd-surface-glass-strong);
+    backdrop-filter: blur(var(--yd-glass-blur));
+    -webkit-backdrop-filter: blur(var(--yd-glass-blur));
+    border: 1px solid var(--yd-border-strong);
 }
 
 /* ----------------------------------------
@@ -228,6 +303,13 @@ body {
     border-color: var(--yd-border-hover);
 }
 
+#progressCard {
+    background: var(--yd-surface-glass-strong);
+    backdrop-filter: blur(var(--yd-glass-blur));
+    -webkit-backdrop-filter: blur(var(--yd-glass-blur));
+    border-color: var(--yd-border-strong);
+}
+
 .card-header {
     background: var(--yd-bg-surface);
     border-bottom: 1px solid var(--yd-divider);
@@ -254,8 +336,10 @@ body {
 
 /* Modals */
 .modal-content {
-    background: var(--yd-bg-raised);
-    border: 1px solid var(--yd-border);
+    background: var(--yd-surface-glass-strong);
+    backdrop-filter: blur(var(--yd-glass-blur));
+    -webkit-backdrop-filter: blur(var(--yd-glass-blur));
+    border: 1px solid var(--yd-border-strong);
     border-radius: var(--yd-radius-xl);
     box-shadow: var(--yd-shadow-lg);
     animation: modalScale var(--yd-transition-base) ease-out;
@@ -281,7 +365,13 @@ body {
 }
 
 .modal-backdrop {
-    backdrop-filter: blur(4px);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    background-color: rgba(0,0,0,0.4);
+}
+
+.modal-backdrop.show {
+    opacity: 1;
 }
 
 /* Forms */
@@ -298,11 +388,15 @@ body {
 }
 
 .form-control:focus,
-.form-select:focus {
+.form-select:focus,
+.form-control:focus-visible,
+.form-select:focus-visible {
     background-color: var(--yd-bg-surface);
     border-color: var(--yd-accent-primary);
     color: var(--yd-text-primary);
-    box-shadow: 0 0 0 3px var(--yd-accent-primary-muted);
+    box-shadow: 0 0 0 4px var(--yd-accent-primary-muted);
+    transition: border-color 160ms cubic-bezier(.2,.8,.2,1), box-shadow 160ms cubic-bezier(.2,.8,.2,1);
+    outline: none;
 }
 
 .form-control::placeholder {
@@ -339,8 +433,18 @@ body {
     font-size: var(--yd-text-sm);
     border-radius: var(--yd-radius-md);
     padding: var(--yd-space-2) var(--yd-space-4);
-    transition: all var(--yd-transition-fast);
+    transition: all 180ms cubic-bezier(.2,.8,.2,1);
     letter-spacing: 0.01em;
+}
+
+.btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+}
+
+.btn-primary:hover:not(:disabled),
+.btn-danger:hover:not(:disabled) {
+    filter: brightness(1.07);
+    box-shadow: var(--yd-shadow-md);
 }
 
 .btn-close {
@@ -358,9 +462,8 @@ body {
 
 .yd-btn-primary:hover,
 .btn-danger:hover {
-    filter: brightness(1.1);
-    box-shadow: var(--yd-shadow-glow);
-    transform: translateY(-1px);
+    filter: brightness(1.07);
+    box-shadow: var(--yd-shadow-md);
     color: #fff;
 }
 
@@ -540,6 +643,22 @@ body {
     text-decoration: underline !important;
 }
 
+#folderBreadcrumb .breadcrumb-item a {
+    background: var(--yd-surface-glass);
+    border: 1px solid var(--yd-border);
+    border-radius: var(--yd-radius-full);
+    padding: 2px 10px;
+    font-size: var(--yd-text-xs);
+    transition: all 180ms cubic-bezier(.2,.8,.2,1);
+    text-decoration: none;
+}
+
+#folderBreadcrumb .breadcrumb-item a:hover {
+    background: var(--yd-surface-glass-strong);
+    border-color: var(--yd-border-strong);
+    text-decoration: none !important;
+}
+
 .breadcrumb-item.active {
     color: var(--yd-text-primary);
 }
@@ -567,10 +686,10 @@ body {
    4. Layout - Navbar
    ---------------------------------------- */
 .navbar {
-    background: var(--yd-glass-bg) !important;
+    background: var(--yd-surface-glass) !important;
     backdrop-filter: blur(var(--yd-glass-blur));
     -webkit-backdrop-filter: blur(var(--yd-glass-blur));
-    border-bottom: 1px solid var(--yd-glass-border) !important;
+    border-bottom: 1px solid var(--yd-border) !important;
     padding: var(--yd-space-3) 0;
     transition: background-color var(--yd-transition-slow);
 }
@@ -616,7 +735,7 @@ body {
     font-weight: 500;
     font-size: var(--yd-text-sm);
     padding: var(--yd-space-3) var(--yd-space-4);
-    transition: all var(--yd-transition-fast);
+    transition: all 180ms cubic-bezier(.2,.8,.2,1);
     border: none;
     background: transparent;
     white-space: nowrap;
@@ -674,7 +793,7 @@ body {
     display: block;
     padding: var(--yd-space-3) var(--yd-space-4);
     border-bottom: 1px solid var(--yd-divider);
-    transition: all var(--yd-transition-fast);
+    transition: transform var(--yd-transition-fast), box-shadow var(--yd-transition-fast), background-color var(--yd-transition-fast), color var(--yd-transition-fast);
     cursor: pointer;
     text-decoration: none;
     color: inherit;
@@ -685,11 +804,14 @@ body {
     background-color: var(--yd-bg-hover);
     color: inherit;
     text-decoration: none;
+    transform: translateY(-1px);
+    box-shadow: var(--yd-shadow-md);
 }
 
 .yd-media-item.active {
     background-color: var(--yd-accent-primary-muted);
     border-left: 3px solid var(--yd-accent-primary);
+    box-shadow: 0 0 0 2px var(--yd-accent-primary), var(--yd-shadow-sm);
 }
 
 .yd-media-item:last-child {
@@ -758,6 +880,12 @@ body {
     justify-content: center;
     border-radius: var(--yd-radius-sm);
     font-size: 0.875rem;
+    transition: all 180ms cubic-bezier(.2,.8,.2,1);
+}
+
+.yd-action-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--yd-shadow-sm);
 }
 
 /* ----------------------------------------
@@ -786,6 +914,10 @@ body {
     background: var(--yd-gradient-accent);
     transition: width var(--yd-transition-base);
     position: relative;
+}
+
+.yd-progress-bar__fill--active {
+    box-shadow: 0 0 12px var(--yd-accent-primary);
 }
 
 .yd-progress-bar__fill--active::after {
@@ -920,6 +1052,35 @@ body {
     color: var(--yd-text-tertiary);
 }
 
+.yd-badge--ready::before,
+.yd-badge--downloading::before,
+.yd-badge--error::before,
+.yd-badge--processing::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    margin-right: 5px;
+    vertical-align: middle;
+}
+
+.yd-badge--ready::before {
+    background: var(--yd-success);
+    box-shadow: 0 0 6px var(--yd-success);
+}
+
+.yd-badge--downloading::before,
+.yd-badge--processing::before {
+    background: var(--yd-warning);
+    box-shadow: 0 0 6px var(--yd-warning);
+}
+
+.yd-badge--error::before {
+    background: var(--yd-error);
+    box-shadow: 0 0 6px var(--yd-error);
+}
+
 /* ----------------------------------------
    10. Components - Folder Items
    ---------------------------------------- */
@@ -927,7 +1088,7 @@ body {
     display: block;
     padding: var(--yd-space-3) var(--yd-space-4);
     border-bottom: 1px solid var(--yd-divider);
-    transition: all var(--yd-transition-fast);
+    transition: transform var(--yd-transition-fast), box-shadow var(--yd-transition-fast), background-color var(--yd-transition-fast);
     cursor: pointer;
     text-decoration: none;
     color: inherit;
@@ -935,7 +1096,8 @@ body {
 
 .yd-folder-item:hover {
     background-color: var(--yd-bg-hover);
-    transform: translateX(3px);
+    transform: translateY(-1px);
+    box-shadow: var(--yd-shadow-md);
     color: inherit;
     text-decoration: none;
 }
@@ -958,10 +1120,13 @@ body {
    11. Components - Transcription Viewer
    ---------------------------------------- */
 .transcription-viewer {
-    background-color: var(--yd-bg-surface);
+    background: var(--yd-surface-glass);
+    backdrop-filter: blur(var(--yd-glass-blur));
+    -webkit-backdrop-filter: blur(var(--yd-glass-blur));
     border: 1px solid var(--yd-border);
     border-radius: var(--yd-radius-md);
     padding: var(--yd-space-4);
+    box-shadow: var(--yd-shadow-md);
     transition: background-color var(--yd-transition-slow);
 }
 
@@ -1014,7 +1179,7 @@ audio::-webkit-media-controls-panel {
     background: var(--yd-bg-raised);
     border: 1px solid var(--yd-border);
     border-radius: var(--yd-radius-lg);
-    box-shadow: var(--yd-shadow-lg);
+    box-shadow: var(--yd-shadow-md);
     animation: toastSlideIn 0.3s ease-out;
 }
 
@@ -1144,6 +1309,9 @@ audio::-webkit-media-controls-panel {
 }
 
 .item-checkbox {
+    accent-color: var(--yd-accent-primary);
+    width: 16px;
+    height: 16px;
     cursor: pointer;
 }
 
@@ -1189,11 +1357,11 @@ audio::-webkit-media-controls-panel {
 @keyframes itemEnter {
     from {
         opacity: 0;
-        transform: translateY(8px);
+        transform: translateY(8px) scale(0.97);
     }
     to {
         opacity: 1;
-        transform: translateY(0);
+        transform: translateY(0) scale(1);
     }
 }
 
@@ -1353,11 +1521,25 @@ audio::-webkit-media-controls-panel {
         transform: none;
     }
 
+    .btn:hover {
+        transform: none;
+        filter: none;
+    }
+
+    .yd-media-item:hover {
+        transform: none;
+    }
+
     .yd-folder-item:hover {
         transform: none;
     }
 
     .move-folder-option:hover:not(.active) {
         transform: none;
+    }
+
+    @keyframes itemEnter {
+        from { opacity: 0; }
+        to { opacity: 1; }
     }
 }

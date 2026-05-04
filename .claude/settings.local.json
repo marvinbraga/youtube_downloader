@@ -43,7 +43,18 @@
       "Bash(tee /tmp/ring-lint-output.txt)",
       "Bash(echo \"EXIT_CODE: $?\")",
       "Bash(ruff check:*)",
-      "Bash(lsof -ti:8000)"
+      "Bash(lsof -ti:8000)",
+      "Bash(uv run *)",
+      "Bash(echo \"PID: $!\")",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_take_screenshot",
+      "mcp__playwright__browser_evaluate",
+      "mcp__playwright__browser_type",
+      "mcp__playwright__browser_click",
+      "mcp__playwright__browser_wait_for",
+      "mcp__playwright__browser_console_messages",
+      "mcp__playwright__browser_snapshot",
+      "Bash(awk '{print $5, $9}')"
     ]
   }
 }

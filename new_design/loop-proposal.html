@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Loop — Video downloader proposal</title>
+<link rel="stylesheet" href="styles/system.css" />
+<style>
+  /* Design canvas chrome harmonization */
+  body { background: oklch(0.13 0.01 280); }
+  /* Dark / light per-artboard theme attribute is set on inner shell */
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="components/shared.jsx"></script>
+<script type="text/babel" src="components/screens-1.jsx"></script>
+<script type="text/babel" src="components/screens-2.jsx"></script>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+const DEFAULTS = /*EDITMODE-BEGIN*/{
+  "brandName": "Loop",
+  "theme": "light",
+  "accentHue": 264,
+  "fontPair": "jetbrains",
+  "density": "comfortable"
+}/*EDITMODE-END*/;
+
+const FONT_PAIRS = {
+  geist:        { sans: "'Geist', ui-sans-serif, system-ui, sans-serif",        serif: "'Instrument Serif', Georgia, serif" },
+  inter_serif:  { sans: "'Inter', ui-sans-serif, system-ui, sans-serif",         serif: "'Fraunces', Georgia, serif" },
+  mono_serif:   { sans: "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif", serif: "'Cormorant Garamond', Georgia, serif" },
+  jetbrains:    { sans: "'JetBrains Mono', ui-monospace, monospace",             serif: "'Instrument Serif', Georgia, serif" },
+};
+
+// Inject extra Google Fonts on demand
+const ensureFontPair = (key) => {
+  const map = {
+    inter_serif: 'Inter:wght@400;500;600&family=Fraunces:wght@400;500',
+    mono_serif: 'IBM+Plex+Sans:wght@400;500;600&family=Cormorant+Garamond:wght@400;500',
+    jetbrains: 'JetBrains+Mono:wght@400;500;600',
+  };
+  if (!map[key]) return;
+  const id = `font-${key}`;
+  if (document.getElementById(id)) return;
+  const link = document.createElement('link');
+  link.id = id; link.rel = 'stylesheet';
+  link.href = `https://fonts.googleapis.com/css2?family=${map[key]}&display=swap`;
+  document.head.appendChild(link);
+};
+
+const App = () => {
+  const [tweaks, setTweak] = useTweaks(DEFAULTS);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--accent-h', tweaks.accentHue);
+    ensureFontPair(tweaks.fontPair);
+    const fp = FONT_PAIRS[tweaks.fontPair] || FONT_PAIRS.geist;
+    document.documentElement.style.setProperty('--font-sans', fp.sans);
+    document.documentElement.style.setProperty('--font-serif', fp.serif);
+    document.documentElement.style.setProperty('--density', tweaks.density === 'compact' ? 0.85 : 1);
+  }, [tweaks.accentHue, tweaks.fontPair, tweaks.density]);
+
+  // Per-artboard theme: each renders inside its own theme-scope wrapper
+  const ThemeScope = ({ theme = tweaks.theme, children, scale = 1 }) => (
+    <div data-theme={theme} style={{
+      transform: `scale(${scale})`,
+      transformOrigin: 'top left',
+      width: scale === 1 ? '100%' : `${100 / scale}%`,
+      height: scale === 1 ? '100%' : `${100 / scale}%`,
+    }}>
+      {children}
+    </div>
+  );
+
+  const desktopArtboards = [
+    { id: 'home',     label: '01 · Home',          comp: HomeDesktop },
+    { id: 'analyze',  label: '02 · Analyze',       comp: AnalyzeDesktop },
+    { id: 'queue',    label: '03 · Queue',         comp: QueueDesktop },
+    { id: 'library',  label: '04 · Library',       comp: LibraryDesktop },
+    { id: 'settings', label: '05 · Settings',      comp: SettingsDesktop },
+    { id: 'login',    label: '06 · Sign in',       comp: LoginDesktop },
+    { id: 'pricing',  label: '07 · Pricing',       comp: PricingDesktop },
+    { id: 'error',    label: '08 · Error',         comp: ErrorDesktop },
+  ];
+
+  const mobileArtboards = [
+    { id: 'home_m',    label: '09 · Home',    comp: HomeMobile },
+    { id: 'analyze_m', label: '10 · Analyze', comp: AnalyzeMobile, dark: true },
+    { id: 'library_m', label: '11 · Library', comp: LibraryMobile },
+  ];
+
+  const darkArtboards = [
+    { id: 'home_d',    label: '12 · Home (dark)',    comp: HomeDesktop },
+    { id: 'analyze_d', label: '13 · Analyze (dark)', comp: AnalyzeDesktop },
+    { id: 'library_d', label: '14 · Library (dark)', comp: LibraryDesktop },
+    { id: 'pricing_d', label: '15 · Pricing (dark)', comp: PricingDesktop },
+  ];
+
+  return (
+    <>
+      <DesignCanvas>
+        <DCSection id="overview" title="Overview" subtitle="A universal video downloader with a calm, glassy aesthetic. Save anything from 1,200+ sources, in any format up to 8K HDR, with captions, trim, and bulk playlists.">
+          <DCArtboard id="cover" label="Cover" width={1280} height={420}>
+            <div className="aurora-stage grain" data-theme={tweaks.theme} style={{
+              width: 1280, height: 420, padding: 56,
+              display: 'flex', alignItems: 'center', gap: 48,
+            }}>
+              <div className="aurora-3rd" />
+              <div style={{ flex: 1, position: 'relative', zIndex: 2 }}>
+                <Logo name={tweaks.brandName} size={22} />
+                <div className="eyebrow" style={{ marginTop: 28 }}>Design proposal · v1</div>
+                <h1 className="serif" style={{ margin: '12px 0 0', fontSize: 96, lineHeight: 0.95, fontWeight: 400, letterSpacing: '-0.04em' }}>
+                  Save anything<br />
+                  <em style={{ color: 'var(--accent)' }}>worth keeping.</em>
+                </h1>
+                <p style={{ marginTop: 20, fontSize: 17, color: 'var(--fg-muted)', maxWidth: 540, lineHeight: 1.5 }}>
+                  A universal video downloader with a calm, modern glassmorphic interface.
+                  Eight desktop screens, three mobile screens, full light + dark themes, fully tweakable.
+                </p>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, width: 380, position: 'relative', zIndex: 2 }}>
+                {[
+                  { l: 'Screens', v: '15' },
+                  { l: 'Themes', v: 'Light · Dark' },
+                  { l: 'Sources', v: '1,200+' },
+                  { l: 'Max quality', v: '8K HDR' },
+                ].map(s => (
+                  <div key={s.l} className="glass" style={{ padding: 18 }}>
+                    <div className="eyebrow">{s.l}</div>
+                    <div className="serif" style={{ fontSize: 32, fontWeight: 400, marginTop: 6, letterSpacing: '-0.02em' }}>{s.v}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="desktop" title="Desktop · primary theme" subtitle={`Currently rendered as ${tweaks.theme}. Use Tweaks (top-right) to switch themes, accent hue, font pair, or rename the brand.`}>
+          {desktopArtboards.map(a => {
+            const Comp = a.comp;
+            return (
+              <DCArtboard key={a.id} id={a.id} label={a.label} width={1280} height={820}>
+                <ThemeScope theme={tweaks.theme}>
+                  <Comp brandName={tweaks.brandName} />
+                </ThemeScope>
+              </DCArtboard>
+            );
+          })}
+        </DCSection>
+
+        <DCSection id="mobile" title="Mobile · responsive" subtitle="Same system, calibrated for small screens. Bottom tab bar replaces the desktop top nav.">
+          {mobileArtboards.map(a => {
+            const Comp = a.comp;
+            return (
+              <DCArtboard key={a.id} id={a.id} label={a.label} width={420} height={820}>
+                <div style={{ width: 420, height: 820, display: 'grid', placeItems: 'center', background: 'oklch(0.18 0.01 280)' }}>
+                  <Comp brandName={tweaks.brandName} />
+                </div>
+              </DCArtboard>
+            );
+          })}
+        </DCSection>
+
+        <DCSection id="dark" title="Dark theme" subtitle="A second pass at the key screens in dark mode — same system, recalibrated tokens.">
+          {darkArtboards.map(a => {
+            const Comp = a.comp;
+            return (
+              <DCArtboard key={a.id} id={a.id} label={a.label} width={1280} height={820}>
+                <ThemeScope theme="dark">
+                  <Comp brandName={tweaks.brandName} />
+                </ThemeScope>
+              </DCArtboard>
+            );
+          })}
+        </DCSection>
+      </DesignCanvas>
+
+      {/* Tweaks panel */}
+      <TweaksPanel title="Tweaks">
+        <TweakSection label="Brand" />
+        <TweakText label="Brand name" value={tweaks.brandName} onChange={v => setTweak('brandName', v)} />
+        <TweakSection label="Theme" />
+        <TweakRadio
+          label="Mode"
+          value={tweaks.theme}
+          options={['light', 'dark']}
+          onChange={v => setTweak('theme', v)}
+        />
+        <TweakSlider
+          label="Accent hue"
+          min={0} max={360} step={1} unit="°"
+          value={tweaks.accentHue}
+          onChange={v => setTweak('accentHue', v)}
+        />
+        <TweakSection label="Type & density" />
+        <TweakSelect
+          label="Font pair"
+          value={tweaks.fontPair}
+          options={['geist', 'inter_serif', 'mono_serif', 'jetbrains']}
+          onChange={v => setTweak('fontPair', v)}
+        />
+        <TweakRadio
+          label="Density"
+          value={tweaks.density}
+          options={['comfortable', 'compact']}
+          onChange={v => setTweak('density', v)}
+        />
+      </TweaksPanel>
+    </>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+
+<style id="__om-edit-overrides"></style>
+</body>
+</html>

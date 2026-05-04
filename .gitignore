@@ -1,5 +1,9 @@
 # Tools
 .serena/
+.playwright-mcp/
+
+# Working screenshots
+screenshot-*.png
 
 ### Python template
 # Byte-compiled / optimized / DLL files

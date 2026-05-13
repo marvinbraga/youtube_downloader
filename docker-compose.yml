@@ -39,6 +39,51 @@ services:
         reservations:
           memory: 512m
 
+  # Local S3-compatible storage for development. Only starts when the
+  # 's3-dev' profile is active:  docker compose --profile s3-dev up
+  minio:
+    image: minio/minio:latest
+    container_name: youtube-downloader-minio
+    profiles: ["s3-dev"]
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - ./data/minio:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # One-shot sidecar that waits for MinIO to be healthy, then creates the
+  # default development bucket via the MinIO Client (mc). Only runs under
+  # the 's3-dev' profile alongside the minio service. Override the bucket
+  # name via MINIO_DEV_BUCKET in your .env.
+  minio-init:
+    image: minio/mc:latest
+    container_name: youtube-downloader-minio-init
+    profiles: ["s3-dev"]
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_DEV_BUCKET: ${MINIO_DEV_BUCKET:-youtube-downloader-dev}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        mc alias set local http://minio:9000 minioadmin minioadmin
+        mc mb --ignore-existing local/"$$MINIO_DEV_BUCKET"
+        echo "MinIO bucket '$$MINIO_DEV_BUCKET' is ready."
+    restart: "no"
+
 # Named bind mounts are kept relative to the compose file so `docker compose
 # down` doesn't take the data with it. To enable Docker-managed volumes
 # instead, replace the host paths above with:

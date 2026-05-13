@@ -1,0 +1,66 @@
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Local virtualenv — recreated inside the image
+.venv
+__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# Runtime state — must be a volume, never baked into the image
+data/
+downloads/
+downloads﹨2025-02-10/
+logs/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.db.bak-*
+
+# Local dev / cookies / secrets — never bake into the image
+.env
+.env.*
+!.env.example
+cookies/
+
+# Working artifacts the dev shell creates
+screenshot-*.png
+audio-list-*.png
+instagram-video-list.png
+.playwright-mcp/
+.serena/
+.claude/
+.idea/
+.vscode/
+
+# Docs and tests aren't shipped at runtime
+docs/
+tests/
+notebooks/
+new_design/
+reports/
+single_video_test/
+test_downloads/
+
+# Standalone scripts / Jupyter
+*.ipynb
+analyze_test_results.py
+examine_redis_hash.py
+redis_*.py
+simple_redis_check.py
+test_*.py
+
+# Docker artifacts themselves
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# OS noise
+.DS_Store
+Thumbs.db

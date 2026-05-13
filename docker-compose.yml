@@ -1,0 +1,48 @@
+services:
+  app:
+    container_name: youtube-downloader
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: youtube-downloader:latest
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    env_file:
+      - .env
+    environment:
+      # uvicorn workers > 1 racing on SQLite migrations is handled by the
+      # idempotent _apply_schema_migrations helper, but SQLite write contention
+      # still hurts throughput. Keep it at 1 unless you've moved to Postgres.
+      UVICORN_WORKERS: "1"
+    volumes:
+      # Persist the SQLite DB outside the container.
+      - ./data:/app/data
+      # Downloaded media — must be a volume; container restarts otherwise wipe it.
+      - ./downloads:/app/downloads
+      # Optional: per-source cookies (Netscape format). Mount read-only and
+      # reference via {YT,INSTAGRAM}_COOKIES_FILE in .env using container paths
+      # like /app/cookies/youtube.txt
+      - ./cookies:/app/cookies:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    # Avoid OOM-killing transient yt-dlp ffmpeg muxing jobs on small hosts.
+    # Tune to your machine.
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+        reservations:
+          memory: 512m
+
+# Named bind mounts are kept relative to the compose file so `docker compose
+# down` doesn't take the data with it. To enable Docker-managed volumes
+# instead, replace the host paths above with:
+#   volumes:
+#     - app-data:/app/data
+#     - app-downloads:/app/downloads
+# and declare them under a top-level `volumes:` key.

@@ -2,21 +2,42 @@
 
 FastAPI service for downloading and streaming video/audio from YouTube and Instagram, with built-in transcription support.
 
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge)](LICENSE)
+<!-- Languages & Runtime -->
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![uv](https://img.shields.io/badge/uv-DE5FE9.svg?style=for-the-badge&logo=uv&logoColor=white)](https://docs.astral.sh/uv/)
+[![Docker](https://img.shields.io/badge/Docker-2496ED.svg?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
+
+<!-- Backend Frameworks & Libraries -->
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688.svg?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Uvicorn](https://img.shields.io/badge/Uvicorn-499848.svg?style=for-the-badge&logo=gunicorn&logoColor=white)](https://www.uvicorn.org/)
+[![Pydantic](https://img.shields.io/badge/Pydantic-E92063.svg?style=for-the-badge&logo=pydantic&logoColor=white)](https://docs.pydantic.dev/)
 [![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-D71F00.svg?style=for-the-badge&logo=sqlalchemy&logoColor=white)](https://www.sqlalchemy.org/)
 [![SQLite](https://img.shields.io/badge/SQLite-003B57.svg?style=for-the-badge&logo=sqlite&logoColor=white)](https://www.sqlite.org/)
-[![Pydantic](https://img.shields.io/badge/Pydantic-E92063.svg?style=for-the-badge&logo=pydantic&logoColor=white)](https://docs.pydantic.dev/)
 [![JWT](https://img.shields.io/badge/JWT-000000.svg?style=for-the-badge&logo=jsonwebtokens&logoColor=white)](https://jwt.io/)
+
+<!-- Media & Sources -->
 [![yt-dlp](https://img.shields.io/badge/yt--dlp-FF0000.svg?style=for-the-badge&logo=youtube&logoColor=white)](https://github.com/yt-dlp/yt-dlp)
+[![YouTube](https://img.shields.io/badge/YouTube-FF0000.svg?style=for-the-badge&logo=youtube&logoColor=white)](https://www.youtube.com/)
 [![Instagram](https://img.shields.io/badge/Instagram-E4405F.svg?style=for-the-badge&logo=instagram&logoColor=white)](https://www.instagram.com/)
+[![FFmpeg](https://img.shields.io/badge/FFmpeg-007808.svg?style=for-the-badge&logo=ffmpeg&logoColor=white)](https://ffmpeg.org/)
+
+<!-- Storage -->
+[![AWS S3](https://img.shields.io/badge/AWS_S3-569A31.svg?style=for-the-badge&logo=amazons3&logoColor=white)](https://aws.amazon.com/s3/)
+[![MinIO](https://img.shields.io/badge/MinIO-C72E49.svg?style=for-the-badge&logo=minio&logoColor=white)](https://min.io/)
+[![aioboto3](https://img.shields.io/badge/aioboto3-FF9900.svg?style=for-the-badge&logo=amazonaws&logoColor=white)](https://github.com/terricain/aioboto3)
+
+<!-- Transcription Providers -->
 [![Groq](https://img.shields.io/badge/Groq-F55036.svg?style=for-the-badge&logo=groq&logoColor=white)](https://groq.com/)
 [![OpenAI](https://img.shields.io/badge/OpenAI-412991.svg?style=for-the-badge&logo=openai&logoColor=white)](https://openai.com/)
-[![uv](https://img.shields.io/badge/uv-DE5FE9.svg?style=for-the-badge&logo=uv&logoColor=white)](https://docs.astral.sh/uv/)
+
+<!-- Frontend -->
 [![Bootstrap](https://img.shields.io/badge/Bootstrap_5-7952B3.svg?style=for-the-badge&logo=bootstrap&logoColor=white)](https://getbootstrap.com/)
 [![jQuery](https://img.shields.io/badge/jQuery-0769AD.svg?style=for-the-badge&logo=jquery&logoColor=white)](https://jquery.com/)
+
+<!-- Project Status -->
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg?style=for-the-badge)](LICENSE)
+[![Code style: ruff](https://img.shields.io/badge/code_style-ruff-D7FF64.svg?style=for-the-badge&logo=ruff&logoColor=black)](https://github.com/astral-sh/ruff)
+[![pre-commit](https://img.shields.io/badge/pre--commit-FAB040.svg?style=for-the-badge&logo=precommit&logoColor=white)](https://pre-commit.com/)
 
 ## Features
 
@@ -74,6 +95,54 @@ uv run uvicorn app.uwtv.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 The server will be available at `http://localhost:8000`.
+
+## Storage Backends
+
+The service supports two storage backends, selected at startup via `STORAGE_BACKEND`:
+
+- **`local`** (default) — Finished downloads stay on disk under `downloads/`. Streaming endpoints serve bytes directly via `FileResponse` / `StreamingResponse`. Zero external dependencies.
+- **`s3`** — Finished downloads are uploaded to AWS S3 (or any S3-compatible service: MinIO, LocalStack). Streaming endpoints return a `302 Redirect` to a short-lived presigned GET URL.
+
+### Switching to S3
+
+Set in your `.env`:
+
+```
+STORAGE_BACKEND=s3
+AWS_S3_BUCKET=my-bucket
+AWS_REGION=us-east-1
+```
+
+Credentials are resolved via the standard AWS chain: env vars (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`), `~/.aws/credentials`, IAM roles, IRSA, etc. Prefer IAM roles or IRSA over inline keys.
+
+### Behavior
+
+- yt-dlp always downloads to disk first (ffmpeg muxing requires seekable files). The S3 upload happens **after** download success.
+- Each row has a `storage_backend` column. Rows already downloaded under the previous backend are **not** migrated; the service serves each row according to its own row-level backend value.
+- `S3_DELETE_LOCAL_AFTER_UPLOAD=true` (default) removes the local copy after upload. Set to `false` to keep a redundant copy.
+- Transcription pulls S3-backed media to a tempfile via `Storage.download_to_temp()`; the tempfile is removed in a `finally` block after the transcript is produced.
+
+### Local development with MinIO
+
+```bash
+docker compose --profile s3-dev up -d
+# Open http://localhost:9001 (minioadmin / minioadmin).
+# The minio-init sidecar auto-creates the bucket "youtube-downloader-dev"
+# (override via MINIO_DEV_BUCKET in your .env).
+# In .env:
+#   STORAGE_BACKEND=s3
+#   AWS_S3_BUCKET=youtube-downloader-dev
+#   AWS_REGION=us-east-1
+#   AWS_S3_ENDPOINT_URL=http://localhost:9000
+#   AWS_ACCESS_KEY_ID=minioadmin
+#   AWS_SECRET_ACCESS_KEY=minioadmin
+```
+
+### Known v1 limitations
+
+- No retroactive migration of legacy local rows.
+- `app/services/files.py:scan_video_directory` only lists files on disk — S3-only rows are visible via the DB-backed `/video/list-downloads`, not via `/videos`.
+- Transcription markdown files always live on disk.
 
 ## Main Endpoints
 

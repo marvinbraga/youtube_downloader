@@ -3,8 +3,29 @@ from datetime import datetime
 from typing import Optional, List
 import uuid
 
-from sqlalchemy import String, Integer, DateTime, Text, Float, ForeignKey
+from sqlalchemy import (
+    String,
+    Integer,
+    DateTime,
+    Text,
+    Float,
+    ForeignKey,
+    CheckConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+# Storage backend domain. The DB column is free VARCHAR(20) — SQLite cannot add
+# CHECK constraints via ALTER TABLE, so the constraint below only applies when
+# the table is created from scratch via Base.metadata.create_all. For
+# pre-existing tables (any production DB that ran a prior version of this app),
+# enforcement is application-level: anything that writes ``storage_backend``
+# must validate against ``STORAGE_BACKENDS`` first.
+STORAGE_BACKENDS: tuple[str, ...] = ("local", "s3")
+
+
+def is_valid_storage_backend(value: str) -> bool:
+    return value in STORAGE_BACKENDS
 
 
 class Base(DeclarativeBase):
@@ -80,6 +101,12 @@ class Audio(Base):
     """Modelo SQLAlchemy para áudios"""
 
     __tablename__ = "audios"
+    __table_args__ = (
+        CheckConstraint(
+            "storage_backend IN ('local', 's3')",
+            name="ck_audios_storage_backend",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
@@ -98,6 +125,17 @@ class Audio(Base):
     directory: Mapped[str] = mapped_column(String(1000), nullable=False, default="")
     format: Mapped[str] = mapped_column(String(20), nullable=False, default="m4a")
     filesize: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # Storage backend (Strategy pattern: 'local' | 's3'). Domain enforced by
+    # CheckConstraint in __table_args__ (fresh tables only) + STORAGE_BACKENDS
+    # tuple for application-level validation on existing rows.
+    storage_backend: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="local", index=True
+    )
+    # TODO(review): if a cleanup job ever queries by s3_key prefix, add an index.
+    # Today the only access path is row PK -> read s3_key, so no index is
+    # justified. (code-reviewer, 2026-05-13, Severity: Low)
+    s3_key: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
 
     # Status de download
     download_status: Mapped[str] = mapped_column(
@@ -147,6 +185,8 @@ class Audio(Base):
             "directory": self.directory,
             "format": self.format,
             "filesize": self.filesize,
+            "storage_backend": self.storage_backend,
+            "s3_key": self.s3_key,
             "download_status": self.download_status,
             "download_progress": self.download_progress,
             "download_error": self.download_error,
@@ -167,6 +207,12 @@ class Video(Base):
     """Modelo SQLAlchemy para vídeos"""
 
     __tablename__ = "videos"
+    __table_args__ = (
+        CheckConstraint(
+            "storage_backend IN ('local', 's3')",
+            name="ck_videos_storage_backend",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
@@ -184,6 +230,17 @@ class Video(Base):
     filesize: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     duration: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     resolution: Mapped[str] = mapped_column(String(20), nullable=False, default="")
+
+    # Storage backend (Strategy pattern: 'local' | 's3'). Domain enforced by
+    # CheckConstraint in __table_args__ (fresh tables only) + STORAGE_BACKENDS
+    # tuple for application-level validation on existing rows.
+    storage_backend: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="local", index=True
+    )
+    # TODO(review): if a cleanup job ever queries by s3_key prefix, add an index.
+    # Today the only access path is row PK -> read s3_key, so no index is
+    # justified. (code-reviewer, 2026-05-13, Severity: Low)
+    s3_key: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
 
     # Status de download
     download_status: Mapped[str] = mapped_column(
@@ -232,6 +289,8 @@ class Video(Base):
             "filesize": self.filesize,
             "duration": self.duration,
             "resolution": self.resolution,
+            "storage_backend": self.storage_backend,
+            "s3_key": self.s3_key,
             "download_status": self.download_status,
             "download_progress": self.download_progress,
             "download_error": self.download_error,

@@ -121,6 +121,40 @@ async def _apply_schema_migrations(conn) -> None:
         "CREATE INDEX IF NOT EXISTS ix_videos_external_id ON videos(external_id)"
     )
 
+    # TODO(review): the two storage-column blocks below are near-identical
+    # copy-paste. If a third storage-bearing table ever appears, extract
+    # _add_storage_columns(conn, table_name). For two tables, inline is fine.
+    # (code-reviewer, 2026-05-13, Severity: Low)
+    # --- audios.storage_backend, audios.s3_key ---
+    result = await conn.exec_driver_sql("PRAGMA table_info(audios)")
+    audio_cols = {row[1] for row in result.fetchall()}
+    await _add_column_if_missing(
+        conn,
+        "audios",
+        "storage_backend",
+        "VARCHAR(20) NOT NULL DEFAULT 'local'",
+        audio_cols,
+    )
+    await _add_column_if_missing(conn, "audios", "s3_key", "VARCHAR(1000)", audio_cols)
+    await conn.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_audios_storage_backend ON audios(storage_backend)"
+    )
+
+    # --- videos.storage_backend, videos.s3_key ---
+    result = await conn.exec_driver_sql("PRAGMA table_info(videos)")
+    video_cols = {row[1] for row in result.fetchall()}
+    await _add_column_if_missing(
+        conn,
+        "videos",
+        "storage_backend",
+        "VARCHAR(20) NOT NULL DEFAULT 'local'",
+        video_cols,
+    )
+    await _add_column_if_missing(conn, "videos", "s3_key", "VARCHAR(1000)", video_cols)
+    await conn.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_videos_storage_backend ON videos(storage_backend)"
+    )
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency para obter uma sessão do banco"""

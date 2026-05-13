@@ -7,7 +7,7 @@ from typing import Optional, List
 
 from fastapi import FastAPI, HTTPException, Depends, Query, BackgroundTasks, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 from loguru import logger
@@ -40,6 +40,9 @@ from app.models.folder import (
     BulkMoveRequest,
 )
 from app.services.configs import video_mapping, AUDIO_DIR, audio_mapping, DOWNLOADS_DIR
+from app.services.storage import (
+    get_storage,
+)  # L1: hoisted from per-endpoint lazy imports.
 from app.services.files import (
     scan_video_directory,
     generate_video_stream,
@@ -92,6 +95,19 @@ async def lifespan(app: FastAPI):
     except ValueError as exc:
         logger.error(f"Invalid cookie configuration, cannot start: {exc}")
         raise RuntimeError(f"Invalid cookie configuration: {exc}") from exc
+
+    # Validate storage configuration at startup
+    try:
+        from app.services.configs import validate_storage_config
+
+        validate_storage_config()
+        # Warm the storage cache: eager-init the singleton during startup so
+        # the first request never races on the bare if-check in get_storage().
+        storage = get_storage()
+        logger.info(f"Storage configuration validated. Backend: {storage.backend_name}")
+    except ValueError as exc:
+        logger.error(f"Invalid storage configuration, cannot start: {exc}")
+        raise RuntimeError(f"Invalid storage configuration: {exc}") from exc
 
     # Iniciar processamento da fila
     download_queue.start_processing()
@@ -196,67 +212,131 @@ async def list_video_downloads(token_data: dict = Depends(verify_token)):
 
 @app.get("/video/{video_id}")
 async def stream_video(video_id: str, token_data: dict = Depends(verify_token)):
-    """Stream de vídeo (requer autenticação)"""
-    if video_id not in video_mapping:
+    """Stream de vídeo (legacy mapping fast-path; falls back to DB for S3 rows)."""
+    # L3: `video_mapping` is an in-memory dict populated by VideoDownloadManager
+    # at download time. It's a fast path for the common case (local backend,
+    # session-warm). When the lookup misses we fall through to the DB, which:
+    #   (a) handles S3-backed rows (no mapping entry by design — we redirect),
+    #   (b) handles process-restart cases (mapping is lost; DB is the source of
+    #       truth), and
+    #   (c) handles stale mappings pointing at a deleted/missing file.
+    # Net effect: the mapping is a cache; the DB is the system of record.
+    if video_id in video_mapping:
+        video_source = video_mapping[video_id]
+
+        if isinstance(video_source, str) and video_source.startswith("http"):
+            logger.debug(f"Iniciando streaming do YouTube: {video_source}")
+            return StreamingResponse(
+                stream_manager.stream_youtube_video(video_source),
+                media_type="video/mp4",
+            )
+
+        video_path = video_source
+        content_types = {".mp4": "video/mp4", ".webm": "video/webm"}
+        content_type = content_types.get(video_path.suffix.lower())
+        if not content_type:
+            logger.error("Formato de vídeo não suportado.")
+            raise HTTPException(
+                status_code=400, detail="Formato de vídeo não suportado"
+            )
+        return StreamingResponse(
+            generate_video_stream(video_path), media_type=content_type
+        )
+
+    # Not in mapping — could be an S3-backed row. Look it up in the DB.
+    video_info = await video_manager.get_video_info(video_id)
+    if not video_info:
+        video_info = await video_manager.get_video_by_youtube_id(video_id)
+    if not video_info:
         logger.error("Vídeo não encontrado.")
         raise HTTPException(status_code=404, detail="Vídeo não encontrado")
 
-    video_source = video_mapping[video_id]
-
-    # Se for uma URL do YouTube
-    if isinstance(video_source, str) and video_source.startswith("http"):
-        logger.debug(f"Iniciando streaming do YouTube: {video_source}")
-        return StreamingResponse(
-            stream_manager.stream_youtube_video(video_source), media_type="video/mp4"
+    backend = video_info.get("storage_backend", "local")
+    if backend == "s3" and video_info.get("s3_key"):
+        storage = get_storage()
+        url = await storage.get_url(
+            video_info["s3_key"], filename=video_info.get("name")
         )
+        return RedirectResponse(url=url, status_code=302)
 
-    # Para vídeos locais
-    video_path = video_source
-    content_types = {".mp4": "video/mp4", ".webm": "video/webm"}
-
-    content_type = content_types.get(video_path.suffix.lower())
-    if not content_type:
-        logger.error("Formato de vídeo não suportado.")
-        raise HTTPException(status_code=400, detail="Formato de vídeo não suportado")
-
+    # Local row that wasn't yet mapped — serve directly from disk.
+    relative_path = video_info.get("path", "")
+    video_path = DOWNLOADS_DIR / relative_path
+    if not video_path.exists():
+        raise HTTPException(status_code=404, detail="Vídeo não encontrado")
+    content_types = {
+        ".mp4": "video/mp4",
+        ".webm": "video/webm",
+        ".mkv": "video/x-matroska",
+    }
+    content_type = content_types.get(video_path.suffix.lower(), "video/mp4")
     return StreamingResponse(generate_video_stream(video_path), media_type=content_type)
 
 
 @app.get("/audios/{audio_id}/stream/")
 async def stream_audio(audio_id: str, token_data: dict = Depends(verify_token)):
-    """Endpoint para streaming de áudio (requer autenticação)"""
+    """Streaming de áudio (legacy mapping fast-path; falls back to DB for S3 rows)."""
     try:
         logger.debug(f"Solicitado streaming do áudio: {audio_id}")
 
-        # Busca o áudio no mapeamento
-        if audio_id not in audio_mapping:
-            logger.warning(f"Áudio não encontrado no mapeamento: {audio_id}")
+        # L3: `audio_mapping` is an in-memory cache populated by
+        # AudioDownloadManager at download time. Same semantics as
+        # `video_mapping` (see stream_video for the full note): a fast path
+        # for local files in a warm process, with graceful fallback to the DB
+        # for S3-backed rows, post-restart lookups, and stale-mapping cases.
+        if audio_id in audio_mapping:
+            audio_path = audio_mapping[audio_id]
+            if audio_path.exists():
+                content_type = "audio/mp4"
+                suffix = audio_path.suffix.lower()
+                if suffix == ".m4a":
+                    content_type = "audio/mp4"
+                elif suffix == ".mp3":
+                    content_type = "audio/mpeg"
+                elif suffix == ".wav":
+                    content_type = "audio/wav"
+                elif suffix == ".ogg":
+                    content_type = "audio/ogg"
+                logger.info(
+                    f"Streaming áudio local {audio_id}: {audio_path} ({content_type})"
+                )
+                return StreamingResponse(
+                    generate_audio_stream(audio_path), media_type=content_type
+                )
+            logger.warning(
+                f"Mapeamento aponta para arquivo inexistente: {audio_path}; "
+                f"caindo no DB para resolução."
+            )
+
+        # Not in mapping (or stale mapping) — look up in DB.
+        audio_info = await audio_manager.get_audio_info(audio_id)
+        if not audio_info:
+            logger.warning(f"Áudio não encontrado no mapeamento nem no DB: {audio_id}")
             raise HTTPException(status_code=404, detail="Áudio não encontrado")
 
-        audio_path = audio_mapping[audio_id]
+        backend = audio_info.get("storage_backend", "local")
+        if backend == "s3" and audio_info.get("s3_key"):
+            storage = get_storage()
+            url = await storage.get_url(
+                audio_info["s3_key"], filename=audio_info.get("name")
+            )
+            return RedirectResponse(url=url, status_code=302)
 
-        # Verifica se o arquivo existe
-        if not audio_path.exists():
-            logger.warning(f"Arquivo de áudio não encontrado: {audio_path}")
+        # Local row, not in mapping (rare — should only happen if mapping
+        # wasn't rebuilt after app restart). Serve from disk.
+        audio_file_path = AUDIO_DIR.parent / audio_info["path"]
+        if not audio_file_path.exists():
             raise HTTPException(
                 status_code=404, detail="Arquivo de áudio não encontrado"
             )
-
-        # Determina o tipo de mídia
         content_type = "audio/mp4"
-        if audio_path.suffix.lower() == ".m4a":
-            content_type = "audio/mp4"
-        elif audio_path.suffix.lower() == ".mp3":
+        suffix = audio_file_path.suffix.lower()
+        if suffix == ".mp3":
             content_type = "audio/mpeg"
-        elif audio_path.suffix.lower() == ".wav":
+        elif suffix == ".wav":
             content_type = "audio/wav"
-        elif audio_path.suffix.lower() == ".ogg":
-            content_type = "audio/ogg"
-
-        logger.info(f"Streaming áudio {audio_id}: {audio_path} ({content_type})")
-
         return StreamingResponse(
-            generate_audio_stream(audio_path), media_type=content_type
+            generate_audio_stream(audio_file_path), media_type=content_type
         )
 
     except HTTPException:
@@ -827,11 +907,14 @@ async def get_video_download_status(
 async def stream_downloaded_video(
     video_id: str, token_data: dict = Depends(verify_token)
 ):
-    """Streaming de vídeo baixado do YouTube"""
+    """Streaming de vídeo baixado (local) ou redirect para S3 presigned."""
     try:
         logger.debug(f"Solicitado streaming do vídeo: {video_id}")
 
         video_info = await video_manager.get_video_by_youtube_id(video_id)
+        if not video_info:
+            # Fallback: maybe the path param is the row id, not the YouTube id.
+            video_info = await video_manager.get_video_info(video_id)
 
         if not video_info:
             logger.warning(f"Vídeo não encontrado: {video_id}")
@@ -844,7 +927,19 @@ async def stream_downloaded_video(
                 detail=f"Vídeo ainda não está pronto. Status: {video_info.get('download_status')}",
             )
 
-        # O path no banco é relativo (ex: videos/id/file.mp4), construir caminho absoluto
+        backend = video_info.get("storage_backend", "local")
+
+        if backend == "s3":
+            s3_key = video_info.get("s3_key")
+            if not s3_key:
+                logger.error(f"S3 row sem s3_key: {video_id}")
+                raise HTTPException(status_code=500, detail="Row S3 sem s3_key")
+            storage = get_storage()
+            url = await storage.get_url(s3_key, filename=video_info.get("name"))
+            logger.info(f"Redirecting video {video_id} to S3 presigned URL")
+            return RedirectResponse(url=url, status_code=302)
+
+        # Local backend (legacy behavior)
         relative_path = video_info.get("path", "")
         video_path = DOWNLOADS_DIR / relative_path
 
@@ -859,10 +954,9 @@ async def stream_downloaded_video(
             ".webm": "video/webm",
             ".mkv": "video/x-matroska",
         }
-
         content_type = content_types.get(video_path.suffix.lower(), "video/mp4")
 
-        logger.info(f"Iniciando streaming do vídeo: {video_path}")
+        logger.info(f"Iniciando streaming local do vídeo: {video_path}")
         return StreamingResponse(
             generate_video_stream(video_path), media_type=content_type
         )
@@ -912,21 +1006,39 @@ async def transcribe_audio(
 
         if audio_info:
             logger.debug(f"Áudio encontrado: {audio_info['id']}")
-            media_path = AUDIO_DIR.parent / audio_info["path"]
-
-            if not media_path.exists():
-                logger.error(f"Arquivo de áudio não encontrado: {media_path}")
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Arquivo de áudio não encontrado: {media_path}",
+            # C1 fix: for S3-backed rows, the local path may not exist (the file
+            # was uploaded and possibly cleaned up). Materialize from S3 to a
+            # tempfile so the downstream transcribe_task can read it. The tempfile
+            # is cleaned up in the `finally` of transcribe_task (see M1 fix below).
+            if audio_info.get("storage_backend") == "s3" and audio_info.get("s3_key"):
+                storage = get_storage()
+                media_path = await storage.download_to_temp(audio_info["s3_key"])
+                logger.info(
+                    f"S3 audio materializado em tempfile para transcrição: {media_path}"
                 )
+            else:
+                media_path = DOWNLOADS_DIR / audio_info["path"]
+                if not media_path.exists():
+                    logger.error(f"Arquivo de áudio não encontrado: {media_path}")
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Arquivo de áudio não encontrado: {media_path}",
+                    )
 
             transcription_status = audio_info.get("transcription_status", "none")
 
             if transcription_status == "ended" and audio_info.get("transcription_path"):
-                transcription_path = AUDIO_DIR.parent / audio_info["transcription_path"]
+                transcription_path = DOWNLOADS_DIR / audio_info["transcription_path"]
                 if transcription_path.exists():
                     logger.info(f"Transcrição já existe: {transcription_path}")
+                    # The S3 tempfile (if any) is no longer needed in this branch.
+                    if audio_info.get("storage_backend") == "s3":
+                        try:
+                            Path(media_path).unlink(missing_ok=True)
+                        except Exception as cleanup_err:
+                            logger.warning(
+                                f"Falha ao remover tempfile S3 {media_path}: {cleanup_err}"
+                            )
                     return TranscriptionResponse(
                         file_id=request.file_id,
                         transcription_path=str(transcription_path),
@@ -936,6 +1048,14 @@ async def transcribe_audio(
 
             elif transcription_status == "started":
                 logger.info(f"Transcrição já está em andamento para: {request.file_id}")
+                # Drop the tempfile — the running transcription task owns the work.
+                if audio_info.get("storage_backend") == "s3":
+                    try:
+                        Path(media_path).unlink(missing_ok=True)
+                    except Exception as cleanup_err:
+                        logger.warning(
+                            f"Falha ao remover tempfile S3 {media_path}: {cleanup_err}"
+                        )
                 return TranscriptionResponse(
                     file_id=request.file_id,
                     transcription_path="",
@@ -951,14 +1071,23 @@ async def transcribe_audio(
 
             if video_info:
                 logger.debug(f"Vídeo encontrado: {video_info['id']}")
-                media_path = AUDIO_DIR.parent / video_info["path"]
-
-                if not media_path.exists():
-                    logger.error(f"Arquivo de vídeo não encontrado: {media_path}")
-                    raise HTTPException(
-                        status_code=404,
-                        detail=f"Arquivo de vídeo não encontrado: {media_path}",
+                # C1 fix: same S3-aware materialization as for audio (above).
+                if video_info.get("storage_backend") == "s3" and video_info.get(
+                    "s3_key"
+                ):
+                    storage = get_storage()
+                    media_path = await storage.download_to_temp(video_info["s3_key"])
+                    logger.info(
+                        f"S3 video materializado em tempfile para transcrição: {media_path}"
                     )
+                else:
+                    media_path = DOWNLOADS_DIR / video_info["path"]
+                    if not media_path.exists():
+                        logger.error(f"Arquivo de vídeo não encontrado: {media_path}")
+                        raise HTTPException(
+                            status_code=404,
+                            detail=f"Arquivo de vídeo não encontrado: {media_path}",
+                        )
 
                 transcription_status = video_info.get("transcription_status", "none")
 
@@ -966,10 +1095,18 @@ async def transcribe_audio(
                     "transcription_path"
                 ):
                     transcription_path = (
-                        AUDIO_DIR.parent / video_info["transcription_path"]
+                        DOWNLOADS_DIR / video_info["transcription_path"]
                     )
                     if transcription_path.exists():
                         logger.info(f"Transcrição já existe: {transcription_path}")
+                        # The S3 tempfile (if any) is no longer needed in this branch.
+                        if video_info.get("storage_backend") == "s3":
+                            try:
+                                Path(media_path).unlink(missing_ok=True)
+                            except Exception as cleanup_err:
+                                logger.warning(
+                                    f"Falha ao remover tempfile S3 {media_path}: {cleanup_err}"
+                                )
                         return TranscriptionResponse(
                             file_id=request.file_id,
                             transcription_path=str(transcription_path),
@@ -981,6 +1118,14 @@ async def transcribe_audio(
                     logger.info(
                         f"Transcrição já está em andamento para: {request.file_id}"
                     )
+                    # Drop the tempfile — the running transcription task owns the work.
+                    if video_info.get("storage_backend") == "s3":
+                        try:
+                            Path(media_path).unlink(missing_ok=True)
+                        except Exception as cleanup_err:
+                            logger.warning(
+                                f"Falha ao remover tempfile S3 {media_path}: {cleanup_err}"
+                            )
                     return TranscriptionResponse(
                         file_id=request.file_id,
                         transcription_path="",
@@ -1006,18 +1151,58 @@ async def transcribe_audio(
                         detail=f"Arquivo de áudio/vídeo não encontrado: {request.file_id}",
                     )
 
-        transcription_file = media_path.with_suffix(".md")
+        # C1 fix: derive the transcript path from the row's `path` column (which is
+        # ALWAYS the relative-to-DOWNLOADS_DIR location set at row creation, regardless
+        # of storage_backend). For S3 rows, media_path is a /tmp/... file from
+        # download_to_temp — siblings of that path are NOT under DOWNLOADS_DIR, so
+        # `media_path.with_suffix('.md')` + `relative_to(AUDIO_DIR.parent)` would crash.
+        # Fallback (no row at all): media_path is a real on-disk file inside
+        # DOWNLOADS_DIR (find_audio_file scanned local dirs), so the legacy behavior
+        # holds.
+        if audio_info and audio_info.get("path"):
+            transcription_file = DOWNLOADS_DIR / Path(audio_info["path"]).with_suffix(
+                ".md"
+            )
+        elif video_info and video_info.get("path"):
+            transcription_file = DOWNLOADS_DIR / Path(video_info["path"]).with_suffix(
+                ".md"
+            )
+        else:
+            transcription_file = media_path.with_suffix(".md")
+
+        # M1 fix: if find_audio_file materialized an S3 object as a /tmp file, we must
+        # clean it up after the background task finishes. This flag is only true when
+        # neither audio_info nor video_info was provided AND the row backing media_path
+        # is S3 (find_audio_file already returned the temp path in that branch).
+        # In the current flow both rows are looked up above first; the fallback branch
+        # only runs when neither was found — and in that case find_audio_file scanned
+        # the local filesystem (no S3 lookup), so no tempfile to clean. We still pass
+        # the explicit storage_backend hints from the row to be safe.
+        media_is_tempfile = False
+        if audio_info and audio_info.get("storage_backend") == "s3":
+            media_is_tempfile = True
+        elif video_info and video_info.get("storage_backend") == "s3":
+            media_is_tempfile = True
 
         if transcription_file.exists():
             logger.info(f"Transcrição já existe: {transcription_file}")
 
+            # The /tmp media copy (if any) is no longer needed.
+            if media_is_tempfile:
+                try:
+                    Path(media_path).unlink(missing_ok=True)
+                except Exception as cleanup_err:
+                    logger.warning(
+                        f"Falha ao remover tempfile S3 {media_path}: {cleanup_err}"
+                    )
+
             if audio_info:
-                rel_path = str(transcription_file.relative_to(AUDIO_DIR.parent))
+                rel_path = str(transcription_file.relative_to(DOWNLOADS_DIR))
                 await audio_manager.update_transcription_status(
                     audio_info["id"], "ended", rel_path
                 )
             elif video_info:
-                rel_path = str(transcription_file.relative_to(AUDIO_DIR.parent))
+                rel_path = str(transcription_file.relative_to(DOWNLOADS_DIR))
                 await video_manager.update_transcription_status(
                     video_info["id"], "ended", rel_path
                 )
@@ -1029,6 +1214,10 @@ async def transcribe_audio(
                 message="Transcrição já existe",
             )
 
+        # Ensure the transcript output directory exists for S3 rows (the audio
+        # parent dir may have been cleaned up after upload).
+        transcription_file.parent.mkdir(parents=True, exist_ok=True)
+
         # Atualiza o status para "started"
         if audio_info:
             await audio_manager.update_transcription_status(audio_info["id"], "started")
@@ -1039,6 +1228,7 @@ async def transcribe_audio(
         _audio_info = audio_info
         _video_info = video_info
         _media_path = media_path
+        _media_is_tempfile = media_is_tempfile
 
         # Tarefa em segundo plano para transcrição
         def transcribe_task():
@@ -1058,18 +1248,14 @@ async def transcribe_audio(
                     )
 
                     if _audio_info:
-                        rel_path = Path(transcription_path).relative_to(
-                            AUDIO_DIR.parent
-                        )
+                        rel_path = Path(transcription_path).relative_to(DOWNLOADS_DIR)
                         asyncio.run(
                             audio_manager.update_transcription_status(
                                 _audio_info["id"], "ended", str(rel_path)
                             )
                         )
                     elif _video_info:
-                        rel_path = Path(transcription_path).relative_to(
-                            AUDIO_DIR.parent
-                        )
+                        rel_path = Path(transcription_path).relative_to(DOWNLOADS_DIR)
                         asyncio.run(
                             video_manager.update_transcription_status(
                                 _video_info["id"], "ended", str(rel_path)
@@ -1105,6 +1291,17 @@ async def transcribe_audio(
                         )
                     )
                 logger.exception(f"Erro na tarefa de transcrição: {str(e)}")
+            finally:
+                # M1 fix (option b): when media was materialized from S3 into /tmp,
+                # delete the tempfile after transcription completes (success OR error).
+                if _media_is_tempfile:
+                    try:
+                        Path(_media_path).unlink(missing_ok=True)
+                        logger.debug(f"Tempfile S3 removido: {_media_path}")
+                    except Exception as cleanup_err:
+                        logger.warning(
+                            f"Falha ao remover tempfile S3 {_media_path}: {cleanup_err}"
+                        )
 
         background_tasks.add_task(transcribe_task)
 
@@ -1132,7 +1329,7 @@ async def get_transcription(file_id: str, token_data: dict = Depends(verify_toke
         audio_info = await audio_manager.get_audio_info(file_id)
 
         if audio_info and audio_info.get("transcription_status") == "ended":
-            transcription_path = AUDIO_DIR.parent / audio_info["transcription_path"]
+            transcription_path = DOWNLOADS_DIR / audio_info["transcription_path"]
 
             if transcription_path.exists():
                 logger.debug(f"Transcrição encontrada: {transcription_path}")
@@ -1146,9 +1343,51 @@ async def get_transcription(file_id: str, token_data: dict = Depends(verify_toke
                     f"Caminho de transcrição não existe: {transcription_path}"
                 )
 
+        # C1 fix: also try video_info before falling back to find_audio_file (which,
+        # for S3-backed rows, downloads to /tmp and would produce a /tmp/.md path
+        # that never matches the deterministic on-disk transcript location).
+        video_info = await video_manager.get_video_info(file_id)
+        if video_info and video_info.get("transcription_status") == "ended":
+            transcription_path = DOWNLOADS_DIR / video_info["transcription_path"]
+            if transcription_path.exists():
+                logger.debug(f"Transcrição encontrada: {transcription_path}")
+                return FileResponse(
+                    path=transcription_path,
+                    media_type="text/markdown",
+                    filename=transcription_path.name,
+                )
+
         try:
             audio_file = await TranscriptionService.find_audio_file(file_id)
-            transcription_file = audio_file.with_suffix(".md")
+            # C1 fix: derive transcript path from the row's `path` column when available
+            # (deterministic under DOWNLOADS_DIR). Only fall back to `audio_file.with_suffix`
+            # when there's no row — that branch is local-only (find_audio_file scanned disk).
+            media_is_tempfile = False
+            if audio_info and audio_info.get("path"):
+                transcription_file = DOWNLOADS_DIR / Path(
+                    audio_info["path"]
+                ).with_suffix(".md")
+                if audio_info.get("storage_backend") == "s3":
+                    media_is_tempfile = True
+            elif video_info and video_info.get("path"):
+                transcription_file = DOWNLOADS_DIR / Path(
+                    video_info["path"]
+                ).with_suffix(".md")
+                if video_info.get("storage_backend") == "s3":
+                    media_is_tempfile = True
+            else:
+                transcription_file = audio_file.with_suffix(".md")
+
+            # M1 fix: if find_audio_file pulled the media from S3 into /tmp, clean
+            # up immediately — the media file is not needed by this endpoint, only
+            # the (already-on-disk) transcript is read below.
+            if media_is_tempfile:
+                try:
+                    Path(audio_file).unlink(missing_ok=True)
+                except Exception as cleanup_err:
+                    logger.warning(
+                        f"Falha ao remover tempfile S3 {audio_file}: {cleanup_err}"
+                    )
 
             if not transcription_file.exists():
                 logger.error(f"Transcrição não encontrada para: {file_id}")
@@ -1160,7 +1399,7 @@ async def get_transcription(file_id: str, token_data: dict = Depends(verify_toke
             logger.debug(f"Transcrição encontrada: {transcription_file}")
 
             if audio_info and audio_info.get("transcription_status") != "ended":
-                rel_path = str(transcription_file.relative_to(AUDIO_DIR.parent))
+                rel_path = str(transcription_file.relative_to(DOWNLOADS_DIR))
                 await audio_manager.update_transcription_status(
                     audio_info["id"], "ended", rel_path
                 )
@@ -1183,7 +1422,7 @@ async def get_transcription(file_id: str, token_data: dict = Depends(verify_toke
             logger.debug(f"Transcrição encontrada por busca: {transcription_file}")
 
             if audio_info:
-                rel_path = str(transcription_file.relative_to(AUDIO_DIR.parent))
+                rel_path = str(transcription_file.relative_to(DOWNLOADS_DIR))
                 await audio_manager.update_transcription_status(
                     audio_info["id"], "ended", rel_path
                 )
@@ -1204,7 +1443,7 @@ async def get_transcription(file_id: str, token_data: dict = Depends(verify_toke
 
 @app.get("/audio/stream/{audio_id}")
 async def stream_audio_file(audio_id: str, token: str = Query(None)):
-    """Endpoint para servir arquivos de áudio com autenticação opcional"""
+    """Servir áudio (local FileResponse) ou redirect para S3 presigned."""
     try:
         if token:
             try:
@@ -1215,15 +1454,25 @@ async def stream_audio_file(audio_id: str, token: str = Query(None)):
 
         logger.debug(f"Solicitado stream do áudio: {audio_id}")
 
-        # Busca no banco de dados
         audio = await audio_manager.get_audio_info(audio_id)
-
         if not audio:
             logger.warning(f"Áudio não encontrado: {audio_id}")
             raise HTTPException(status_code=404, detail="Áudio não encontrado")
 
-        audio_file_path = AUDIO_DIR.parent / audio["path"]
+        backend = audio.get("storage_backend", "local")
 
+        if backend == "s3":
+            s3_key = audio.get("s3_key")
+            if not s3_key:
+                logger.error(f"S3 row sem s3_key: {audio_id}")
+                raise HTTPException(status_code=500, detail="Row S3 sem s3_key")
+            storage = get_storage()
+            url = await storage.get_url(s3_key, filename=audio.get("name"))
+            logger.info(f"Redirecting audio {audio_id} to S3 presigned URL")
+            return RedirectResponse(url=url, status_code=302)
+
+        # Local backend
+        audio_file_path = AUDIO_DIR.parent / audio["path"]
         if not audio_file_path.exists():
             logger.warning(f"Arquivo não encontrado: {audio_file_path}")
             raise HTTPException(
@@ -1238,8 +1487,9 @@ async def stream_audio_file(audio_id: str, token: str = Query(None)):
         elif audio_file_path.suffix.lower() == ".wav":
             content_type = "audio/wav"
 
-        logger.info(f"Servindo áudio {audio_id}: {audio_file_path} ({content_type})")
-
+        logger.info(
+            f"Servindo áudio local {audio_id}: {audio_file_path} ({content_type})"
+        )
         return FileResponse(
             path=str(audio_file_path),
             media_type=content_type,

@@ -96,53 +96,268 @@ uv run uvicorn app.uwtv.main:app --reload --host 0.0.0.0 --port 8000
 
 The server will be available at `http://localhost:8000`.
 
-## Storage Backends
+## Persistence Manual
 
-The service supports two storage backends, selected at startup via `STORAGE_BACKEND`:
+The service exposes a single contract: every finished download lands at a stable, addressable location, and every row knows which backend stores its bytes. How that contract is fulfilled is a deployment decision. This section covers every supported mode.
 
-- **`local`** (default) — Finished downloads stay on disk under `downloads/`. Streaming endpoints serve bytes directly via `FileResponse` / `StreamingResponse`. Zero external dependencies.
-- **`s3`** — Finished downloads are uploaded to AWS S3 (or any S3-compatible service: MinIO, LocalStack). Streaming endpoints return a `302 Redirect` to a short-lived presigned GET URL.
+### Quick decision matrix
 
-### Switching to S3
+| Your situation | Recommended mode |
+|---|---|
+| Local development, single user, small library | **Local filesystem** (default) |
+| Home server / NAS, occasional access | **Local filesystem** on external mount |
+| Production single-host with Docker | **Docker bind mount** to a dedicated host path |
+| Production multi-host, shared access | **AWS S3** (or S3-compatible) |
+| Self-hosted alternative to AWS | **MinIO** (S3 protocol, runs in Docker) |
+| Cost-optimized cold archive | **Backblaze B2** / **Wasabi** / **Cloudflare R2** (S3-compatible) |
+| Testing without real cloud | **LocalStack** or **MinIO** dev profile |
+| Hybrid (local for hot, S3 for cold) | **Local + S3** with `S3_DELETE_LOCAL_AFTER_UPLOAD=false` |
 
-Set in your `.env`:
+The implementation distinguishes two backend families (`local` and `s3`), selected at startup via `STORAGE_BACKEND`. Each row stores its own `storage_backend` value, so legacy data downloaded under a previous mode keeps working when you switch.
 
+### Behavior shared by every mode
+
+- **yt-dlp always writes to local disk first.** ffmpeg muxing requires seekable files, so a transient local copy is unavoidable. With `STORAGE_BACKEND=s3`, the file is uploaded after download success.
+- **Streaming endpoints branch per row.** Local rows serve bytes via `FileResponse` / `StreamingResponse`. S3 rows return a `302 Redirect` to a short-lived presigned GET URL.
+- **Deletion order is local → DB → S3.** Local FS first, DB row next, S3 object best-effort last. An S3 orphan is recoverable via a sweeper; a DB row pointing at a missing S3 object is user-visible breakage.
+- **Transcription is backend-agnostic.** S3-backed rows are materialized into a `tempfile` via `Storage.download_to_temp()` (streamed in 8 MB chunks to avoid OOM), transcribed, then cleaned up in `finally`. Transcript markdown is always written to disk regardless of media backend.
+
+### Mode 1 — Local filesystem (default)
+
+#### 1.1. Default project paths (no configuration)
+
+```env
+# .env — nothing storage-related needed
 ```
+
+Files go to `./downloads/audio/{id}/` and `./downloads/videos/{id}/` relative to the project root. SQLite lives at `./data/youtube_downloader.db`. Use this for development and quick trials.
+
+#### 1.2. Custom host path (run outside Docker)
+
+The download paths are derived from `app/services/configs.py`. To redirect them without modifying code, set the working directory and let `./downloads` resolve there:
+
+```bash
+cd /mnt/midia/youtube-downloader
+uv run uvicorn app.uwtv.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+The `downloads/` and `data/` directories will be created next to where the process starts.
+
+#### 1.3. Docker bind mount (default `docker-compose.yml`)
+
+```yaml
+services:
+  app:
+    volumes:
+      - ./data:/app/data
+      - ./downloads:/app/downloads
+      - ./cookies:/app/cookies:ro
+```
+
+The host's `./data` and `./downloads` directories are mounted into the container. Files are visible from both sides — `ls ./downloads/audio/` on the host shows what's inside. `docker compose down` does not remove them; only `rm -rf ./downloads` does.
+
+#### 1.4. Bind mount to an external location
+
+Edit `docker-compose.yml` to point at a different host path — useful for HDs, NAS mounts, or larger partitions:
+
+```yaml
+volumes:
+  - /mnt/hd-externo/youtube-downloader/data:/app/data
+  - /mnt/hd-externo/youtube-downloader/downloads:/app/downloads
+```
+
+Or parameterize via env so the compose file stays generic:
+
+```yaml
+volumes:
+  - ${DATA_DIR:-./data}:/app/data
+  - ${DOWNLOADS_DIR:-./downloads}:/app/downloads
+```
+
+```env
+# .env
+DATA_DIR=/mnt/hd-externo/youtube-downloader/data
+DOWNLOADS_DIR=/mnt/hd-externo/youtube-downloader/downloads
+```
+
+#### 1.5. Docker-managed named volumes
+
+Use this when you don't want to think about host paths and don't need to inspect files directly:
+
+```yaml
+services:
+  app:
+    volumes:
+      - app-data:/app/data
+      - app-downloads:/app/downloads
+
+volumes:
+  app-data:
+  app-downloads:
+```
+
+Files live under `/var/lib/docker/volumes/youtube_downloader_app-downloads/_data/`. Survive `docker compose down`; lost only with `docker compose down -v`.
+
+#### 1.6. Network filesystem (NFS / SMB)
+
+Mount the remote share on the host first, then bind-mount that path into the container:
+
+```bash
+# Host
+sudo mount -t nfs nas.local:/exports/media /mnt/nas-media
+
+# docker-compose.yml
+volumes:
+  - /mnt/nas-media/youtube-downloader/downloads:/app/downloads
+```
+
+Caveats: NFS locks can interact poorly with SQLite. Keep `data/` on local disk and only put `downloads/` on the share.
+
+### Mode 2 — Object storage via S3 protocol
+
+Set `STORAGE_BACKEND=s3` plus a bucket and a region. Credentials are resolved via the standard AWS chain (env, `~/.aws/credentials`, IAM role, IRSA, container metadata, SSO). Prefer instance/role identity over inline keys in production.
+
+#### 2.1. AWS S3 (production)
+
+```env
 STORAGE_BACKEND=s3
-AWS_S3_BUCKET=my-bucket
+AWS_S3_BUCKET=my-prod-bucket
 AWS_REGION=us-east-1
+# Credentials picked up from IAM role attached to the EC2/ECS/EKS workload.
+S3_PRESIGNED_URL_TTL=21600          # 6h — covers long sessions
+S3_DELETE_LOCAL_AFTER_UPLOAD=true   # default; switch to false for hybrid
 ```
 
-Credentials are resolved via the standard AWS chain: env vars (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`), `~/.aws/credentials`, IAM roles, IRSA, etc. Prefer IAM roles or IRSA over inline keys.
+Minimum IAM permissions on the bucket: `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`, `s3:HeadObject`.
 
-### Behavior
+#### 2.2. AWS S3 with explicit credentials (workstation / CI)
 
-- yt-dlp always downloads to disk first (ffmpeg muxing requires seekable files). The S3 upload happens **after** download success.
-- Each row has a `storage_backend` column. Rows already downloaded under the previous backend are **not** migrated; the service serves each row according to its own row-level backend value.
-- `S3_DELETE_LOCAL_AFTER_UPLOAD=true` (default) removes the local copy after upload. Set to `false` to keep a redundant copy.
-- Transcription pulls S3-backed media to a tempfile via `Storage.download_to_temp()`; the tempfile is removed in a `finally` block after the transcript is produced.
+```env
+STORAGE_BACKEND=s3
+AWS_S3_BUCKET=my-personal-bucket
+AWS_REGION=sa-east-1
+AWS_ACCESS_KEY_ID=AKIA...
+AWS_SECRET_ACCESS_KEY=...
+```
 
-### Local development with MinIO
+Use this only when an IAM role isn't available. Never commit the populated `.env`.
+
+#### 2.3. MinIO (self-hosted S3 protocol)
+
+Two deployment paths:
+
+**Dev / local MinIO via this repo's Docker profile:**
 
 ```bash
 docker compose --profile s3-dev up -d
-# Open http://localhost:9001 (minioadmin / minioadmin).
-# The minio-init sidecar auto-creates the bucket "youtube-downloader-dev"
-# (override via MINIO_DEV_BUCKET in your .env).
-# In .env:
-#   STORAGE_BACKEND=s3
-#   AWS_S3_BUCKET=youtube-downloader-dev
-#   AWS_REGION=us-east-1
-#   AWS_S3_ENDPOINT_URL=http://localhost:9000
-#   AWS_ACCESS_KEY_ID=minioadmin
-#   AWS_SECRET_ACCESS_KEY=minioadmin
+# Console: http://localhost:9001 (minioadmin / minioadmin)
+# Bucket "youtube-downloader-dev" auto-created by the minio-init sidecar.
 ```
+
+```env
+STORAGE_BACKEND=s3
+AWS_S3_BUCKET=youtube-downloader-dev
+AWS_REGION=us-east-1
+AWS_S3_ENDPOINT_URL=http://minio:9000     # inside compose network
+# Or: http://localhost:9000 if running the app outside compose
+AWS_ACCESS_KEY_ID=minioadmin
+AWS_SECRET_ACCESS_KEY=minioadmin
+```
+
+Override the bucket name via `MINIO_DEV_BUCKET` in `.env` before bringing the profile up.
+
+**Production MinIO (separate host or cluster):**
+
+```env
+STORAGE_BACKEND=s3
+AWS_S3_BUCKET=media-archive
+AWS_REGION=us-east-1                       # arbitrary; MinIO ignores
+AWS_S3_ENDPOINT_URL=https://minio.internal.example.com
+AWS_ACCESS_KEY_ID=<minio-access-key>
+AWS_SECRET_ACCESS_KEY=<minio-secret-key>
+```
+
+#### 2.4. Other S3-compatible providers
+
+The endpoint and region are the only knobs that change. Tested-equivalent endpoints:
+
+| Provider | `AWS_S3_ENDPOINT_URL` | `AWS_REGION` |
+|---|---|---|
+| **DigitalOcean Spaces** | `https://nyc3.digitaloceanspaces.com` (substitute region) | `nyc3` / `sfo3` / `fra1` etc. |
+| **Backblaze B2** | `https://s3.us-west-002.backblazeb2.com` (your region) | `us-west-002` |
+| **Wasabi** | `https://s3.us-east-1.wasabisys.com` | `us-east-1` |
+| **Cloudflare R2** | `https://<account-id>.r2.cloudflarestorage.com` | `auto` |
+| **LocalStack** (test) | `http://localhost:4566` | `us-east-1` |
+
+Pick the region documented by the provider and use their access-key/secret pair.
+
+#### 2.5. Tuning knobs
+
+| Variable | Default | Effect |
+|---|---|---|
+| `S3_PRESIGNED_URL_TTL` | `21600` (6h) | Validity window of stream redirect URLs. Max 7 days (AWS hard cap). |
+| `S3_DELETE_LOCAL_AFTER_UPLOAD` | `true` | `false` keeps a redundant local copy after successful upload (hybrid mode). |
+| `AWS_S3_KEY_PREFIX` | unset | Prepended to every key (e.g., `youtube-downloader/audio/abc.m4a`). Useful for sharing a bucket with other apps. |
+
+### Mode 3 — Hybrid setups
+
+#### 3.1. Local hot + S3 archive (`S3_DELETE_LOCAL_AFTER_UPLOAD=false`)
+
+Both copies persist. Streaming still goes through the S3 path. Use when:
+
+- You want a disaster-recovery copy on disk
+- Re-uploads to a different bucket are anticipated
+- Local FS is fast enough that you'd rather not pay S3 egress on every play
+
+Trade-off: disk usage doubles.
+
+#### 3.2. Mixed-vintage library
+
+After switching `STORAGE_BACKEND` from `local` to `s3`, **existing rows are not migrated**. Each row keeps the `storage_backend` value it had when finished downloading. Streaming endpoints transparently serve local rows from disk and S3 rows from S3 — no UI distinction.
+
+To force a row onto the new backend, delete and re-download it via the API (yt-dlp will re-fetch the source).
+
+### Mode 4 — Testing without real cloud
+
+LocalStack and the bundled MinIO dev profile both speak the S3 protocol. Point `AWS_S3_ENDPOINT_URL` at them and you can run the full upload/presigned-URL/download cycle offline. The repo's `docker compose --profile s3-dev` is the lowest-friction option.
+
+### Cookies and downloads/ in Docker (orthogonal to storage backend)
+
+```yaml
+volumes:
+  - ./cookies:/app/cookies:ro
+```
+
+```env
+YT_COOKIES_FILE=/app/cookies/youtube.txt
+INSTAGRAM_COOKIES_FILE=/app/cookies/instagram.txt
+```
+
+These paths are read-only inside the container and never persisted to S3; they belong to the yt-dlp authentication layer, not the storage layer.
+
+### Migrating data between modes
+
+There is no built-in migration tool. The recommended workflow is one of:
+
+1. **Stop the service, copy bytes, swap config.**
+   ```bash
+   # Local → S3 (example with aws-cli)
+   aws s3 sync ./downloads s3://my-bucket/youtube-downloader/
+
+   # Update the DB to flip rows to s3 (manual SQL or a one-off script)
+   sqlite3 ./data/youtube_downloader.db "UPDATE audios SET storage_backend='s3', s3_key='youtube-downloader/'||path WHERE storage_backend='local';"
+   ```
+
+2. **Delete + re-download.** Simplest when the library is small or the source URLs are still accessible.
+
+3. **Side-by-side.** Run a second instance pointing at the new backend, copy individual rows, switch DNS / port.
 
 ### Known v1 limitations
 
-- No retroactive migration of legacy local rows.
-- `app/services/files.py:scan_video_directory` only lists files on disk — S3-only rows are visible via the DB-backed `/video/list-downloads`, not via `/videos`.
-- Transcription markdown files always live on disk.
+- No retroactive migration of legacy local rows (see above for manual workflows).
+- `app/services/files.py:scan_video_directory` only lists files on disk — S3-only rows are visible via the DB-backed `/video/list-downloads`, not via the legacy `/videos` filesystem scan.
+- Transcription markdown files always live on disk regardless of media storage backend.
+- Single uvicorn worker recommended. SQLite write contention degrades multi-worker throughput; move to Postgres before scaling out.
 
 ## Main Endpoints
 

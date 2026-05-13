@@ -110,4 +110,13 @@ O diretório `web_client/` contém uma interface web para interagir com a API.
 
 ## Licença
 
-Apache License 2.0 — veja o arquivo [LICENSE](LICENSE) para o texto completo.
+GNU Affero General Public License v3.0 (AGPL-3.0) — veja [LICENSE](LICENSE) para o texto completo.
+
+Resumo das obrigações para quem redistribuir ou rodar como serviço de rede:
+
+- Disponibilizar o código-fonte (incluindo modificações) sob a mesma licença
+- Preservar avisos de copyright e a referência à AGPL
+- Indicar mudanças relevantes feitas no código
+- Se o software for oferecido a usuários através de uma rede (SaaS), o operador deve fornecer aos usuários acesso ao código-fonte correspondente
+
+Quem apenas usa o software localmente, sem distribuir nem expor como serviço de rede a terceiros, não tem obrigações adicionais.

@@ -18,11 +18,14 @@ from app.services.configs import (
     audio_mapping,
     video_mapping,
     get_yt_dlp_cookies_opts,
+    S3_DELETE_LOCAL_AFTER_UPLOAD,
+    STORAGE_BACKEND,
 )
 from app.db.database import get_db_context
 from app.db.models import Audio, Video
 from app.db.repositories import AudioRepository, VideoRepository
 from app.services.downloaders import get_downloader
+from app.services.storage import get_storage
 
 # Detecta deno e node para resolver JS challenges do YouTube
 _deno_path = shutil.which("deno") or os.path.expanduser("~/.deno/bin/deno")
@@ -357,6 +360,11 @@ class AudioDownloadManager:
                         name=f"{actual_title}.m4a",
                     )
 
+            # Storage strategy hook: upload to S3 if STORAGE_BACKEND=s3,
+            # then optionally remove the local file. No-op for local backend.
+            relative_path = str(filename.relative_to(self.download_dir.parent))
+            await self._upload_to_storage_if_needed(audio_id, filename, relative_path)
+
             # Atualizar mapeamento em memória
             self._add_audio_mappings(filename, info, audio_id)
 
@@ -481,33 +489,159 @@ class AudioDownloadManager:
             repo = AudioRepository(session)
             await repo.update(audio_id, download_progress=progress)
 
+    async def _upload_to_storage_if_needed(
+        self, audio_id: str, local_filename: Path, relative_path: str
+    ) -> None:
+        """Upload the finished audio to the active storage backend.
+
+        For LocalStorage this is a no-op. For S3Storage this PUTs the
+        file under key=relative_path, persists `s3_key` + `storage_backend='s3'`
+        in the DB, and (if S3_DELETE_LOCAL_AFTER_UPLOAD) deletes the
+        local file and its parent directory.
+
+        H1: this method is idempotent. If the row already has
+        `storage_backend='s3'` + a `s3_key` that resolves in the bucket, we
+        short-circuit before touching S3.
+
+        H2: between the PUT and the DB update, we re-fetch the row in the same
+        session to detect a concurrent `delete_audio`. If the row vanished, we
+        best-effort delete the just-uploaded S3 object to avoid an orphan.
+
+        M3 (documented, not fixed): when the S3 upload fails, the row keeps
+        `download_status='ready'` (local file is OK) AND
+        `download_error="S3 upload failed: ..."` (signals the secondary
+        issue). Retrying is via re-invoking this method, which is now
+        idempotent (H1 short-circuit if the previous attempt succeeded).
+        Adding a dedicated `storage_status` column is the proper long-term
+        fix but requires a new Alembic-style migration; deferred to v2.
+        """
+        if STORAGE_BACKEND != "s3":
+            return  # LocalStorage: nothing to do
+
+        storage = get_storage()
+
+        # H1: idempotency. If a previous invocation already promoted this row
+        # to S3 and the object is reachable, do nothing.
+        async with get_db_context() as session:
+            repo = AudioRepository(session)
+            current = await repo.get_by_id(audio_id)
+
+        if current is not None and current.storage_backend == "s3" and current.s3_key:
+            try:
+                if await storage.exists(current.s3_key):
+                    logger.info(
+                        f"Audio {audio_id} already uploaded to s3://.../{current.s3_key}, "
+                        f"skipping re-upload (idempotency)."
+                    )
+                    return
+            except Exception as exists_err:
+                # head_object failure shouldn't block a re-upload attempt;
+                # fall through to PUT (which is itself idempotent on the bucket).
+                logger.debug(
+                    f"S3 exists() check failed for {current.s3_key}, "
+                    f"proceeding with re-upload: {exists_err}"
+                )
+
+        try:
+            s3_key = await storage.put_file(local_filename, relative_path)
+        except Exception as upload_err:
+            logger.error(
+                f"S3 upload failed for audio {audio_id}: {upload_err}. "
+                f"Row remains storage_backend='local'."
+            )
+            # M3: surfacing the failure via download_error is intentional even
+            # though `download_status` stays 'ready'. The local copy is usable;
+            # the operator-visible signal here is "S3 promotion did not happen,
+            # retry on demand".
+            async with get_db_context() as session:
+                repo = AudioRepository(session)
+                await repo.update(
+                    audio_id,
+                    download_error=f"S3 upload failed: {str(upload_err)[:480]}",
+                )
+            return
+
+        # H2: re-fetch in the same session before updating to detect a race
+        # with delete_audio. If the row was deleted while we were uploading,
+        # best-effort delete the S3 object to prevent an orphan.
+        async with get_db_context() as session:
+            repo = AudioRepository(session)
+            still_present = await repo.get_by_id(audio_id)
+            if still_present is None:
+                logger.warning(
+                    f"Audio {audio_id} row was deleted during S3 upload "
+                    f"(orphan key={s3_key}). Best-effort S3 delete."
+                )
+                try:
+                    await storage.delete(s3_key)
+                except Exception as orphan_err:
+                    logger.warning(
+                        f"Orphan S3 cleanup failed for {s3_key}: {orphan_err}"
+                    )
+                return
+            await repo.update(
+                audio_id,
+                storage_backend="s3",
+                s3_key=s3_key,
+            )
+
+        if S3_DELETE_LOCAL_AFTER_UPLOAD:
+            try:
+                if local_filename.exists():
+                    local_filename.unlink()
+                parent = local_filename.parent
+                if parent.exists() and not any(parent.iterdir()):
+                    parent.rmdir()
+                logger.info(f"Local copy removed for audio {audio_id} after S3 upload.")
+            except Exception as cleanup_err:
+                logger.warning(
+                    f"Local cleanup failed for audio {audio_id}: {cleanup_err}"
+                )
+
     async def delete_audio(self, audio_id: str) -> bool:
-        """Exclui um áudio do banco de dados e remove os arquivos físicos."""
+        """Exclui um áudio do banco, S3 (se aplicável) e arquivos locais.
+
+        M4: order is now `local FS -> DB row -> S3`. Rationale: an orphan in
+        S3 is recoverable via a sweeper job; an orphan DB row pointing at a
+        404 S3 key produces a streaming error with no obvious remediation.
+        S3 delete is best-effort and logged.
+        """
         try:
             logger.info(f"Iniciando exclusão do áudio: {audio_id}")
 
-            # Obtém informações do áudio antes de excluir
             audio_info = await self.get_audio_info(audio_id)
             if not audio_info:
                 logger.warning(f"Áudio não encontrado: {audio_id}")
                 return False
 
-            # Remove o diretório físico do áudio
+            # 1) Local filesystem cleanup. Safe even for S3 rows: directory
+            # may have been auto-removed at upload time, or kept if
+            # S3_DELETE_LOCAL_AFTER_UPLOAD=false.
             audio_dir = self.download_dir / audio_id
             if audio_dir.exists() and audio_dir.is_dir():
-                import shutil
-
                 shutil.rmtree(audio_dir)
                 logger.info(f"Diretório removido: {audio_dir}")
 
-            # Remove do mapeamento em memória
             if audio_id in audio_mapping:
                 del audio_mapping[audio_id]
 
-            # Remove do banco de dados
+            # 2) DB row removal — once this commits, the audio is logically gone.
             async with get_db_context() as session:
                 repo = AudioRepository(session)
                 result = await repo.delete(audio_id)
+
+            # 3) Best-effort S3 delete. After the DB row is gone, an S3 orphan
+            # is recoverable (and not user-visible) — never block the delete
+            # on this step.
+            if audio_info.get("storage_backend") == "s3" and audio_info.get("s3_key"):
+                try:
+                    storage = get_storage()
+                    await storage.delete(audio_info["s3_key"])
+                except Exception as s3_err:
+                    logger.warning(
+                        f"S3 delete failed for {audio_id} "
+                        f"(DB+local already cleaned up): {s3_err}"
+                    )
 
             logger.success(f"Áudio excluído com sucesso: {audio_id}")
             return result
@@ -903,6 +1037,11 @@ class VideoDownloadManager:
                         name=f"{actual_title}.mp4",
                     )
 
+            # Storage strategy hook: upload to S3 if STORAGE_BACKEND=s3,
+            # then optionally remove the local file. No-op for local backend.
+            relative_path = str(filename.relative_to(self.download_dir.parent))
+            await self._upload_to_storage_if_needed(video_id, filename, relative_path)
+
             # Atualizar mapeamento em memória
             self._add_video_mappings(filename, info, video_id)
 
@@ -992,33 +1131,128 @@ class VideoDownloadManager:
             repo = VideoRepository(session)
             await repo.update(video_id, download_progress=progress)
 
+    async def _upload_to_storage_if_needed(
+        self, video_id: str, local_filename: Path, relative_path: str
+    ) -> None:
+        """Upload the finished video to the active storage backend.
+
+        Mirrors AudioDownloadManager._upload_to_storage_if_needed. See that
+        method's docstring for the full semantics (H1 idempotency, H2 race
+        protection, M3 error-channel rationale).
+        """
+        if STORAGE_BACKEND != "s3":
+            return
+
+        storage = get_storage()
+
+        # H1: idempotency.
+        async with get_db_context() as session:
+            repo = VideoRepository(session)
+            current = await repo.get_by_id(video_id)
+
+        if current is not None and current.storage_backend == "s3" and current.s3_key:
+            try:
+                if await storage.exists(current.s3_key):
+                    logger.info(
+                        f"Video {video_id} already uploaded to s3://.../{current.s3_key}, "
+                        f"skipping re-upload (idempotency)."
+                    )
+                    return
+            except Exception as exists_err:
+                logger.debug(
+                    f"S3 exists() check failed for {current.s3_key}, "
+                    f"proceeding with re-upload: {exists_err}"
+                )
+
+        try:
+            s3_key = await storage.put_file(local_filename, relative_path)
+        except Exception as upload_err:
+            logger.error(
+                f"S3 upload failed for video {video_id}: {upload_err}. "
+                f"Row remains storage_backend='local'."
+            )
+            # M3: see audio counterpart for rationale.
+            async with get_db_context() as session:
+                repo = VideoRepository(session)
+                await repo.update(
+                    video_id,
+                    download_error=f"S3 upload failed: {str(upload_err)[:480]}",
+                )
+            return
+
+        # H2: detect concurrent delete via same-session re-fetch.
+        async with get_db_context() as session:
+            repo = VideoRepository(session)
+            still_present = await repo.get_by_id(video_id)
+            if still_present is None:
+                logger.warning(
+                    f"Video {video_id} row was deleted during S3 upload "
+                    f"(orphan key={s3_key}). Best-effort S3 delete."
+                )
+                try:
+                    await storage.delete(s3_key)
+                except Exception as orphan_err:
+                    logger.warning(
+                        f"Orphan S3 cleanup failed for {s3_key}: {orphan_err}"
+                    )
+                return
+            await repo.update(
+                video_id,
+                storage_backend="s3",
+                s3_key=s3_key,
+            )
+
+        if S3_DELETE_LOCAL_AFTER_UPLOAD:
+            try:
+                if local_filename.exists():
+                    local_filename.unlink()
+                parent = local_filename.parent
+                if parent.exists() and not any(parent.iterdir()):
+                    parent.rmdir()
+                logger.info(f"Local copy removed for video {video_id} after S3 upload.")
+            except Exception as cleanup_err:
+                logger.warning(
+                    f"Local cleanup failed for video {video_id}: {cleanup_err}"
+                )
+
     async def delete_video(self, video_id: str) -> bool:
-        """Exclui um vídeo do banco de dados e remove os arquivos físicos."""
+        """Exclui um vídeo do banco, S3 (se aplicável) e arquivos locais.
+
+        M4: order is local FS -> DB row -> S3 (best-effort). See
+        AudioDownloadManager.delete_audio for rationale.
+        """
         try:
             logger.info(f"Iniciando exclusão do vídeo: {video_id}")
 
-            # Obtém informações do vídeo antes de excluir
             video_info = await self.get_video_info(video_id)
             if not video_info:
                 logger.warning(f"Vídeo não encontrado: {video_id}")
                 return False
 
-            # Remove o diretório físico do vídeo
+            # 1) Local filesystem cleanup.
             video_dir = self.download_dir / video_id
             if video_dir.exists() and video_dir.is_dir():
-                import shutil
-
                 shutil.rmtree(video_dir)
                 logger.info(f"Diretório removido: {video_dir}")
 
-            # Remove do mapeamento em memória
             if video_id in video_mapping:
                 del video_mapping[video_id]
 
-            # Remove do banco de dados
+            # 2) DB row removal.
             async with get_db_context() as session:
                 repo = VideoRepository(session)
                 result = await repo.delete(video_id)
+
+            # 3) Best-effort S3 delete.
+            if video_info.get("storage_backend") == "s3" and video_info.get("s3_key"):
+                try:
+                    storage = get_storage()
+                    await storage.delete(video_info["s3_key"])
+                except Exception as s3_err:
+                    logger.warning(
+                        f"S3 delete failed for {video_id} "
+                        f"(DB+local already cleaned up): {s3_err}"
+                    )
 
             logger.success(f"Vídeo excluído com sucesso: {video_id}")
             return result

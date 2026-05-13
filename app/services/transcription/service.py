@@ -12,6 +12,7 @@ from app.services.transcription.parsers import (
 )
 from app.services.configs import AUDIO_DIR, VIDEO_DIR, audio_mapping
 from app.services.managers import AudioDownloadManager, VideoDownloadManager
+from app.services.storage import get_storage
 
 
 class AudioLoader(BlobLoader):
@@ -132,10 +133,18 @@ class TranscriptionService:
         audio_info = await audio_manager.get_audio_info(file_id)
 
         if audio_info:
-            # Se encontrou no gerenciador, retorna o caminho do arquivo
             logger.debug(
-                f"Arquivo encontrado no gerenciador de áudio: {audio_info['path']}"
+                f"Arquivo encontrado no gerenciador de áudio: {audio_info['path']} "
+                f"(backend={audio_info.get('storage_backend', 'local')})"
             )
+            if audio_info.get("storage_backend") == "s3" and audio_info.get("s3_key"):
+                storage = get_storage()
+                tmp_path = await storage.download_to_temp(audio_info["s3_key"])
+                logger.info(
+                    f"S3 audio materializado em tempfile para transcrição: {tmp_path}"
+                )
+                return tmp_path
+
             audio_path = AUDIO_DIR.parent / audio_info["path"]
             if audio_path.exists():
                 return audio_path
@@ -149,10 +158,18 @@ class TranscriptionService:
         video_info = await video_manager.get_video_info(file_id)
 
         if video_info:
-            # Se encontrou no gerenciador de vídeos, retorna o caminho do arquivo
             logger.debug(
-                f"Arquivo encontrado no gerenciador de vídeo: {video_info['path']}"
+                f"Arquivo encontrado no gerenciador de vídeo: {video_info['path']} "
+                f"(backend={video_info.get('storage_backend', 'local')})"
             )
+            if video_info.get("storage_backend") == "s3" and video_info.get("s3_key"):
+                storage = get_storage()
+                tmp_path = await storage.download_to_temp(video_info["s3_key"])
+                logger.info(
+                    f"S3 video materializado em tempfile para transcrição: {tmp_path}"
+                )
+                return tmp_path
+
             video_path = VIDEO_DIR.parent / video_info["path"]
             if video_path.exists():
                 return video_path

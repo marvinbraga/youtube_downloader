@@ -78,3 +78,68 @@ def get_yt_dlp_cookies_opts(source: str = "youtube") -> Dict[str, Any]:
         return {"cookiefile": str(resolved)}
 
     return {}
+
+
+# ---------------------------------------------------------------------------
+# Storage backend configuration
+# ---------------------------------------------------------------------------
+
+# STORAGE_BACKEND: 'local' (default) | 's3'
+STORAGE_BACKEND = os.environ.get("STORAGE_BACKEND", "local").strip().lower()
+
+# S3-specific config (only required when STORAGE_BACKEND=s3)
+AWS_S3_BUCKET = os.environ.get("AWS_S3_BUCKET", "").strip()
+AWS_REGION = (
+    os.environ.get("AWS_REGION", "").strip()
+    or os.environ.get("AWS_DEFAULT_REGION", "").strip()
+)
+AWS_S3_ENDPOINT_URL = os.environ.get("AWS_S3_ENDPOINT_URL", "").strip() or None
+AWS_S3_KEY_PREFIX = os.environ.get("AWS_S3_KEY_PREFIX", "").strip().strip("/")
+
+# Credentials are picked up automatically by aioboto3 via the standard
+# AWS credential chain (env vars, ~/.aws/credentials, IMDS, IRSA, etc.).
+# We deliberately do not read AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY in
+# Python — aioboto3 handles them transparently and reading them here only
+# risks accidental logging of secrets.
+
+# How long presigned GET URLs stay valid (seconds). Six hours by default,
+# which covers podcasts and long-form episodes without re-issuing the URL
+# mid-playback session.
+S3_PRESIGNED_URL_TTL = int(os.environ.get("S3_PRESIGNED_URL_TTL", "21600"))
+
+# Whether to delete the local file after a successful S3 upload.
+# 'true' (default) frees disk but breaks local-file tools (transcription
+# falls back to download_to_temp). 'false' keeps a redundant local copy.
+S3_DELETE_LOCAL_AFTER_UPLOAD = (
+    os.environ.get("S3_DELETE_LOCAL_AFTER_UPLOAD", "true").strip().lower() == "true"
+)
+
+
+def validate_storage_config() -> None:
+    """Validate storage configuration. Called once at startup.
+
+    Raises ValueError if STORAGE_BACKEND=s3 but required S3 env vars are
+    missing. Local backend has no required config.
+    """
+    # Import here to avoid a circular import: app.db.models imports nothing
+    # from app.services, but keeping this lazy keeps the dependency direction
+    # explicit at the module level.
+    from app.db.models import STORAGE_BACKENDS, is_valid_storage_backend
+
+    if not is_valid_storage_backend(STORAGE_BACKEND):
+        raise ValueError(
+            f"STORAGE_BACKEND='{STORAGE_BACKEND}' is not supported. "
+            f"Valid values: {', '.join(sorted(STORAGE_BACKENDS))}"
+        )
+    if STORAGE_BACKEND == "s3":
+        missing = []
+        if not AWS_S3_BUCKET:
+            missing.append("AWS_S3_BUCKET")
+        if not AWS_REGION:
+            missing.append("AWS_REGION (or AWS_DEFAULT_REGION)")
+        if missing:
+            raise ValueError("STORAGE_BACKEND=s3 requires: " + ", ".join(missing))
+        if S3_PRESIGNED_URL_TTL <= 0 or S3_PRESIGNED_URL_TTL > 7 * 24 * 3600:
+            raise ValueError(
+                "S3_PRESIGNED_URL_TTL must be > 0 and <= 604800 seconds (7d)."
+            )

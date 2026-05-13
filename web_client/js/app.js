@@ -902,9 +902,22 @@ $(document).ready(function() {
         } catch (error) {
             hideLoading();
             console.error('Error deleting audio:', error);
-            const message = error.responseJSON?.detail || 'Erro ao excluir áudio';
-            showToast(message, 'error');
+            showToast(formatDeleteError(error, 'áudio'), 'error');
         }
+    }
+
+    function formatDeleteError(error, entity) {
+        if (error?.responseJSON?.detail) return error.responseJSON.detail;
+        if (error?.status === 0 || error?.readyState === 0) {
+            return `Servidor não respondeu. Verifique se o backend está rodando em ${API_BASE_URL}.`;
+        }
+        if (error?.statusText === 'timeout') {
+            return `Tempo esgotado ao excluir ${entity}. Tente novamente.`;
+        }
+        if (error?.status >= 500) {
+            return `Erro interno ao excluir ${entity} (HTTP ${error.status}). Veja os logs do servidor.`;
+        }
+        return `Erro ao excluir ${entity}`;
     }
 
     async function deleteVideo(videoId) {
@@ -940,8 +953,7 @@ $(document).ready(function() {
         } catch (error) {
             hideLoading();
             console.error('Error deleting video:', error);
-            const message = error.responseJSON?.detail || 'Erro ao excluir vídeo';
-            showToast(message, 'error');
+            showToast(formatDeleteError(error, 'vídeo'), 'error');
         }
     }
 

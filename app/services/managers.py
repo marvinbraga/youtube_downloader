@@ -513,7 +513,7 @@ class AudioDownloadManager:
             return result
 
         except Exception as e:
-            logger.error(f"Erro ao excluir áudio {audio_id}: {str(e)}")
+            logger.exception(f"Erro ao excluir áudio {audio_id}: {e}")
             raise
 
     # Mantém compatibilidade com código legado
@@ -1024,7 +1024,7 @@ class VideoDownloadManager:
             return result
 
         except Exception as e:
-            logger.error(f"Erro ao excluir vídeo {video_id}: {str(e)}")
+            logger.exception(f"Erro ao excluir vídeo {video_id}: {e}")
             raise
 
     async def update_transcription_status(

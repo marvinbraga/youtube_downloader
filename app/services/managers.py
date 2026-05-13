@@ -22,6 +22,7 @@ from app.services.configs import (
 from app.db.database import get_db_context
 from app.db.models import Audio, Video
 from app.db.repositories import AudioRepository, VideoRepository
+from app.services.downloaders import get_downloader
 
 # Detecta deno e node para resolver JS challenges do YouTube
 _deno_path = shutil.which("deno") or os.path.expanduser("~/.deno/bin/deno")
@@ -45,6 +46,26 @@ YDL_REMOTE_COMPONENTS = ["ejs:github"]
 _YOUTUBE_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{11}$")
 
 
+def extract_external_id(url: str) -> tuple:
+    """Return ``(source, external_id)`` for ``url``.
+
+    Falls back to a timestamp-based ID if the platform extractor cannot derive one.
+    Raises ``ValueError`` if the URL host is not supported.
+    """
+    downloader = get_downloader(url)  # raises ValueError on unsupported host
+    ext_id = downloader.extract_id(url)
+    if not ext_id:
+        ext_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    return downloader.source, ext_id
+
+
+# v1 scope: VideoStreamManager is intentionally NOT refactored to use the
+# Downloader Strategy. It depends on yt-dlp's "best[ext=mp4]" format selector
+# to expose a top-level info["url"], which the Strategy's get_info() does not
+# guarantee. Streaming remains YouTube-only until a future
+# Downloader.build_stream_opts() lands. Instagram playback (when needed)
+# would use the downloaded file path via existing /audio/stream / /video/stream
+# file-based endpoints.
 class VideoStreamManager:
     def __init__(self):
         self.ydl_opts = {
@@ -100,35 +121,19 @@ class AudioDownloadManager:
         )
 
     def extract_youtube_id(self, url: str) -> Optional[str]:
-        """Extrai o ID do YouTube de uma URL"""
+        """Legacy: returns the external_id for any supported URL.
+
+        Despite the YouTube-flavored name (kept for backward compat with the
+        ``/audio/check_exists`` endpoint), this resolves Instagram URLs too.
+        """
         try:
-            youtube_id = None
-
-            match = re.search(
-                r"(?:youtube\.com/(?:watch\?v=|live/|shorts/)|youtu\.be/)([a-zA-Z0-9_-]{11})",
-                url,
-            )
-            if match:
-                youtube_id = match.group(1)
-
-            if not youtube_id:
-                ydl_info_opts = {
-                    "quiet": True,
-                    "no_warnings": True,
-                    "skip_download": True,
-                    "extract_flat": True,
-                    "js_runtimes": YDL_JS_RUNTIMES,
-                    "remote_components": YDL_REMOTE_COMPONENTS,
-                    **get_yt_dlp_cookies_opts(),
-                }
-
-                with YoutubeDL(ydl_info_opts) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                    youtube_id = info.get("id", "")
-
-            return youtube_id
-        except Exception as e:
-            logger.error(f"Erro ao extrair ID do YouTube: {str(e)}")
+            _, ext_id = extract_external_id(url)
+            return ext_id
+        except ValueError as exc:
+            logger.warning(f"URL não suportada para extração de ID: {exc}")
+            return None
+        except Exception as exc:
+            logger.error(f"Erro ao extrair ID externo: {exc}")
             return None
 
     async def get_audio_info(self, audio_id: str) -> Optional[Dict[str, Any]]:
@@ -139,20 +144,24 @@ class AudioDownloadManager:
             if audio:
                 return audio.to_dict()
 
-            # Tenta buscar pelo youtube_id
-            audio = await repo.get_by_youtube_id(audio_id)
+            # Fallback: buscar pelo external_id (cobre todas as sources)
+            audio = await repo.get_by_external_id(audio_id)
             if audio:
                 return audio.to_dict()
 
         return None
 
     async def get_audio_by_youtube_id(
-        self, youtube_id: str
+        self, external_id: str
     ) -> Optional[Dict[str, Any]]:
-        """Obtém informações de um áudio pelo ID do YouTube"""
+        """Obtém informações de um áudio pelo external_id.
+
+        Nome legacy preservado por compat com o endpoint /audio/check_exists.
+        A busca usa `external_id` para cobrir todas as sources.
+        """
         async with get_db_context() as session:
             repo = AudioRepository(session)
-            audio = await repo.get_by_youtube_id(youtube_id)
+            audio = await repo.get_by_external_id(external_id)
             if audio:
                 return audio.to_dict()
         return None
@@ -165,62 +174,75 @@ class AudioDownloadManager:
             return [a.to_dict() for a in audios]
 
     async def register_audio_for_download(self, url: str) -> str:
-        """Registra um áudio para download com status 'downloading'."""
+        """Registra um áudio para download com status 'downloading'.
+
+        Multi-source: dispara o downloader correto via factory e persiste
+        ``source`` + ``external_id``. O ID primário da linha continua sendo
+        o ``external_id`` (mantém o mesmo padrão histórico em que ``id == youtube_id``).
+        """
         try:
             logger.info(f"Registrando áudio para download: {url}")
 
-            youtube_id = self.extract_youtube_id(url)
-            if not youtube_id:
-                youtube_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            downloader = get_downloader(url)  # raises ValueError on unsupported host
+            source = downloader.source
 
-            # Verifica se já existe
-            existing = await self.get_audio_by_youtube_id(youtube_id)
-            if existing:
-                existing_status = existing.get("download_status", "")
-                if existing_status not in ("error", ""):
-                    logger.info(f"Áudio já existe com ID: {youtube_id}")
-                    return youtube_id
-                # Reprocessar áudios com erro: resetar status para 'downloading'
-                logger.info(
-                    f"Áudio {youtube_id} tinha status '{existing_status}', resetando para nova tentativa"
-                )
-                async with get_db_context() as session:
-                    repo = AudioRepository(session)
+            external_id = downloader.extract_id(url)
+            if not external_id:
+                # Sintetizar timestamp ID só é seguro para YouTube (histórico).
+                # Para outras sources, isso geraria linhas-lixo cujo external_id
+                # nunca casa com nada que yt-dlp consiga baixar.
+                if source != "youtube":
+                    raise ValueError(
+                        f"URL não suportada para download ({source}): {url}"
+                    )
+                external_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+            # Dedup por (source, external_id) — evita falso-positivo cross-platform
+            async with get_db_context() as session:
+                repo = AudioRepository(session)
+                existing = await repo.get_by_external_id(external_id, source=source)
+
+                if existing is not None:
+                    if existing.download_status not in ("error", ""):
+                        logger.info(
+                            f"Áudio já existe (source={source}, ext_id={external_id})"
+                        )
+                        return existing.id
+                    # Reprocessa erro: reseta status
+                    logger.info(
+                        f"Áudio {existing.id} estava com status '{existing.download_status}', "
+                        "resetando para nova tentativa"
+                    )
                     await repo.update(
-                        youtube_id,
+                        existing.id,
                         download_status="downloading",
                         download_progress=0,
                         download_error="",
                     )
-                return youtube_id
+                    return existing.id
 
-            # Obter informações básicas sem baixar
-            ydl_opts = {
-                "quiet": True,
-                "no_warnings": True,
-                "skip_download": True,
-                "js_runtimes": YDL_JS_RUNTIMES,
-                "remote_components": YDL_REMOTE_COMPONENTS,
-                **get_yt_dlp_cookies_opts(),
-            }
-
-            title = f"Video_{youtube_id}"
+            # Extrai título sem baixar
+            title = f"Video_{external_id}"
             try:
-                with YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                    title = info.get("title", title)
+                loop = asyncio.get_event_loop()
+                info = await loop.run_in_executor(None, downloader.get_info, url)
+                title = info.get("title") or title
             except Exception as extract_error:
-                logger.warning(f"Erro ao extrair informações: {str(extract_error)}")
+                logger.warning(f"Erro ao extrair informações: {extract_error}")
 
-            # Criar entrada no banco
+            # YouTube preserva populamento de ``youtube_id`` para compat;
+            # outras sources deixam essa coluna NULL.
+            youtube_id_value = external_id if source == "youtube" else None
+
             async with get_db_context() as session:
                 repo = AudioRepository(session)
-
                 audio = Audio(
-                    id=youtube_id,
+                    id=external_id,
                     title=title,
                     name=f"{title}.m4a",
-                    youtube_id=youtube_id,
+                    source=source,
+                    external_id=external_id,
+                    youtube_id=youtube_id_value,
                     url=url,
                     path="",
                     directory="",
@@ -233,15 +255,16 @@ class AudioDownloadManager:
                     transcription_path="",
                     keywords=json.dumps(self._extract_keywords(title)),
                 )
-
                 await repo.create(audio)
 
-            logger.info(f"Áudio registrado com ID: {youtube_id}")
-            return youtube_id
+            logger.info(f"Áudio registrado: id={external_id} source={source}")
+            return external_id
 
+        except ValueError as ve:
+            logger.error(f"URL não suportada: {ve}")
+            raise
         except Exception as e:
-            error_str = str(e)
-            logger.error(f"Erro ao registrar áudio: {error_str}")
+            logger.error(f"Erro ao registrar áudio: {e}")
             raise
 
     async def download_audio_with_status_async(
@@ -277,35 +300,11 @@ class AudioDownloadManager:
                     progress_data["current_progress"] = 95
                     progress_data["status"] = "finished"
 
-            ydl_opts = {
-                "format": "bestaudio/best",
-                "outtmpl": str(download_dir / "%(title)s.%(ext)s"),
-                "postprocessors": [
-                    {
-                        "key": "FFmpegExtractAudio",
-                        "preferredcodec": "m4a",
-                        "preferredquality": "192",
-                    }
-                ],
-                "progress_hooks": [simple_progress_hook],
-                "socket_timeout": 30,
-                "retries": 10,
-                "fragment_retries": 10,
-                "nocheckcertificate": True,
-                "ignoreerrors": False,
-                "verbose": os.environ.get("YT_DLP_VERBOSE", "").lower()
-                in ("1", "true", "yes"),
-                "noplaylist": True,
-                "js_runtimes": YDL_JS_RUNTIMES,
-                "remote_components": YDL_REMOTE_COMPONENTS,
-                "http_headers": {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                    "Accept-Language": "en-US,en;q=0.5",
-                    "DNT": "1",
-                },
-                **get_yt_dlp_cookies_opts(),
-            }
+            downloader = get_downloader(url)
+            ydl_opts = downloader.build_audio_opts(
+                output_dir=str(download_dir),
+                progress_hook=simple_progress_hook,
+            )
 
             try:
                 loop = asyncio.get_event_loop()
@@ -548,6 +547,9 @@ class AudioDownloadManager:
         # TODO(review): move import urllib.parse to module top-level - code-reviewer, 2026-04-28, Severity: Low
         import urllib.parse
 
+        # NOTE: Playlist support is YouTube-only for v1. Instagram has no
+        # native playlist concept that maps cleanly to yt-dlp's flat extractor.
+        # Tracked as a non-goal in docs/plans/2026-05-13-instagram-support.md.
         # TODO(review): move _ALLOWED_HOSTS to module-level constant to avoid per-call allocation - code-reviewer, 2026-04-28, Severity: Low
         _ALLOWED_HOSTS = {
             "youtube.com",
@@ -664,35 +666,15 @@ class VideoDownloadManager:
         )
 
     def extract_youtube_id(self, url: str) -> Optional[str]:
-        """Extrai o ID do YouTube de uma URL"""
+        """Legacy: returns the external_id for any supported URL."""
         try:
-            youtube_id = None
-
-            match = re.search(
-                r"(?:youtube\.com/(?:watch\?v=|live/|shorts/)|youtu\.be/)([a-zA-Z0-9_-]{11})",
-                url,
-            )
-            if match:
-                youtube_id = match.group(1)
-
-            if not youtube_id:
-                ydl_info_opts = {
-                    "quiet": True,
-                    "no_warnings": True,
-                    "skip_download": True,
-                    "extract_flat": True,
-                    "js_runtimes": YDL_JS_RUNTIMES,
-                    "remote_components": YDL_REMOTE_COMPONENTS,
-                    **get_yt_dlp_cookies_opts(),
-                }
-
-                with YoutubeDL(ydl_info_opts) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                    youtube_id = info.get("id", "")
-
-            return youtube_id
-        except Exception as e:
-            logger.error(f"Erro ao extrair ID do YouTube: {str(e)}")
+            _, ext_id = extract_external_id(url)
+            return ext_id
+        except ValueError as exc:
+            logger.warning(f"URL não suportada para extração de ID: {exc}")
+            return None
+        except Exception as exc:
+            logger.error(f"Erro ao extrair ID externo: {exc}")
             return None
 
     async def get_video_info(self, video_id: str) -> Optional[Dict[str, Any]]:
@@ -703,20 +685,24 @@ class VideoDownloadManager:
             if video:
                 return video.to_dict()
 
-            # Tenta buscar pelo youtube_id
-            video = await repo.get_by_youtube_id(video_id)
+            # Fallback: buscar pelo external_id (cobre todas as sources)
+            video = await repo.get_by_external_id(video_id)
             if video:
                 return video.to_dict()
 
         return None
 
     async def get_video_by_youtube_id(
-        self, youtube_id: str
+        self, external_id: str
     ) -> Optional[Dict[str, Any]]:
-        """Obtém informações de um vídeo pelo ID do YouTube"""
+        """Obtém informações de um vídeo pelo external_id.
+
+        Nome legacy preservado por compat. A busca usa `external_id` para
+        cobrir todas as sources.
+        """
         async with get_db_context() as session:
             repo = VideoRepository(session)
-            video = await repo.get_by_youtube_id(youtube_id)
+            video = await repo.get_by_external_id(external_id)
             if video:
                 return video.to_dict()
         return None
@@ -735,60 +721,60 @@ class VideoDownloadManager:
         try:
             logger.info(f"Registrando vídeo para download: {url}")
 
-            youtube_id = self.extract_youtube_id(url)
-            if not youtube_id:
-                youtube_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            downloader = get_downloader(url)
+            source = downloader.source
 
-            # Verifica se já existe
-            existing = await self.get_video_by_youtube_id(youtube_id)
-            if existing:
-                existing_status = existing.get("download_status", "")
-                if existing_status not in ("error", ""):
-                    logger.info(f"Vídeo já existe com ID: {youtube_id}")
-                    return youtube_id
-                # Reprocessar vídeos com erro: resetar status para 'downloading'
-                logger.info(
-                    f"Vídeo {youtube_id} tinha status '{existing_status}', resetando para nova tentativa"
-                )
-                async with get_db_context() as session:
-                    repo = VideoRepository(session)
+            external_id = downloader.extract_id(url)
+            if not external_id:
+                if source != "youtube":
+                    raise ValueError(
+                        f"URL não suportada para download ({source}): {url}"
+                    )
+                external_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+            async with get_db_context() as session:
+                repo = VideoRepository(session)
+                existing = await repo.get_by_external_id(external_id, source=source)
+
+                if existing is not None:
+                    if existing.download_status not in ("error", ""):
+                        logger.info(
+                            f"Vídeo já existe (source={source}, ext_id={external_id})"
+                        )
+                        return existing.id
+                    logger.info(
+                        f"Vídeo {existing.id} estava com status '{existing.download_status}', "
+                        "resetando para nova tentativa"
+                    )
                     await repo.update(
-                        youtube_id,
+                        existing.id,
                         download_status="downloading",
                         download_progress=0,
                         download_error="",
                     )
-                return youtube_id
+                    return existing.id
 
-            # Obter informações básicas sem baixar
-            ydl_opts = {
-                "quiet": True,
-                "no_warnings": True,
-                "skip_download": True,
-                "js_runtimes": YDL_JS_RUNTIMES,
-                "remote_components": YDL_REMOTE_COMPONENTS,
-                **get_yt_dlp_cookies_opts(),
-            }
-
-            title = f"Video_{youtube_id}"
+            title = f"Video_{external_id}"
             duration = None
             try:
-                with YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                    title = info.get("title", title)
-                    duration = info.get("duration")
+                loop = asyncio.get_event_loop()
+                info = await loop.run_in_executor(None, downloader.get_info, url)
+                title = info.get("title") or title
+                duration = info.get("duration")
             except Exception as extract_error:
-                logger.warning(f"Erro ao extrair informações: {str(extract_error)}")
+                logger.warning(f"Erro ao extrair informações: {extract_error}")
 
-            # Criar entrada no banco
+            youtube_id_value = external_id if source == "youtube" else None
+
             async with get_db_context() as session:
                 repo = VideoRepository(session)
-
                 video = Video(
-                    id=youtube_id,
+                    id=external_id,
                     title=title,
                     name=f"{title}.mp4",
-                    youtube_id=youtube_id,
+                    source=source,
+                    external_id=external_id,
+                    youtube_id=youtube_id_value,
                     url=url,
                     path="",
                     directory="",
@@ -799,17 +785,17 @@ class VideoDownloadManager:
                     download_status="downloading",
                     download_progress=0,
                     download_error="",
-                    source="youtube",
                 )
-
                 await repo.create(video)
 
-            logger.info(f"Vídeo registrado com ID: {youtube_id}")
-            return youtube_id
+            logger.info(f"Vídeo registrado: id={external_id} source={source}")
+            return external_id
 
+        except ValueError as ve:
+            logger.error(f"URL não suportada: {ve}")
+            raise
         except Exception as e:
-            error_str = str(e)
-            logger.error(f"Erro ao registrar vídeo: {error_str}")
+            logger.error(f"Erro ao registrar vídeo: {e}")
             raise
 
     async def download_video_with_status_async(
@@ -845,34 +831,12 @@ class VideoDownloadManager:
                     progress_data["current_progress"] = 95
                     progress_data["status"] = "finished"
 
-            # Seleciona o formato baseado na resolução
-            format_str = self.RESOLUTION_MAP.get(
-                resolution, self.RESOLUTION_MAP["1080p"]
+            downloader = get_downloader(url)
+            ydl_opts = downloader.build_video_opts(
+                output_dir=str(download_dir),
+                resolution=resolution,
+                progress_hook=simple_progress_hook,
             )
-
-            ydl_opts = {
-                "format": format_str,
-                "outtmpl": str(download_dir / "%(title)s.%(ext)s"),
-                "merge_output_format": "mp4",
-                "progress_hooks": [simple_progress_hook],
-                "socket_timeout": 30,
-                "retries": 10,
-                "fragment_retries": 10,
-                "nocheckcertificate": True,
-                "ignoreerrors": False,
-                "verbose": os.environ.get("YT_DLP_VERBOSE", "").lower()
-                in ("1", "true", "yes"),
-                "noplaylist": True,
-                "js_runtimes": YDL_JS_RUNTIMES,
-                "remote_components": YDL_REMOTE_COMPONENTS,
-                "http_headers": {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                    "Accept-Language": "en-US,en;q=0.5",
-                    "DNT": "1",
-                },
-                **get_yt_dlp_cookies_opts(),
-            }
 
             try:
                 loop = asyncio.get_event_loop()
@@ -1111,6 +1075,9 @@ class VideoDownloadManager:
         # TODO(review): move import urllib.parse to module top-level - code-reviewer, 2026-04-28, Severity: Low
         import urllib.parse
 
+        # NOTE: Playlist support is YouTube-only for v1. Instagram has no
+        # native playlist concept that maps cleanly to yt-dlp's flat extractor.
+        # Tracked as a non-goal in docs/plans/2026-05-13-instagram-support.md.
         # TODO(review): move _ALLOWED_HOSTS to module-level constant to avoid per-call allocation - code-reviewer, 2026-04-28, Severity: Low
         _ALLOWED_HOSTS = {
             "youtube.com",

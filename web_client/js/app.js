@@ -168,8 +168,18 @@ $(document).ready(function() {
         };
     }
 
+    function validateVideoUrl(url) {
+        if (!url) return false;
+        return (
+            url.includes('youtube.com/') ||
+            url.includes('youtu.be/') ||
+            url.includes('instagram.com/')
+        );
+    }
+
+    // Backward-compat alias — remove in a future cleanup pass.
     function validateYouTubeUrl(url) {
-        return url && (url.includes('youtube.com/') || url.includes('youtu.be/'));
+        return validateVideoUrl(url);
     }
 
     // ========================================
@@ -509,7 +519,7 @@ $(document).ready(function() {
         const highQuality = $('#highQuality').is(':checked');
 
         if (!validateYouTubeUrl(url)) {
-            showToast('Por favor, insira uma URL válida do YouTube', 'warning');
+            showToast('Por favor, insira uma URL válida do YouTube ou Instagram', 'warning');
             return;
         }
 
@@ -559,7 +569,7 @@ $(document).ready(function() {
         const resolution = $('#videoResolution').val();
 
         if (!validateYouTubeUrl(url)) {
-            showToast('Por favor, insira uma URL válida do YouTube', 'warning');
+            showToast('Por favor, insira uma URL válida do YouTube ou Instagram', 'warning');
             return;
         }
 

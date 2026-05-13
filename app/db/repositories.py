@@ -26,6 +26,16 @@ class AudioRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_by_external_id(
+        self, external_id: str, source: Optional[str] = None
+    ) -> Optional[Audio]:
+        """Busca áudio pelo external_id (opcionalmente filtrando por source)."""
+        query = select(Audio).where(Audio.external_id == external_id)
+        if source is not None:
+            query = query.where(Audio.source == source)
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
     async def get_all(self, order_by_date: bool = True) -> List[Audio]:
         """Lista todos os áudios"""
         query = select(Audio)
@@ -144,6 +154,16 @@ class VideoRepository:
         result = await self.session.execute(
             select(Video).where(Video.youtube_id == youtube_id)
         )
+        return result.scalar_one_or_none()
+
+    async def get_by_external_id(
+        self, external_id: str, source: Optional[str] = None
+    ) -> Optional[Video]:
+        """Busca vídeo pelo external_id (opcionalmente filtrando por source)."""
+        query = select(Video).where(Video.external_id == external_id)
+        if source is not None:
+            query = query.where(Video.source == source)
+        result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
     async def get_all(self, order_by_date: bool = True) -> List[Video]:

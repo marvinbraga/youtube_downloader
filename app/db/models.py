@@ -84,6 +84,12 @@ class Audio(Base):
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     name: Mapped[str] = mapped_column(String(500), nullable=False)
+    source: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="youtube", index=True
+    )
+    external_id: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, index=True
+    )
     youtube_id: Mapped[Optional[str]] = mapped_column(
         String(100), nullable=True, index=True
     )
@@ -134,6 +140,8 @@ class Audio(Base):
             "title": self.title,
             "name": self.name,
             "youtube_id": self.youtube_id,
+            "source": self.source,
+            "external_id": self.external_id,
             "url": self.url,
             "path": self.path,
             "directory": self.directory,
@@ -163,6 +171,9 @@ class Video(Base):
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     name: Mapped[str] = mapped_column(String(500), nullable=False)
+    external_id: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, index=True
+    )
     youtube_id: Mapped[Optional[str]] = mapped_column(
         String(100), nullable=True, index=True
     )
@@ -196,7 +207,9 @@ class Video(Base):
     folder: Mapped[Optional["Folder"]] = relationship("Folder", back_populates="videos")
 
     # Metadados
-    source: Mapped[str] = mapped_column(String(50), nullable=False, default="youtube")
+    source: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="youtube", index=True
+    )
     created_date: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.now
     )
@@ -211,6 +224,7 @@ class Video(Base):
             "title": self.title,
             "name": self.name,
             "youtube_id": self.youtube_id,
+            "external_id": self.external_id,
             "url": self.url,
             "path": self.path,
             "directory": self.directory,

@@ -18,6 +18,7 @@ class ClientAuth(BaseModel):
 class VideoSource(str, Enum):
     LOCAL = "local"
     YOUTUBE = "youtube"
+    INSTAGRAM = "instagram"
 
 
 class VideoInfo(BaseModel):

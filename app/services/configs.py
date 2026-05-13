@@ -36,36 +36,44 @@ security = HTTPBearer()
 VALID_BROWSERS = {"chrome", "brave", "firefox", "edge", "opera", "safari", "vivaldi"}
 
 
-def get_yt_dlp_cookies_opts() -> Dict[str, Any]:
-    """Return yt-dlp options for cookie-based authentication.
+def get_yt_dlp_cookies_opts(source: str = "youtube") -> Dict[str, Any]:
+    """Return yt-dlp options for cookie-based authentication for a given source.
 
-    Priority:
-    1. YT_COOKIES_FROM_BROWSER — uses cookies extracted directly from the
-       named browser's profile.  Value must be one of: chrome, brave,
-       firefox, edge, opera, safari, vivaldi.
-    2. YT_COOKIES_FILE — path to a Netscape-format cookies.txt file.
-    3. Neither set — returns an empty dict (no cookie auth).
+    Cookies are looked up per-source. For ``source='youtube'`` the legacy env
+    vars ``YT_COOKIES_FROM_BROWSER`` and ``YT_COOKIES_FILE`` are honored. For
+    other sources (e.g. ``instagram``) the upper-cased prefix is used:
+    ``INSTAGRAM_COOKIES_FROM_BROWSER`` and ``INSTAGRAM_COOKIES_FILE``.
 
-    Examples
-    --------
-    YT_COOKIES_FROM_BROWSER=chrome  ->  {"cookiesfrombrowser": ("chrome",)}
-    YT_COOKIES_FILE=/tmp/cookies.txt ->  {"cookiefile": "/tmp/cookies.txt"}
+    Priority within a source:
+      1. ``<SOURCE>_COOKIES_FROM_BROWSER`` — extract directly from browser profile.
+         Valid values: chrome, brave, firefox, edge, opera, safari, vivaldi.
+      2. ``<SOURCE>_COOKIES_FILE`` — path to a Netscape-format cookies.txt file.
+      3. Neither set — returns ``{}`` (no cookie auth; public content still works).
     """
-    browser = os.environ.get("YT_COOKIES_FROM_BROWSER", "").strip().lower()
+    source_key = source.upper() if source else "YOUTUBE"
+    # Backward-compatible aliases: YOUTUBE keeps the historical YT_ prefix.
+    if source_key == "YOUTUBE":
+        browser_env = "YT_COOKIES_FROM_BROWSER"
+        file_env = "YT_COOKIES_FILE"
+    else:
+        browser_env = f"{source_key}_COOKIES_FROM_BROWSER"
+        file_env = f"{source_key}_COOKIES_FILE"
+
+    browser = os.environ.get(browser_env, "").strip().lower()
     if browser:
         if browser not in VALID_BROWSERS:
             raise ValueError(
-                f"YT_COOKIES_FROM_BROWSER='{browser}' is not supported. "
+                f"{browser_env}='{browser}' is not supported. "
                 f"Valid values: {', '.join(sorted(VALID_BROWSERS))}"
             )
         return {"cookiesfrombrowser": (browser,)}
 
-    cookies_file = os.environ.get("YT_COOKIES_FILE", "").strip()
+    cookies_file = os.environ.get(file_env, "").strip()
     if cookies_file:
         resolved = Path(cookies_file).resolve()
         if not resolved.is_file():
             raise ValueError(
-                f"YT_COOKIES_FILE='{cookies_file}' does not point to a regular file."
+                f"{file_env}='{cookies_file}' does not point to a regular file."
             )
         return {"cookiefile": str(resolved)}
 

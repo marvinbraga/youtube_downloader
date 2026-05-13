@@ -864,6 +864,37 @@ body {
     font-size: 0.7rem;
 }
 
+.yd-media-item .yd-media-path {
+    font-size: 0.65rem !important;
+    line-height: 1.25;
+    color: var(--yd-text-tertiary);
+    opacity: 0.85;
+    direction: rtl;
+    text-align: left;
+}
+
+.yd-media-item .yd-media-path__text {
+    unicode-bidi: plaintext;
+}
+
+.yd-media-item .yd-media-path i {
+    font-size: 0.6rem;
+    direction: ltr;
+    display: inline-block;
+}
+
+.yd-media-item .yd-media-path .copy-path-btn {
+    color: var(--yd-text-tertiary);
+    text-decoration: none;
+    direction: ltr;
+    font-size: 0.65rem !important;
+    line-height: 1;
+}
+
+.yd-media-item .yd-media-path .copy-path-btn:hover {
+    color: var(--yd-text-primary);
+}
+
 /* Action Buttons Group */
 .yd-action-group {
     display: flex;

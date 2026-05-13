@@ -29,10 +29,97 @@ AsyncSessionLocal = async_sessionmaker(
 
 
 async def init_db() -> None:
-    """Inicializa o banco de dados criando as tabelas"""
+    """Inicializa o banco de dados criando as tabelas e aplicando migrações de schema."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await _apply_schema_migrations(conn)
     logger.info(f"Banco de dados inicializado em: {DATABASE_PATH}")
+
+
+async def _add_column_if_missing(
+    conn, table: str, column: str, ddl_fragment: str, existing_cols: set
+) -> None:
+    """Adds a column via ALTER TABLE. Tolerates concurrent-startup race.
+
+    The PRAGMA-read + ALTER write window is not atomic across SQLite
+    connections — two workers can both observe the column missing and race
+    on ADD COLUMN. The "duplicate column name" OperationalError is therefore
+    treated as success: by the time we get it, the other worker won.
+    """
+    from sqlalchemy.exc import OperationalError
+
+    if column in existing_cols:
+        return
+    try:
+        await conn.exec_driver_sql(
+            f"ALTER TABLE {table} ADD COLUMN {column} {ddl_fragment}"
+        )
+        logger.info(f"Coluna '{column}' adicionada em {table}")
+    except OperationalError as exc:
+        if "duplicate column name" in str(exc).lower():
+            logger.info(f"Coluna '{column}' já existe em {table} (race resolvida)")
+            return
+        raise
+
+
+async def _apply_schema_migrations(conn) -> None:
+    """Aplica migrações idempotentes de schema para suporte multi-plataforma.
+
+    Adiciona colunas `source` e `external_id` em `audios` e `external_id` em
+    `videos`. Faz backfill de `external_id = youtube_id` e `source = 'youtube'`
+    para linhas pré-existentes. Seguro para rodar em todo startup e para
+    inicializações concorrentes (multi-worker uvicorn).
+    """
+    # --- audios ---
+    result = await conn.exec_driver_sql("PRAGMA table_info(audios)")
+    audio_cols = {row[1] for row in result.fetchall()}
+    audio_needs_backfill = "source" not in audio_cols or "external_id" not in audio_cols
+
+    await _add_column_if_missing(
+        conn,
+        "audios",
+        "source",
+        "VARCHAR(50) NOT NULL DEFAULT 'youtube'",
+        audio_cols,
+    )
+    await _add_column_if_missing(
+        conn, "audios", "external_id", "VARCHAR(100)", audio_cols
+    )
+
+    if audio_needs_backfill:
+        await conn.exec_driver_sql(
+            "UPDATE audios SET external_id = youtube_id "
+            "WHERE external_id IS NULL AND youtube_id IS NOT NULL"
+        )
+
+    await conn.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_audios_source ON audios(source)"
+    )
+    await conn.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_audios_external_id ON audios(external_id)"
+    )
+
+    # --- videos ---
+    result = await conn.exec_driver_sql("PRAGMA table_info(videos)")
+    video_cols = {row[1] for row in result.fetchall()}
+    video_needs_backfill = "external_id" not in video_cols
+
+    await _add_column_if_missing(
+        conn, "videos", "external_id", "VARCHAR(100)", video_cols
+    )
+
+    if video_needs_backfill:
+        await conn.exec_driver_sql(
+            "UPDATE videos SET external_id = youtube_id "
+            "WHERE external_id IS NULL AND youtube_id IS NOT NULL"
+        )
+
+    await conn.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_videos_source ON videos(source)"
+    )
+    await conn.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_videos_external_id ON videos(external_id)"
+    )
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

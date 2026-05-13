@@ -8,6 +8,7 @@ from pydantic import BaseModel, HttpUrl
 class AudioSource(str, Enum):
     LOCAL = "local"
     YOUTUBE = "youtube"
+    INSTAGRAM = "instagram"
 
 
 class DownloadStatus(str, Enum):

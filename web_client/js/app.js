@@ -144,6 +144,44 @@ $(document).ready(function() {
         return (bytes / Math.pow(1024, i)).toFixed(2) + ' ' + sizes[i];
     }
 
+    function escapeHtml(text) {
+        if (text === null || text === undefined) return '';
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function copyPathToClipboard(path) {
+        if (!path) {
+            showToast('Caminho indisponível', 'warning');
+            return;
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(path).then(() => {
+                showToast('Caminho copiado', 'success');
+            }).catch(() => {
+                showToast('Falha ao copiar caminho', 'error');
+            });
+        } else {
+            const ta = document.createElement('textarea');
+            ta.value = path;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            try {
+                document.execCommand('copy');
+                showToast('Caminho copiado', 'success');
+            } catch (_) {
+                showToast('Falha ao copiar caminho', 'error');
+            }
+            document.body.removeChild(ta);
+        }
+    }
+
     function formatDate(dateString) {
         if (!dateString) return '-';
         const date = new Date(dateString);
@@ -168,8 +206,18 @@ $(document).ready(function() {
         };
     }
 
+    function validateVideoUrl(url) {
+        if (!url) return false;
+        return (
+            url.includes('youtube.com/') ||
+            url.includes('youtu.be/') ||
+            url.includes('instagram.com/')
+        );
+    }
+
+    // Backward-compat alias — remove in a future cleanup pass.
     function validateYouTubeUrl(url) {
-        return url && (url.includes('youtube.com/') || url.includes('youtu.be/'));
+        return validateVideoUrl(url);
     }
 
     // ========================================
@@ -283,6 +331,10 @@ $(document).ready(function() {
                                 <span class="me-3"><i class="bi bi-hdd me-1"></i>${formatFileSize(audio.filesize)}</span>
                                 <span><i class="bi bi-calendar me-1"></i>${formatDate(audio.modified_date)}</span>
                             </div>
+                            <div class="yd-media-path text-truncate font-monospace mt-1" title="${escapeHtml(audio.path || '')}">
+                                <i class="bi bi-folder2-open me-1"></i><span class="yd-media-path__text">${escapeHtml(audio.path || '(sem caminho registrado)')}</span>
+                                ${audio.path ? `<button type="button" class="btn btn-link p-0 ms-1 align-baseline copy-path-btn" data-path="${escapeHtml(audio.path)}" title="Copiar caminho"><i class="bi bi-clipboard"></i></button>` : ''}
+                            </div>
                         </div>
                         <div class="ms-2 yd-action-group">
                             ${statusBadge}
@@ -307,6 +359,12 @@ $(document).ready(function() {
                 e.preventDefault();
                 e.stopPropagation();
                 confirmDeleteAudio(audio);
+            });
+
+            item.find('.copy-path-btn').on('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                copyPathToClipboard(audio.path);
             });
 
             item.on('click', (e) => {
@@ -408,6 +466,10 @@ $(document).ready(function() {
                                 <span class="me-3"><i class="bi bi-aspect-ratio me-1"></i>${video.resolution || '-'}</span>
                                 <span><i class="bi bi-clock me-1"></i>${formatDuration(video.duration)}</span>
                             </div>
+                            <div class="yd-media-path text-truncate font-monospace mt-1" title="${escapeHtml(video.path || '')}">
+                                <i class="bi bi-folder2-open me-1"></i><span class="yd-media-path__text">${escapeHtml(video.path || '(sem caminho registrado)')}</span>
+                                ${video.path ? `<button type="button" class="btn btn-link p-0 ms-1 align-baseline copy-path-btn" data-path="${escapeHtml(video.path)}" title="Copiar caminho"><i class="bi bi-clipboard"></i></button>` : ''}
+                            </div>
                         </div>
                         <div class="ms-2 yd-action-group">
                             ${statusBadge}
@@ -435,6 +497,12 @@ $(document).ready(function() {
                 e.preventDefault();
                 e.stopPropagation();
                 confirmDeleteVideo(video);
+            });
+
+            item.find('.copy-path-btn').on('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                copyPathToClipboard(video.path);
             });
 
             item.on('click', (e) => {
@@ -509,7 +577,7 @@ $(document).ready(function() {
         const highQuality = $('#highQuality').is(':checked');
 
         if (!validateYouTubeUrl(url)) {
-            showToast('Por favor, insira uma URL válida do YouTube', 'warning');
+            showToast('Por favor, insira uma URL válida do YouTube ou Instagram', 'warning');
             return;
         }
 
@@ -559,7 +627,7 @@ $(document).ready(function() {
         const resolution = $('#videoResolution').val();
 
         if (!validateYouTubeUrl(url)) {
-            showToast('Por favor, insira uma URL válida do YouTube', 'warning');
+            showToast('Por favor, insira uma URL válida do YouTube ou Instagram', 'warning');
             return;
         }
 

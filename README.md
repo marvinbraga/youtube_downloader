@@ -110,4 +110,4 @@ O diretório `web_client/` contém uma interface web para interagir com a API.
 
 ## Licença
 
-MIT
+Apache License 2.0 — veja o arquivo [LICENSE](LICENSE) para o texto completo.

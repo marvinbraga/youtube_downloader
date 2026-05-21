@@ -22,6 +22,9 @@ $(document).ready(function() {
     let activeDownloads = new Map();
     let currentTranscription = null;
     let currentTranscriptionId = null;
+    let currentTranscriptionMedia = [];
+    let transcriptionSearchMode = 'title';
+    let lastTranscriptionSearchTerm = '';
 
     // Folder state
     let currentFolders = [];
@@ -302,6 +305,22 @@ $(document).ready(function() {
         container.empty();
 
         if (audios.length === 0) {
+            if (searchTerm) {
+                container.html(`
+                    <div class="yd-empty-state">
+                        <i class="bi bi-search yd-empty-state__icon"></i>
+                        <p class="yd-empty-state__title">Nenhum resultado para "${escapeHtml(searchTerm)}"</p>
+                        <p class="yd-empty-state__desc">Tente outra palavra ou limpe a busca.</p>
+                        <button type="button" class="btn btn-sm btn-outline-secondary mt-2" data-clear-target="#searchAudioInput">
+                            <i class="bi bi-x-lg me-1"></i>Limpar busca
+                        </button>
+                    </div>
+                `);
+                container.find('[data-clear-target]').on('click', () => {
+                    $('#searchAudioInput').val('').trigger('input');
+                });
+                return;
+            }
             container.html(`
                 <div class="yd-empty-state">
                     <i class="bi bi-music-note-beamed yd-empty-state__icon"></i>
@@ -436,6 +455,22 @@ $(document).ready(function() {
         container.empty();
 
         if (videos.length === 0) {
+            if (searchTerm) {
+                container.html(`
+                    <div class="yd-empty-state">
+                        <i class="bi bi-search yd-empty-state__icon"></i>
+                        <p class="yd-empty-state__title">Nenhum resultado para "${escapeHtml(searchTerm)}"</p>
+                        <p class="yd-empty-state__desc">Tente outra palavra ou limpe a busca.</p>
+                        <button type="button" class="btn btn-sm btn-outline-secondary mt-2" data-clear-target="#searchVideoInput">
+                            <i class="bi bi-x-lg me-1"></i>Limpar busca
+                        </button>
+                    </div>
+                `);
+                container.find('[data-clear-target]').on('click', () => {
+                    $('#searchVideoInput').val('').trigger('input');
+                });
+                return;
+            }
             container.html(`
                 <div class="yd-empty-state">
                     <i class="bi bi-camera-video yd-empty-state__icon"></i>
@@ -990,24 +1025,43 @@ $(document).ready(function() {
                 return dateB - dateA;
             });
 
-            renderTranscriptionMediaList(allMedia);
+            currentTranscriptionMedia = allMedia;
+            // Reaplica a busca atual (se houver) sobre a lista recém-carregada.
+            applyTranscriptionSearch();
 
         } catch (error) {
             console.error('Error loading transcription media list:', error);
             if (error.status === 401) {
                 authenticate();
             } else {
+                currentTranscriptionMedia = [];
                 renderTranscriptionMediaList([]);
                 showToast('Erro ao carregar lista de mídias', 'error');
             }
         }
     }
 
-    function renderTranscriptionMediaList(mediaList) {
+    function renderTranscriptionMediaList(mediaList, searchTerm = '', snippetsByFileId = null, useCompositeKey = false) {
         const container = $('#transcriptionMediaList');
         container.empty();
 
         if (mediaList.length === 0) {
+            if (searchTerm) {
+                container.html(`
+                    <div class="yd-empty-state">
+                        <i class="bi bi-search yd-empty-state__icon"></i>
+                        <p class="yd-empty-state__title">Nenhum resultado para "${escapeHtml(searchTerm)}"</p>
+                        <p class="yd-empty-state__desc">Tente outra palavra ou alterne o modo de busca (Título/Conteúdo).</p>
+                        <button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="clearTranscriptionSearchInline">
+                            <i class="bi bi-x-lg me-1"></i>Limpar busca
+                        </button>
+                    </div>
+                `);
+                container.find('#clearTranscriptionSearchInline').on('click', () => {
+                    $('#searchTranscriptionInput').val('').trigger('input');
+                });
+                return;
+            }
             container.html(`
                 <div class="yd-empty-state">
                     <i class="bi bi-collection yd-empty-state__icon"></i>
@@ -1027,6 +1081,14 @@ $(document).ready(function() {
 
             const transcriptionStatus = getTranscriptionStatusBadge(media.transcription_status);
             const thumbClass = isAudio ? 'yd-media-thumb--audio' : 'yd-media-thumb--video';
+            const titleHtml = searchTerm
+                ? highlightText(media.title || media.name || '', searchTerm)
+                : (media.title || media.name || '');
+            const snippetKey = useCompositeKey ? `${media.id}|${media.mediaType}` : media.id;
+            const snippetData = snippetsByFileId ? snippetsByFileId[snippetKey] : null;
+            const snippetHtml = snippetData
+                ? `<div class="yd-search-snippet" title="Trecho com a ocorrência (${snippetData.match_count} match${snippetData.match_count > 1 ? 'es' : ''})">${snippetData.snippet}</div>`
+                : '';
 
             const item = $(`
                 <div class="yd-media-item" data-id="${media.id}" data-type="${media.mediaType}">
@@ -1037,12 +1099,13 @@ $(document).ready(function() {
                             </div>
                         </div>
                         <div class="flex-grow-1 min-width-0">
-                            <h6 class="yd-media-title text-truncate">${media.title || media.name}</h6>
+                            <h6 class="yd-media-title text-truncate">${titleHtml}</h6>
                             <div class="yd-media-meta">
                                 ${typeBadge}
                                 <span class="ms-2"><i class="bi bi-hdd me-1"></i>${formatFileSize(media.filesize)}</span>
                                 <span class="ms-2"><i class="bi bi-calendar me-1"></i>${formatDate(media.modified_date)}</span>
                             </div>
+                            ${snippetHtml}
                         </div>
                         <div class="ms-2 yd-action-group">
                             ${transcriptionStatus}
@@ -1055,7 +1118,8 @@ $(document).ready(function() {
                                 <i class="bi bi-file-text"></i>
                             </button>
                             <button class="btn btn-sm btn-outline-danger yd-action-btn delete-transcription-btn" data-id="${media.id}"
-                                    title="Excluir Transcrição" ${media.transcription_status !== 'ended' ? 'disabled' : ''}>
+                                    title="${media.transcription_status === 'started' ? 'Cancelar Transcrição' : 'Excluir Transcrição'}"
+                                    ${media.transcription_status === 'none' ? 'disabled' : ''}>
                                 <i class="bi bi-trash"></i>
                             </button>
                         </div>
@@ -1078,7 +1142,7 @@ $(document).ready(function() {
             item.find('.delete-transcription-btn').on('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                confirmDeleteTranscription(media.id, media.title || media.name);
+                confirmDeleteTranscription(media.id, media.title || media.name, media.transcription_status);
             });
 
             container.append(item);
@@ -1252,11 +1316,13 @@ $(document).ready(function() {
     let pendingDeleteTranscriptionId = null;
     let pendingDeleteTranscriptionTitle = null;
 
-    function confirmDeleteTranscription(fileId, title) {
+    function confirmDeleteTranscription(fileId, title, status) {
         pendingDeleteTranscriptionId = fileId;
         pendingDeleteTranscriptionTitle = title;
+        const isCancel = status === 'started';
+        const label = isCancel ? 'Cancelar Transcrição' : 'Excluir Transcrição';
         $('#deleteItemTitle').text(`Transcrição de "${title}"`);
-        $('#deleteModalLabel').html('<i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>Excluir Transcrição');
+        $('#deleteModalLabel').html(`<i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>${label}`);
         deleteModal.show();
     }
 
@@ -2166,11 +2232,20 @@ $(document).ready(function() {
         return badges[status] || '';
     }
 
+    function escapeRegex(str) {
+        return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
     function highlightText(text, searchTerm) {
         if (!searchTerm || !text) return text || '';
-        const regex = new RegExp(`(${searchTerm})`, 'gi');
+        const regex = new RegExp(`(${escapeRegex(searchTerm)})`, 'gi');
         return text.replace(regex, '<mark>$1</mark>');
     }
+
+    // Campos pesquisados em filterList para Áudios/Vídeos. Inclui keywords
+    // (array de strings, vindo do to_dict() do modelo) e url (não source_url —
+    // o payload usa "url"). title/name continuam sendo os primários.
+    const SEARCH_FIELDS = ['title', 'name', 'url'];
 
     function filterList(items, searchTerm, renderFn) {
         if (!searchTerm) {
@@ -2179,10 +2254,23 @@ $(document).ready(function() {
         }
 
         const term = searchTerm.toLowerCase();
-        const filtered = items.filter(item =>
-            (item.title && item.title.toLowerCase().includes(term)) ||
-            (item.name && item.name.toLowerCase().includes(term))
-        );
+        const filtered = items.filter(item => {
+            for (const field of SEARCH_FIELDS) {
+                const value = item[field];
+                if (typeof value === 'string' && value.toLowerCase().includes(term)) {
+                    return true;
+                }
+            }
+            // keywords pode ser array
+            const kw = item.keywords;
+            if (Array.isArray(kw) && kw.some(k => typeof k === 'string' && k.toLowerCase().includes(term))) {
+                return true;
+            }
+            if (typeof kw === 'string' && kw.toLowerCase().includes(term)) {
+                return true;
+            }
+            return false;
+        });
 
         renderFn(filtered, searchTerm);
     }
@@ -2207,10 +2295,17 @@ $(document).ready(function() {
     });
 
     // Search inputs
+    function syncClearButton(inputEl) {
+        const $input = $(inputEl);
+        const hasValue = !!$input.val();
+        $(`.yd-search-clear[data-target="#${$input.attr('id')}"]`).prop('hidden', !hasValue);
+    }
+
     let audioSearchTimeout;
     $('#searchAudioInput').on('input', function() {
         clearTimeout(audioSearchTimeout);
         const searchTerm = $(this).val();
+        syncClearButton(this);
         audioSearchTimeout = setTimeout(() => {
             filterList(currentAudios, searchTerm, renderAudioList);
         }, 300);
@@ -2220,9 +2315,144 @@ $(document).ready(function() {
     $('#searchVideoInput').on('input', function() {
         clearTimeout(videoSearchTimeout);
         const searchTerm = $(this).val();
+        syncClearButton(this);
         videoSearchTimeout = setTimeout(() => {
             filterList(currentVideos, searchTerm, renderVideoList);
         }, 300);
+    });
+
+    // --- Transcription search ---
+    let transcriptionSearchTimeout;
+    let transcriptionSearchAbort = null;
+
+    function applyTranscriptionSearch() {
+        const term = lastTranscriptionSearchTerm.trim();
+        if (!term) {
+            renderTranscriptionMediaList(currentTranscriptionMedia);
+            return;
+        }
+        if (transcriptionSearchMode === 'title') {
+            const lower = term.toLowerCase();
+            const filtered = currentTranscriptionMedia.filter(m =>
+                ((m.title || '').toLowerCase().includes(lower)) ||
+                ((m.name || '').toLowerCase().includes(lower))
+            );
+            renderTranscriptionMediaList(filtered, term);
+            return;
+        }
+        // Modo conteúdo: hit backend
+        if (term.length < 2) {
+            renderTranscriptionMediaList(currentTranscriptionMedia, term);
+            return;
+        }
+        runTranscriptionContentSearch(term);
+    }
+
+    function runTranscriptionContentSearch(term) {
+        if (transcriptionSearchAbort) {
+            transcriptionSearchAbort.abort();
+        }
+        const controller = new AbortController();
+        transcriptionSearchAbort = controller;
+        const url = `${API_BASE_URL}/transcription/search?q=${encodeURIComponent(term)}`;
+        $('#transcriptionMediaList').html(`
+            <div class="yd-empty-state">
+                <div class="spinner-border text-danger mb-3" role="status"><span class="visually-hidden">Buscando...</span></div>
+                <p class="mb-0">Buscando "${escapeHtml(term)}" nas transcrições...</p>
+            </div>
+        `);
+        fetch(url, {
+            headers: getAuthHeaders(),
+            signal: controller.signal
+        })
+            .then(r => {
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.json();
+            })
+            .then(data => {
+                const rows = Array.isArray(data?.results) ? data.results : [];
+                // Chave composta por (file_id, media_type): áudio e vídeo
+                // do mesmo external_id seriam colidir em uma única chave.
+                const keyOf = (id, type) => `${id}|${type}`;
+                const matchKeys = new Set(
+                    rows.filter(r => r && r.file_id && r.media_type)
+                        .map(r => keyOf(r.file_id, r.media_type))
+                );
+                const snippets = {};
+                rows.forEach(r => {
+                    if (!r || !r.file_id || !r.media_type) return;
+                    snippets[keyOf(r.file_id, r.media_type)] = {
+                        snippet: r.snippet,
+                        match_count: r.match_count,
+                    };
+                });
+                const filtered = currentTranscriptionMedia.filter(
+                    m => matchKeys.has(keyOf(m.id, m.mediaType))
+                );
+                filtered.sort((a, b) =>
+                    (snippets[keyOf(b.id, b.mediaType)]?.match_count || 0)
+                    - (snippets[keyOf(a.id, a.mediaType)]?.match_count || 0)
+                );
+                renderTranscriptionMediaList(filtered, term, snippets, true);
+                if (data?.truncated) {
+                    showToast(
+                        `Mostrando os primeiros ${rows.length} de ${data.total_matches} resultados`,
+                        'info'
+                    );
+                }
+            })
+            .catch(err => {
+                if (err.name === 'AbortError') return;
+                console.error('Erro na busca de conteúdo:', err);
+                showToast('Erro na busca de conteúdo das transcrições', 'error');
+                renderTranscriptionMediaList([], term);
+            });
+    }
+
+    $('#searchTranscriptionInput').on('input', function() {
+        clearTimeout(transcriptionSearchTimeout);
+        lastTranscriptionSearchTerm = $(this).val();
+        syncClearButton(this);
+        const delay = transcriptionSearchMode === 'content' ? 400 : 200;
+        transcriptionSearchTimeout = setTimeout(applyTranscriptionSearch, delay);
+    });
+
+    $('input[name="searchTranscriptionMode"]').on('change', function() {
+        transcriptionSearchMode = $(this).val();
+        // Cancela qualquer fetch de conteúdo em voo antes de aplicar o novo modo
+        // — evita que uma resposta tardia sobrescreva a renderização do modo título.
+        if (transcriptionSearchAbort) {
+            transcriptionSearchAbort.abort();
+            transcriptionSearchAbort = null;
+        }
+        applyTranscriptionSearch();
+    });
+
+    // Botões de limpar (×) compartilhados nos 3 inputs
+    $(document).on('click', '.yd-search-clear', function() {
+        const target = $(this).data('target');
+        $(target).val('').trigger('input').focus();
+    });
+
+    // ESC dentro de um input de busca limpa o conteúdo
+    $('.yd-search-input').on('keydown', function(e) {
+        if (e.key === 'Escape' && $(this).val()) {
+            e.preventDefault();
+            $(this).val('').trigger('input');
+        }
+    });
+
+    // Atalho global '/' para focar a busca da aba ativa
+    $(document).on('keydown', function(e) {
+        if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
+        const tag = (e.target.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) return;
+        const activePane = $('.tab-pane.active');
+        const $input = activePane.find('.yd-search-input').first();
+        if ($input.length) {
+            e.preventDefault();
+            $input.trigger('focus').select();
+        }
     });
 
     // Tab change events

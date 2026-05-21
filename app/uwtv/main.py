@@ -1232,6 +1232,30 @@ async def transcribe_audio(
 
         # Tarefa em segundo plano para transcrição
         def transcribe_task():
+            def _is_cancelled() -> bool:
+                """Re-lê o status corrente; se for 'none', considera cancelado.
+
+                Fecha o caminho mais frequente da race em que o usuário pediu
+                cancelamento (DELETE /audio/transcription/{id}) enquanto o
+                worker estava executando. Ainda existe uma pequena janela
+                entre este check e o write subsequente, mas ela é estreita o
+                bastante para ser aceitável.
+                """
+                try:
+                    if _audio_info:
+                        info = asyncio.run(
+                            audio_manager.get_audio_info(_audio_info["id"])
+                        )
+                    elif _video_info:
+                        info = asyncio.run(
+                            video_manager.get_video_info(_video_info["id"])
+                        )
+                    else:
+                        return False
+                    return (info or {}).get("transcription_status") == "none"
+                except Exception:
+                    return False
+
             try:
                 provider = TranscriptionProvider(request.provider)
 
@@ -1247,13 +1271,26 @@ async def transcribe_audio(
                         docs, output_path
                     )
 
-                    if _audio_info:
+                    if _is_cancelled():
+                        # Usuário cancelou enquanto o worker rodava — limpa o
+                        # arquivo recém-escrito e não regrava o status.
+                        try:
+                            Path(transcription_path).unlink(missing_ok=True)
+                        except Exception as e:
+                            logger.warning(
+                                f"Cancelado: falha ao remover {transcription_path}: {e}"
+                            )
+                        logger.info(
+                            f"Transcrição cancelada pelo usuário; arquivo removido: {transcription_path}"
+                        )
+                    elif _audio_info:
                         rel_path = Path(transcription_path).relative_to(DOWNLOADS_DIR)
                         asyncio.run(
                             audio_manager.update_transcription_status(
                                 _audio_info["id"], "ended", str(rel_path)
                             )
                         )
+                        logger.success(f"Transcrição concluída: {output_path}")
                     elif _video_info:
                         rel_path = Path(transcription_path).relative_to(DOWNLOADS_DIR)
                         asyncio.run(
@@ -1261,10 +1298,13 @@ async def transcribe_audio(
                                 _video_info["id"], "ended", str(rel_path)
                             )
                         )
-
-                    logger.success(f"Transcrição concluída: {output_path}")
+                        logger.success(f"Transcrição concluída: {output_path}")
                 else:
-                    if _audio_info:
+                    if _is_cancelled():
+                        logger.info(
+                            "Transcrição cancelada pelo usuário (sem conteúdo gerado)"
+                        )
+                    elif _audio_info:
                         asyncio.run(
                             audio_manager.update_transcription_status(
                                 _audio_info["id"], "error"
@@ -1276,21 +1316,25 @@ async def transcribe_audio(
                                 _video_info["id"], "error"
                             )
                         )
-                    logger.error("Falha na transcrição: nenhum conteúdo gerado")
+                    if not _is_cancelled():
+                        logger.error("Falha na transcrição: nenhum conteúdo gerado")
             except Exception as e:
-                if _audio_info:
+                if _is_cancelled():
+                    logger.info(f"Transcrição cancelada pelo usuário (após erro): {e}")
+                elif _audio_info:
                     asyncio.run(
                         audio_manager.update_transcription_status(
                             _audio_info["id"], "error"
                         )
                     )
+                    logger.exception(f"Erro na tarefa de transcrição: {str(e)}")
                 elif _video_info:
                     asyncio.run(
                         video_manager.update_transcription_status(
                             _video_info["id"], "error"
                         )
                     )
-                logger.exception(f"Erro na tarefa de transcrição: {str(e)}")
+                    logger.exception(f"Erro na tarefa de transcrição: {str(e)}")
             finally:
                 # M1 fix (option b): when media was materialized from S3 into /tmp,
                 # delete the tempfile after transcription completes (success OR error).
@@ -1556,7 +1600,11 @@ async def get_transcription_status(
 
 @app.delete("/audio/transcription/{file_id}")
 async def delete_transcription(file_id: str, token_data: dict = Depends(verify_token)):
-    """Exclui a transcrição de um áudio"""
+    """Exclui ou cancela a transcrição de um áudio.
+
+    Aceita qualquer status diferente de "none" — permite limpar transcrições
+    travadas em "started" (processo morto sem finalizar) ou em "error".
+    """
     try:
         logger.info(f"Solicitação de exclusão de transcrição para ID: {file_id}")
 
@@ -1571,31 +1619,31 @@ async def delete_transcription(file_id: str, token_data: dict = Depends(verify_t
         transcription_status = audio_info.get("transcription_status", "none")
         transcription_path = audio_info.get("transcription_path")
 
-        if transcription_status != "ended" or not transcription_path:
-            logger.warning(f"Transcrição não encontrada para: {file_id}")
+        if transcription_status == "none":
+            logger.warning(f"Sem transcrição para excluir: {file_id}")
             raise HTTPException(
                 status_code=404, detail=f"Transcrição não encontrada para: {file_id}"
             )
 
-        # Caminho completo do arquivo de transcrição
-        full_path = AUDIO_DIR.parent / transcription_path
+        if transcription_path:
+            full_path = AUDIO_DIR.parent / transcription_path
+            if full_path.exists():
+                full_path.unlink()
+                logger.info(f"Arquivo de transcrição removido: {full_path}")
+            else:
+                logger.warning(f"Arquivo de transcrição não existe: {full_path}")
 
-        # Remove o arquivo se existir
-        if full_path.exists():
-            full_path.unlink()
-            logger.info(f"Arquivo de transcrição removido: {full_path}")
-        else:
-            logger.warning(f"Arquivo de transcrição não existe: {full_path}")
+        # Reseta o status (passa string vazia porque a coluna é NOT NULL)
+        await audio_manager.update_transcription_status(file_id, "none", "")
 
-        # Atualiza o status no banco de dados
-        await audio_manager.update_transcription_status(file_id, "none", None)
-
-        logger.success(f"Transcrição excluída com sucesso para: {file_id}")
+        action = "cancelada" if transcription_status == "started" else "excluída"
+        logger.success(f"Transcrição {action} com sucesso para: {file_id}")
 
         return {
             "status": "success",
-            "message": "Transcrição excluída com sucesso",
+            "message": f"Transcrição {action} com sucesso",
             "file_id": file_id,
+            "previous_status": transcription_status,
         }
 
     except HTTPException:
@@ -1605,6 +1653,142 @@ async def delete_transcription(file_id: str, token_data: dict = Depends(verify_t
         raise HTTPException(
             status_code=500, detail=f"Erro ao excluir transcrição: {str(e)}"
         )
+
+
+# Busca em transcrições
+
+# Cap defensivo: arquivos maiores que isso são pulados na busca de conteúdo.
+# Transcrições reais raramente passam de 1-2 MB; 5 MB cobre folga e evita
+# que um .md corrompido ou anômalo carregue muita RAM por requisição.
+MAX_TRANSCRIPTION_SEARCH_BYTES = 5 * 1024 * 1024
+MAX_TRANSCRIPTION_SEARCH_RESULTS = 100
+SNIPPET_RADIUS = 80
+
+
+def _build_snippet(text: str, term_lower: str, term_len: int) -> tuple[str, int]:
+    """Conta ocorrências e devolve snippet HTML-escapado com <mark> ao redor
+    da primeira ocorrência (case-insensitive).
+    """
+    import html as _html
+
+    lower = text.lower()
+    count = lower.count(term_lower)
+    if count == 0:
+        return "", 0
+
+    idx = lower.find(term_lower)
+    start = max(0, idx - SNIPPET_RADIUS)
+    end = min(len(text), idx + term_len + SNIPPET_RADIUS)
+    before = _html.escape(text[start:idx])
+    match = _html.escape(text[idx : idx + term_len])
+    after = _html.escape(text[idx + term_len : end])
+    prefix = "…" if start > 0 else ""
+    suffix = "…" if end < len(text) else ""
+    snippet = f"{prefix}{before}<mark>{match}</mark>{after}{suffix}"
+    return snippet, count
+
+
+@app.get("/transcription/search")
+async def search_transcriptions(
+    q: str = Query(..., min_length=2, max_length=200, description="Termo de busca"),
+    kind: str = Query(
+        "all", regex="^(all|audio|video)$", description="Filtrar por tipo de mídia"
+    ),
+    token_data: dict = Depends(verify_token),
+):
+    """Busca dentro do conteúdo dos arquivos de transcrição (.md).
+
+    Itera sobre áudios e vídeos com transcrição concluída e procura ``q``
+    case-insensitive no texto. Retorna até 100 resultados com snippet curto.
+    """
+    try:
+        term = q.strip()
+        if len(term) < 2:
+            raise HTTPException(
+                status_code=400,
+                detail="Termo de busca muito curto (mínimo 2 caracteres)",
+            )
+        term_lower = term.lower()
+        term_len = len(term)
+
+        results: list[dict] = []
+        scanned = 0
+
+        async def _scan(items: list, media_type: str) -> None:
+            nonlocal scanned
+            for item in items:
+                file_id = item.get("id")
+                if not file_id:
+                    continue
+                status = item.get("transcription_status")
+                rel_path = item.get("transcription_path")
+                if status != "ended" or not rel_path:
+                    continue
+                full_path = DOWNLOADS_DIR / rel_path
+                try:
+                    if not full_path.exists() or not full_path.is_file():
+                        continue
+                    size = full_path.stat().st_size
+                    if size > MAX_TRANSCRIPTION_SEARCH_BYTES:
+                        logger.warning(
+                            f"Transcrição {full_path} excede {MAX_TRANSCRIPTION_SEARCH_BYTES} bytes; pulando"
+                        )
+                        continue
+                    text = await asyncio.to_thread(
+                        full_path.read_text, encoding="utf-8", errors="replace"
+                    )
+                    scanned += 1
+                except OSError as e:
+                    logger.warning(f"Falha ao ler transcrição {full_path}: {e}")
+                    continue
+
+                snippet, count = _build_snippet(text, term_lower, term_len)
+                if count == 0:
+                    continue
+                results.append(
+                    {
+                        "file_id": file_id,
+                        "media_type": media_type,
+                        "title": item.get("title") or item.get("name") or "",
+                        "snippet": snippet,
+                        "match_count": count,
+                    }
+                )
+
+        # Coleta de TODOS os matches em ambos os tipos antes do sort/cap, para
+        # evitar o viés audio-first que esconderia matches de vídeo quando
+        # áudios sozinhos já fossem suficientes para preencher o cap.
+        if kind in ("all", "audio"):
+            audios = await audio_manager.get_all_audios()
+            await _scan(audios, "audio")
+        if kind in ("all", "video"):
+            videos = await video_manager.get_all_videos()
+            await _scan(videos, "video")
+
+        total_matches = len(results)
+        results.sort(key=lambda r: r["match_count"], reverse=True)
+        truncated = total_matches > MAX_TRANSCRIPTION_SEARCH_RESULTS
+        if truncated:
+            results = results[:MAX_TRANSCRIPTION_SEARCH_RESULTS]
+
+        logger.info(
+            f"Busca em transcrições: q='{term}' kind={kind} scanned={scanned} "
+            f"matches={total_matches} truncated={truncated}"
+        )
+
+        return {
+            "query": term,
+            "kind": kind,
+            "scanned": scanned,
+            "truncated": truncated,
+            "total_matches": total_matches,
+            "results": results,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Erro na busca de transcrições: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro na busca: {e}")
 
 
 # SSE e status de download

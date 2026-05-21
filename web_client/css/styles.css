@@ -1576,3 +1576,47 @@ audio::-webkit-media-controls-panel {
         to { opacity: 1; }
     }
 }
+
+/* ========================================
+   Search bars (Áudios / Vídeos / Transcrições)
+   ======================================== */
+
+.yd-search-group .yd-search-clear {
+    border-left: none;
+}
+
+.yd-search-input::placeholder {
+    color: var(--yd-text-tertiary);
+}
+
+.yd-media-title mark,
+.yd-search-snippet mark {
+    background: var(--yd-accent-primary-muted);
+    color: var(--yd-text-primary);
+    padding: 0 .15em;
+    border-radius: .2em;
+}
+
+.yd-toggle-group .btn-check:checked + .btn {
+    background: var(--yd-accent-primary-muted);
+    border-color: var(--yd-accent-primary);
+    color: var(--yd-text-primary);
+}
+
+.yd-search-snippet {
+    margin-top: .35rem;
+    padding: .35rem .55rem;
+    font-size: .82rem;
+    color: var(--yd-text-secondary);
+    background: var(--yd-bg-overlay);
+    border-left: 3px solid var(--yd-accent-primary);
+    border-radius: 0 .25rem .25rem 0;
+    line-height: 1.4;
+    /* Snippet pode ser longo; deixa quebrar mas com cap visual */
+    max-height: 4.4em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+}

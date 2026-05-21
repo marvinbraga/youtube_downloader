@@ -1090,8 +1090,9 @@ $(document).ready(function() {
                 ? `<div class="yd-search-snippet" title="Trecho com a ocorrência (${snippetData.match_count} match${snippetData.match_count > 1 ? 'es' : ''})">${snippetData.snippet}</div>`
                 : '';
 
+            const playLabel = media.mediaType === 'audio' ? 'Reproduzir áudio' : 'Reproduzir vídeo';
             const item = $(`
-                <div class="yd-media-item" data-id="${media.id}" data-type="${media.mediaType}">
+                <div class="yd-media-item yd-clickable" data-id="${media.id}" data-type="${media.mediaType}" role="button" tabindex="0" title="${playLabel}">
                     <div class="d-flex w-100 align-items-center">
                         <div class="me-3">
                             <div class="yd-media-thumb ${thumbClass}">
@@ -1143,6 +1144,20 @@ $(document).ready(function() {
                 e.preventDefault();
                 e.stopPropagation();
                 confirmDeleteTranscription(media.id, media.title || media.name, media.transcription_status);
+            });
+
+            // Click no body do item → troca para a aba correspondente e reproduz.
+            // Cliques nas action-buttons (acima) usam stopPropagation, então não disparam aqui.
+            const triggerPlay = (e) => {
+                if (e.target.closest('.yd-action-group')) return;
+                e.preventDefault();
+                playFromTranscriptionItem(media);
+            };
+            item.on('click', triggerPlay);
+            item.on('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    triggerPlay(e);
+                }
             });
 
             container.append(item);
@@ -2320,6 +2335,36 @@ $(document).ready(function() {
             filterList(currentVideos, searchTerm, renderVideoList);
         }, 300);
     });
+
+    // Click-to-play a partir do item de Transcrições.
+    // Troca para a aba correspondente (Áudios ou Vídeos) e dispara o player.
+    // Reproveita as funções existentes playAudio/playVideo — não duplica lógica.
+    function playFromTranscriptionItem(media) {
+        const isAudio = media.mediaType === 'audio';
+        const targetTabId = isAudio ? '#audio-tab' : '#video-tab';
+        const tabEl = document.querySelector(targetTabId);
+        if (!tabEl) return;
+
+        // Acompanha o evento "shown" para garantir que o pane esteja visível
+        // antes de chamar o player (necessário no caso de vídeo, cujo overlay
+        // de loading reside no DOM do pane).
+        const onShown = () => {
+            tabEl.removeEventListener('shown.bs.tab', onShown);
+            if (isAudio) {
+                playAudio(media);
+            } else {
+                playVideo(media);
+            }
+        };
+
+        if (tabEl.classList.contains('active')) {
+            // Já está na aba — toca direto.
+            if (isAudio) playAudio(media); else playVideo(media);
+        } else {
+            tabEl.addEventListener('shown.bs.tab', onShown, { once: true });
+            bootstrap.Tab.getOrCreateInstance(tabEl).show();
+        }
+    }
 
     // --- Transcription search ---
     let transcriptionSearchTimeout;

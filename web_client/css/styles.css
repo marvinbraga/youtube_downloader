@@ -1603,6 +1603,11 @@ audio::-webkit-media-controls-panel {
     color: var(--yd-text-primary);
 }
 
+.yd-media-item.yd-clickable:focus-visible {
+    outline: 2px solid var(--yd-accent-primary);
+    outline-offset: -2px;
+}
+
 .yd-search-snippet {
     margin-top: .35rem;
     padding: .35rem .55rem;

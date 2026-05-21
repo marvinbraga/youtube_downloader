@@ -205,10 +205,13 @@
 
                 <!-- Audio Controls -->
                 <div class="d-flex gap-2 mb-3">
-                    <div class="input-group flex-grow-1">
+                    <div class="input-group flex-grow-1 yd-search-group">
                         <span class="input-group-text"><i class="bi bi-search"></i></span>
-                        <input type="text" class="form-control" id="searchAudioInput"
-                               placeholder="Buscar áudios...">
+                        <input type="text" class="form-control yd-search-input" id="searchAudioInput"
+                               placeholder="Buscar áudios por título, palavras-chave ou URL... (tecle / para focar)">
+                        <button type="button" class="btn btn-outline-secondary yd-search-clear" data-target="#searchAudioInput" title="Limpar busca" hidden>
+                            <i class="bi bi-x-lg"></i>
+                        </button>
                     </div>
                     <button class="btn btn-outline-secondary" id="refreshAudioBtn" title="Atualizar lista">
                         <i class="bi bi-arrow-clockwise"></i>
@@ -255,10 +258,13 @@
 
                 <!-- Video Controls -->
                 <div class="d-flex gap-2 mb-3">
-                    <div class="input-group flex-grow-1">
+                    <div class="input-group flex-grow-1 yd-search-group">
                         <span class="input-group-text"><i class="bi bi-search"></i></span>
-                        <input type="text" class="form-control" id="searchVideoInput"
-                               placeholder="Buscar vídeos...">
+                        <input type="text" class="form-control yd-search-input" id="searchVideoInput"
+                               placeholder="Buscar vídeos por título, palavras-chave ou URL... (tecle / para focar)">
+                        <button type="button" class="btn btn-outline-secondary yd-search-clear" data-target="#searchVideoInput" title="Limpar busca" hidden>
+                            <i class="bi bi-x-lg"></i>
+                        </button>
                     </div>
                     <button class="btn btn-outline-secondary" id="refreshVideoBtn" title="Atualizar lista">
                         <i class="bi bi-arrow-clockwise"></i>
@@ -424,6 +430,28 @@
                             <option value="ko">한국어</option>
                             <option value="zh">中文</option>
                         </select>
+                    </div>
+                </div>
+
+                <!-- Transcription Search -->
+                <div class="d-flex gap-2 mb-3 flex-wrap align-items-stretch">
+                    <div class="input-group flex-grow-1 yd-search-group" style="min-width: 260px;">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control yd-search-input" id="searchTranscriptionInput"
+                               placeholder="Buscar transcrições... (tecle / para focar)">
+                        <button type="button" class="btn btn-outline-secondary yd-search-clear" data-target="#searchTranscriptionInput" title="Limpar busca" hidden>
+                            <i class="bi bi-x-lg"></i>
+                        </button>
+                    </div>
+                    <div class="btn-group yd-toggle-group" role="group" aria-label="Modo de busca">
+                        <input type="radio" class="btn-check" name="searchTranscriptionMode" id="searchTranscriptionModeTitle" value="title" autocomplete="off" checked>
+                        <label class="btn btn-outline-secondary" for="searchTranscriptionModeTitle" title="Buscar no título da mídia">
+                            <i class="bi bi-card-text me-1"></i>Título
+                        </label>
+                        <input type="radio" class="btn-check" name="searchTranscriptionMode" id="searchTranscriptionModeContent" value="content" autocomplete="off">
+                        <label class="btn btn-outline-secondary" for="searchTranscriptionModeContent" title="Buscar dentro do texto da transcrição">
+                            <i class="bi bi-file-earmark-text me-1"></i>Conteúdo
+                        </label>
                     </div>
                 </div>
 

@@ -4,6 +4,11 @@
 
 # Working screenshots
 screenshot-*.png
+audio-list-*.png
+instagram-video-list.png
+
+# Local planning notes (per-session, not shipped)
+PLAN.md
 
 ### Python template
 # Byte-compiled / optimized / DLL files

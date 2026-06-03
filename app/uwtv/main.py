@@ -1,5 +1,6 @@
 # main.py
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
@@ -39,7 +40,13 @@ from app.models.folder import (
     MoveItemRequest,
     BulkMoveRequest,
 )
-from app.services.configs import video_mapping, AUDIO_DIR, audio_mapping, DOWNLOADS_DIR
+from app.services.configs import (
+    video_mapping,
+    AUDIO_DIR,
+    audio_mapping,
+    DOWNLOADS_DIR,
+    TRANSCRIPTION_CONCURRENCY,
+)
 from app.services.storage import (
     get_storage,
 )  # L1: hoisted from per-endpoint lazy imports.
@@ -113,11 +120,18 @@ async def lifespan(app: FastAPI):
     # Iniciar processamento da fila
     download_queue.start_processing()
 
+    logger.info(
+        f"Fila de transcrição: limite de {TRANSCRIPTION_CONCURRENCY} simultâneas"
+    )
+
     logger.info("Aplicação iniciada com sucesso!")
     yield
 
     # Shutdown
     logger.info("Encerrando aplicação...")
+    # Encerra o executor de transcrições sem bloquear o shutdown nem vazar
+    # threads: cancela tarefas ainda enfileiradas e não aguarda as em execução.
+    _transcription_executor.shutdown(wait=False, cancel_futures=True)
 
 
 app = FastAPI(title="Video Streaming API", lifespan=lifespan)
@@ -134,6 +148,16 @@ app.add_middleware(
 stream_manager = VideoStreamManager()
 audio_manager = AudioDownloadManager()
 video_manager = VideoDownloadManager()
+
+# Executor dedicado às transcrições. Limita quantas rodam em paralelo
+# (TRANSCRIPTION_CONCURRENCY, default 2): apenas N workers existem, o restante
+# das tarefas submetidas aguarda na fila interna do executor sem ocupar threads
+# extras do pool padrão do Starlette. Isso evita o pico de memória que vinha
+# matando o processo do servidor quando várias transcrições rodavam juntas.
+_transcription_executor = ThreadPoolExecutor(
+    max_workers=TRANSCRIPTION_CONCURRENCY,
+    thread_name_prefix="transcribe",
+)
 
 MAX_PLAYLIST_ENTRIES = 200
 
@@ -1004,7 +1028,6 @@ async def list_audio_files(token_data: dict = Depends(verify_token)):
 @app.post("/audio/transcribe", response_model=TranscriptionResponse)
 async def transcribe_audio(
     request: TranscriptionRequest,
-    background_tasks: BackgroundTasks,
     token_data: dict = Depends(verify_token),
 ):
     """Transcreve um arquivo de áudio ou vídeo"""
@@ -1058,7 +1081,7 @@ async def transcribe_audio(
                         message="Transcrição já existe",
                     )
 
-            elif transcription_status == "started":
+            elif transcription_status in ("started", "queued"):
                 logger.info(f"Transcrição já está em andamento para: {request.file_id}")
                 # Drop the tempfile — the running transcription task owns the work.
                 if audio_info.get("storage_backend") == "s3":
@@ -1126,7 +1149,7 @@ async def transcribe_audio(
                             message="Transcrição já existe",
                         )
 
-                elif transcription_status == "started":
+                elif transcription_status in ("started", "queued"):
                     logger.info(
                         f"Transcrição já está em andamento para: {request.file_id}"
                     )
@@ -1230,11 +1253,14 @@ async def transcribe_audio(
         # parent dir may have been cleaned up after upload).
         transcription_file.parent.mkdir(parents=True, exist_ok=True)
 
-        # Atualiza o status para "started"
+        # Enfileiramento: o item entra como "queued". O status só vira "started"
+        # dentro de transcribe_task, quando um worker do executor de fato pega a
+        # tarefa. Assim itens aguardando na fila aparecem "queued" e apenas os
+        # que estão rodando aparecem "started".
         if audio_info:
-            await audio_manager.update_transcription_status(audio_info["id"], "started")
+            await audio_manager.update_transcription_status(audio_info["id"], "queued")
         elif video_info:
-            await video_manager.update_transcription_status(video_info["id"], "started")
+            await video_manager.update_transcription_status(video_info["id"], "queued")
 
         # Captura as variáveis para a closure
         _audio_info = audio_info
@@ -1269,6 +1295,30 @@ async def transcribe_audio(
                     return False
 
             try:
+                # Cancelamento de enfileiradas: se o usuário cancelou (status
+                # "none" via DELETE /audio/transcription/{id}) enquanto a tarefa
+                # esperava na fila do executor, abortar sem processar. O `finally`
+                # ainda roda e limpa o tempfile S3, se houver.
+                if _is_cancelled():
+                    logger.info(
+                        "Transcrição cancelada enquanto enfileirada; abortando antes de iniciar."
+                    )
+                    return
+
+                # Worker pegou a tarefa de fato: agora sim vira "started".
+                if _audio_info:
+                    asyncio.run(
+                        audio_manager.update_transcription_status(
+                            _audio_info["id"], "started"
+                        )
+                    )
+                elif _video_info:
+                    asyncio.run(
+                        video_manager.update_transcription_status(
+                            _video_info["id"], "started"
+                        )
+                    )
+
                 provider = TranscriptionProvider(request.provider)
 
                 docs = TranscriptionService.transcribe_audio(
@@ -1359,13 +1409,16 @@ async def transcribe_audio(
                             f"Falha ao remover tempfile S3 {_media_path}: {cleanup_err}"
                         )
 
-        background_tasks.add_task(transcribe_task)
+        # Submete ao executor dedicado. Se já houver TRANSCRIPTION_CONCURRENCY
+        # transcrições rodando, esta aguarda na fila interna do executor (status
+        # "queued") até um worker liberar.
+        _transcription_executor.submit(transcribe_task)
 
         return TranscriptionResponse(
             file_id=request.file_id,
             transcription_path=str(transcription_file),
             status="processing",
-            message="A transcrição foi iniciada em segundo plano",
+            message="A transcrição foi enfileirada",
         )
     except HTTPException:
         raise
@@ -1648,7 +1701,9 @@ async def delete_transcription(file_id: str, token_data: dict = Depends(verify_t
         # Reseta o status (passa string vazia porque a coluna é NOT NULL)
         await audio_manager.update_transcription_status(file_id, "none", "")
 
-        action = "cancelada" if transcription_status == "started" else "excluída"
+        action = (
+            "cancelada" if transcription_status in ("started", "queued") else "excluída"
+        )
         logger.success(f"Transcrição {action} com sucesso para: {file_id}")
 
         return {

@@ -118,6 +118,18 @@ def get_yt_dlp_cookies_opts(source: str = "youtube") -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Transcription concurrency configuration
+# ---------------------------------------------------------------------------
+
+# Maximum number of transcriptions allowed to run simultaneously. Transcribing a
+# single audio/video can hold ~100MB in memory; running many in parallel spiked
+# memory and was killing the server process. The dedicated executor in main.py
+# uses this value to cap concurrent workers; surplus requests wait in the
+# executor's internal queue (status "queued") instead of grabbing extra threads.
+TRANSCRIPTION_CONCURRENCY = int(os.getenv("TRANSCRIPTION_CONCURRENCY", "2"))
+
+
+# ---------------------------------------------------------------------------
 # Storage backend configuration
 # ---------------------------------------------------------------------------
 

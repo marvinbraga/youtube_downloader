@@ -392,7 +392,7 @@ class AudioDownloadManager:
         self, audio_id: str, status: str, transcription_path: str = None
     ) -> bool:
         """Atualiza o status de transcrição de um áudio"""
-        if status not in ["none", "started", "ended", "error"]:
+        if status not in ["none", "queued", "started", "ended", "error"]:
             logger.warning(f"Status de transcrição inválido: {status}")
             return False
 
@@ -1265,7 +1265,7 @@ class VideoDownloadManager:
         self, video_id: str, status: str, transcription_path: str = None
     ) -> bool:
         """Atualiza o status de transcrição de um vídeo"""
-        if status not in ["none", "started", "ended", "error"]:
+        if status not in ["none", "queued", "started", "ended", "error"]:
             logger.warning(f"Status de transcrição inválido: {status}")
             return False
 

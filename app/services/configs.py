@@ -1,4 +1,8 @@
+import glob
 import os
+import shutil
+import tempfile
+import time
 from pathlib import Path
 from typing import Any, Dict, Union
 
@@ -34,6 +38,38 @@ security = HTTPBearer()
 # ---------------------------------------------------------------------------
 
 VALID_BROWSERS = {"chrome", "brave", "firefox", "edge", "opera", "safari", "vivaldi"}
+
+# Prefix for per-download throwaway cookie copies (see _writable_cookie_copy).
+_COOKIE_TMP_PREFIX = "ytdl_cookies_"
+
+
+def _writable_cookie_copy(master: Path) -> str:
+    """Return a throwaway, writable copy of ``master`` for a single download.
+
+    yt-dlp rewrites the cookiefile on ``YoutubeDL.close()`` (it persists any
+    ``Set-Cookie`` the server sent). Pointing it straight at the mounted master
+    breaks in two ways:
+
+    * the master is mounted read-only -> ``PermissionError`` on save;
+    * the download queue runs multiple downloads at once, and
+      ``MozillaCookieJar.save()`` opens with ``'w'`` (non-atomic), so concurrent
+      saves to a shared file can interleave and corrupt it.
+
+    Handing each download its own copy sidesteps both: the master is never
+    written, and every writer owns a private file. Stale copies are reaped
+    best-effort so long-running containers don't accumulate them.
+    """
+    cutoff = time.time() - 6 * 3600
+    for old in glob.glob(os.path.join(tempfile.gettempdir(), f"{_COOKIE_TMP_PREFIX}*")):
+        try:
+            if os.path.getmtime(old) < cutoff:
+                os.unlink(old)
+        except OSError:
+            pass
+    fd, tmp = tempfile.mkstemp(prefix=_COOKIE_TMP_PREFIX, suffix=".txt")
+    os.close(fd)
+    shutil.copyfile(master, tmp)
+    return tmp
 
 
 def get_yt_dlp_cookies_opts(source: str = "youtube") -> Dict[str, Any]:
@@ -75,7 +111,8 @@ def get_yt_dlp_cookies_opts(source: str = "youtube") -> Dict[str, Any]:
             raise ValueError(
                 f"{file_env}='{cookies_file}' does not point to a regular file."
             )
-        return {"cookiefile": str(resolved)}
+        # Never hand yt-dlp the master directly — it rewrites it on close.
+        return {"cookiefile": _writable_cookie_copy(resolved)}
 
     return {}
 

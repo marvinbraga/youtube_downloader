@@ -15,6 +15,10 @@ services:
       # idempotent _apply_schema_migrations helper, but SQLite write contention
       # still hurts throughput. Keep it at 1 unless you've moved to Postgres.
       UVICORN_WORKERS: "1"
+      # Transcriptions are processed one at a time; extras wait in the queue
+      # (status "queued"). Serial processing keeps the in-memory audio-decode
+      # peak bounded. Raise only after measuring per-job peak vs the memory cap.
+      TRANSCRIPTION_CONCURRENCY: "1"
     volumes:
       # Persist the SQLite DB outside the container.
       - ./data:/app/data
@@ -30,12 +34,14 @@ services:
       timeout: 5s
       start_period: 15s
       retries: 3
-    # Avoid OOM-killing transient yt-dlp ffmpeg muxing jobs on small hosts.
-    # Tune to your machine.
+    # Memory ceiling. Transcription decodes large audio files in memory, so the
+    # old 2g cap was OOM-killing transcription jobs (Docker `oom` event +
+    # exit 137) even with concurrency limited. Raised to 8g — generous on this
+    # host — so a single job has ample headroom. Tune to your machine.
     deploy:
       resources:
         limits:
-          memory: 2g
+          memory: 8g
         reservations:
           memory: 512m
 

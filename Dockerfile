@@ -35,18 +35,27 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     VIRTUAL_ENV=/app/.venv
 
 # ffmpeg is required by yt-dlp's audio post-processor (m4a/mp3 extraction).
-# nodejs is detected by app/services/downloaders/youtube.py to solve YouTube
-# JS player challenges (js_runtimes={"node": {"path": ...}}). Without it,
-# the app boots with a warning and YouTube downloads may fail.
+# Node solves YouTube's JS player challenges via yt-dlp's EJS subsystem
+# (app/services/downloaders/youtube.py sets js_runtimes={"node": {"path": ...}}
+# and remote_components=["ejs:github"]). EJS requires Node >= 22, but Debian
+# bookworm's apt ships Node 18 — too old, which leaves only storyboard formats
+# and makes every YouTube download fail. So we DON'T install nodejs from apt;
+# we copy the Node 22 binary from the official image below. libstdc++6 is the
+# shared lib that binary links against (not guaranteed in python:3.12-slim).
 # tini gives us a proper PID 1 with signal forwarding so SIGTERM from
 # `docker stop` is delivered cleanly to uvicorn.
 RUN apt-get update \
  && apt-get install --no-install-recommends -y \
         ffmpeg \
-        nodejs \
+        libstdc++6 \
         tini \
         curl \
  && rm -rf /var/lib/apt/lists/*
+
+# Node 22 binary for yt-dlp's EJS JS-challenge solver. Copied from the official
+# bookworm-slim image (same glibc as our runtime) instead of apt, which only
+# offers the too-old Node 18. A standalone JS runtime needs no node_modules.
+COPY --from=node:22-bookworm-slim /usr/local/bin/node /usr/local/bin/node
 
 # Non-root user. UID 1000 matches the typical host user, which makes
 # bind-mounted volumes (./data, ./downloads) writable without chown gymnastics.

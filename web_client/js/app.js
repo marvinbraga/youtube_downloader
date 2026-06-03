@@ -1173,11 +1173,11 @@ $(document).ready(function() {
                                 <i class="bi bi-eye"></i>
                             </button>
                             <button class="btn btn-sm btn-danger yd-action-btn start-transcription-btn" data-id="${media.id}"
-                                    title="Transcrever" ${media.transcription_status === 'started' ? 'disabled' : ''}>
+                                    title="Transcrever" ${media.transcription_status === 'started' || media.transcription_status === 'queued' ? 'disabled' : ''}>
                                 <i class="bi bi-file-text"></i>
                             </button>
                             <button class="btn btn-sm btn-outline-danger yd-action-btn delete-transcription-btn" data-id="${media.id}"
-                                    title="${media.transcription_status === 'started' ? 'Cancelar Transcrição' : 'Excluir Transcrição'}"
+                                    title="${media.transcription_status === 'started' || media.transcription_status === 'queued' ? 'Cancelar Transcrição' : 'Excluir Transcrição'}"
                                     ${media.transcription_status === 'none' ? 'disabled' : ''}>
                                 <i class="bi bi-trash"></i>
                             </button>
@@ -1225,6 +1225,7 @@ $(document).ready(function() {
     function getTranscriptionStatusBadge(status) {
         const badges = {
             'ended': '<span class="yd-badge yd-badge--transcribed"><i class="bi bi-check-circle me-1"></i>Transcrito</span>',
+            'queued': '<span class="yd-badge yd-badge--processing"><i class="bi bi-clock-history me-1"></i>Aguardando</span>',
             'started': '<span class="yd-badge yd-badge--processing"><i class="bi bi-hourglass-split me-1"></i>Em andamento</span>',
             'error': '<span class="yd-badge yd-badge--error"><i class="bi bi-x-circle me-1"></i>Erro</span>',
             'none': '<span class="yd-badge yd-badge--not-transcribed"><i class="bi bi-dash-circle me-1"></i>Não transcrito</span>'
@@ -1241,9 +1242,17 @@ $(document).ready(function() {
         const provider = $('#transcriptionProvider').val();
         const language = $('#transcriptionLanguage').val();
 
-        try {
-            showLoading('Iniciando transcrição...');
+        // Enfileiramento otimista e NÃO-bloqueante: marca o item como "Aguardando"
+        // e desabilita seu botão imediatamente, sem abrir o modal de loading e sem
+        // recarregar a lista inteira. O modal cobria a tela e o reload recriava
+        // todo o DOM a cada clique, fazendo o botão seguinte "sumir" — o que
+        // impedia enfileirar vários itens em sequência. Agora dá para clicar em
+        // vários rapidamente; cada um vira "Aguardando" e drena conforme a fila.
+        const $btn = $(`.start-transcription-btn[data-id="${fileId}"]`);
+        const $group = $btn.closest('.yd-action-group');
+        $btn.prop('disabled', true);
 
+        try {
             const response = await $.ajax({
                 url: `${API_BASE_URL}/audio/transcribe`,
                 method: 'POST',
@@ -1255,24 +1264,21 @@ $(document).ready(function() {
                 })
             });
 
-            hideLoading();
-
             if (response.status === 'processing' || response.status === 'success') {
-                showToast('Transcrição iniciada! Este processo pode levar alguns minutos.', 'success');
-                // Start polling for status
+                // Feedback visual imediato no próprio item (sem re-render global).
+                $group.find('.yd-badge').replaceWith(getTranscriptionStatusBadge('queued'));
+                showToast('Adicionado à fila de transcrição.', 'success');
                 pollTranscriptionStatus(fileId);
             } else if (response.message && response.message.includes('já existe')) {
+                $btn.prop('disabled', false);
                 showToast('Transcrição já existe para este arquivo.', 'info');
                 viewTranscription(fileId);
             } else {
-                showToast(response.message || 'Transcrição iniciada', 'info');
+                showToast(response.message || 'Adicionado à fila', 'info');
             }
 
-            // Reload list to update status
-            loadTranscriptionMediaList();
-
         } catch (error) {
-            hideLoading();
+            $btn.prop('disabled', false);
             console.error('Error starting transcription:', error);
             const message = error.responseJSON?.detail || 'Erro ao iniciar transcrição';
             showToast(message, 'error');
@@ -1295,8 +1301,8 @@ $(document).ready(function() {
             } else if (response.status === 'error') {
                 showToast('Erro na transcrição', 'error');
                 loadTranscriptionMediaList();
-            } else if (response.status === 'started') {
-                // Continue polling
+            } else if (response.status === 'queued' || response.status === 'started') {
+                // Estados ativos não-finais: continua o polling.
                 setTimeout(() => pollTranscriptionStatus(fileId), 5000);
             }
 

@@ -607,6 +607,17 @@ $(document).ready(function() {
     // ========================================
     // Download Functions
     // ========================================
+    // URL é playlist quando contém `list=` E NÃO contém `v=`.
+    // URLs com ambos (watch?v=...&list=...) são vídeo único.
+    function isPlaylistUrl(url) {
+        try {
+            const params = new URL(url).searchParams;
+            return params.has('list') && !params.has('v');
+        } catch (_) {
+            return false;
+        }
+    }
+
     async function downloadAudio() {
         const url = $('#audioUrl').val().trim();
         const highQuality = $('#highQuality').is(':checked');
@@ -618,6 +629,11 @@ $(document).ready(function() {
 
         if (!authToken) {
             showToast('Não autenticado', 'error');
+            return;
+        }
+
+        if (isPlaylistUrl(url)) {
+            await downloadAudioPlaylist(url, highQuality);
             return;
         }
 
@@ -653,6 +669,48 @@ $(document).ready(function() {
             hideLoading();
             console.error('Error downloading audio:', error);
             const message = error.responseJSON?.detail || 'Erro ao fazer download';
+            showToast(message, 'error');
+        }
+    }
+
+    async function downloadAudioPlaylist(url, highQuality) {
+        try {
+            showLoading('Enfileirando playlist de áudio...');
+
+            // PlaylistDownloadRequest (app/models/audio.py): url, high_quality.
+            // skip_existing tem default no backend (True) e não há controle na UI — omitido.
+            const response = await $.ajax({
+                url: `${API_BASE_URL}/audio/playlist`,
+                method: 'POST',
+                headers: getAuthHeaders(),
+                data: JSON.stringify({
+                    url: url,
+                    high_quality: highQuality
+                })
+            });
+
+            hideLoading();
+
+            // PlaylistDownloadResponse: playlist_title, total_items, queued_items, skipped_items, tasks[]
+            const tasks = response.tasks || [];
+            const queued = response.queued_items || 0;
+
+            tasks.forEach((task) => {
+                // Pular itens já existentes ou sem registro no DB.
+                if (task.skipped || !task.item_id) {
+                    return;
+                }
+                addActiveDownload(task.item_id, 'audio', task.title || 'Áudio');
+                pollDownloadStatus(task.item_id, 'audio');
+            });
+
+            showToast(`Playlist enfileirada para download (${queued} itens)`, 'success');
+            $('#audioUrl').val('');
+
+        } catch (error) {
+            hideLoading();
+            console.error('Error downloading audio playlist:', error);
+            const message = error.responseJSON?.detail || 'Erro ao enfileirar playlist';
             showToast(message, 'error');
         }
     }

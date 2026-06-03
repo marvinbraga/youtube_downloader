@@ -61,6 +61,7 @@ from app.services.securities import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
 )
 from app.services.transcription.service import TranscriptionService
+from app.services.downloaders import is_playlist_url
 from app.services.sse_manager import sse_manager
 from app.services.download_queue import download_queue, DownloadTask
 from app.db.database import init_db, migrate_json_to_sqlite, get_db_context
@@ -432,6 +433,17 @@ async def download_audio(
     token_data: dict = Depends(verify_token),
 ):
     """Faz o download apenas do áudio de um vídeo do YouTube"""
+    # Guarda fora do try: HTTPException é subclasse de Exception e seria
+    # reembrulhada como 500 pelo handler abaixo se levantada dentro dele.
+    if is_playlist_url(str(request.url)):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "URL de playlist detectada. Use o endpoint POST /audio/playlist "
+                "para baixar playlists."
+            ),
+        )
+
     try:
         logger.info(f"Solicitação de download de áudio: {request.url}")
 
@@ -496,7 +508,7 @@ async def download_audio_playlist(
             folder_repo = FolderRepository(session)
             folder = Folder(
                 name=playlist_title[:255],
-                description=f"Playlist: {playlist_url}",
+                description="Playlist",
                 icon="playlist",
             )
             created_folder = await folder_repo.create(folder)
@@ -712,7 +724,7 @@ async def download_video_playlist(
             folder_repo = FolderRepository(session)
             folder = Folder(
                 name=playlist_title[:255],
-                description=f"Playlist: {playlist_url}",
+                description="Playlist",
                 icon="playlist",
             )
             created_folder = await folder_repo.create(folder)

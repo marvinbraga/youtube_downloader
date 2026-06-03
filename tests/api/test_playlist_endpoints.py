@@ -242,6 +242,53 @@ def test_audio_playlist_playlist_title_truncated_at_255_chars(client):
 
 
 # ---------------------------------------------------------------------------
+# POST /audio/download — playlist guard
+# ---------------------------------------------------------------------------
+
+
+def test_audio_download_playlist_url_returns_400(client):
+    """A playlist URL sent to /audio/download is rejected with 400, not registered.
+
+    The guard runs before the handler's broad ``except Exception`` block, so the
+    HTTPException(400) must survive and not be re-wrapped as a 500.
+    """
+    with (
+        patch(
+            "app.uwtv.main.audio_manager.register_audio_for_download",
+            new=AsyncMock(),
+        ) as register_mock,
+        patch("app.uwtv.main.download_queue.add_download", new=AsyncMock()) as add_mock,
+    ):
+        resp = client.post("/audio/download", json={"url": PLAYLIST_URL})
+
+    assert resp.status_code == 400
+    assert "/audio/playlist" in resp.json()["detail"]
+    register_mock.assert_not_called()
+    add_mock.assert_not_called()
+
+
+def test_audio_download_single_video_with_list_param_is_allowed(client):
+    """watch?v=X&list=Y is a single video and must NOT be blocked by the guard."""
+    single_with_list = "https://www.youtube.com/watch?v=abc1234567a&list=PL123"
+    with (
+        patch(
+            "app.uwtv.main.audio_manager.register_audio_for_download",
+            new=AsyncMock(return_value="audio-id-1"),
+        ),
+        patch(
+            "app.uwtv.main.download_queue.add_download",
+            new=AsyncMock(return_value="task-id-1"),
+        ),
+    ):
+        resp = client.post("/audio/download", json={"url": single_with_list})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["audio_id"] == "audio-id-1"
+    assert body["task_id"] == "task-id-1"
+
+
+# ---------------------------------------------------------------------------
 # POST /video/playlist
 # ---------------------------------------------------------------------------
 

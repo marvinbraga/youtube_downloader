@@ -172,3 +172,10 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 .idea/
 data/
+
+# yt-dlp authentication cookies — these are live, authenticated browser
+# sessions (effectively credentials). Never commit them. Ignore the contents
+# but keep the directory via .gitkeep (a bare `cookies/` would prevent the
+# negation below from re-including the file).
+cookies/*
+!cookies/.gitkeep

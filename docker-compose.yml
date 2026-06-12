@@ -1,3 +1,5 @@
+name: ytd
+
 services:
   app:
     container_name: youtube-downloader
@@ -44,6 +46,10 @@ services:
           memory: 8g
         reservations:
           memory: 512m
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ytd.rule=Host(`ytd.localhost`)"
+      - "traefik.http.services.ytd.loadbalancer.server.port=8000"
 
   # Local S3-compatible storage for development. Only starts when the
   # 's3-dev' profile is active:  docker compose --profile s3-dev up
@@ -89,6 +95,21 @@ services:
         mc mb --ignore-existing local/"$$MINIO_DEV_BUCKET"
         echo "MinIO bucket '$$MINIO_DEV_BUCKET' is ready."
     restart: "no"
+
+  traefik:
+    image: traefik:v2.11
+    container_name: traefik
+    user: "0:955"
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 
 # Named bind mounts are kept relative to the compose file so `docker compose
 # down` doesn't take the data with it. To enable Docker-managed volumes

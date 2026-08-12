@@ -399,6 +399,16 @@
                             <i class="bi bi-arrow-clockwise"></i>
                         </button>
                     </div>
+                    <div class="d-flex gap-2 mb-3">
+                        <div class="input-group flex-grow-1 yd-search-group">
+                            <span class="input-group-text"><i class="bi bi-search"></i></span>
+                            <input type="text" class="form-control yd-search-input" id="searchAlbumsInput"
+                                   placeholder="Buscar álbuns por título ou artista... (tecle / para focar)">
+                            <button type="button" class="btn btn-outline-secondary yd-search-clear" data-target="#searchAlbumsInput" title="Limpar busca" hidden>
+                                <i class="bi bi-x-lg"></i>
+                            </button>
+                        </div>
+                    </div>
                     <div class="yd-album-grid" id="albumGrid">
                         <div class="yd-empty-state">
                             <div class="spinner-border text-danger mb-3" role="status">
@@ -431,6 +441,16 @@
                                     </button>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+                    <div class="d-flex gap-2 mb-3">
+                        <div class="input-group flex-grow-1 yd-search-group">
+                            <span class="input-group-text"><i class="bi bi-search"></i></span>
+                            <input type="text" class="form-control yd-search-input" id="searchAlbumTracksInput"
+                                   placeholder="Buscar faixas neste álbum... (tecle / para focar)">
+                            <button type="button" class="btn btn-outline-secondary yd-search-clear" data-target="#searchAlbumTracksInput" title="Limpar busca" hidden>
+                                <i class="bi bi-x-lg"></i>
+                            </button>
                         </div>
                     </div>
                     <div class="card">

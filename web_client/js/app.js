@@ -1636,11 +1636,20 @@ $(document).ready(function() {
         $('#albumsDetailView').addClass('d-none');
         $('#albumsLibraryView').removeClass('d-none');
         currentAlbum = null;
+        $('#searchAlbumTracksInput').val('');
+        syncClearButton(document.getElementById('searchAlbumTracksInput'));
     }
 
     function showAlbumDetail() {
         $('#albumsLibraryView').addClass('d-none');
         $('#albumsDetailView').removeClass('d-none');
+        // Reset track search when opening a new album view
+        $('#searchAlbumTracksInput').val('');
+        const trackSearch = document.getElementById('searchAlbumTracksInput');
+        if (trackSearch) syncClearButton(trackSearch);
+        if (currentAlbum) {
+            applyAlbumTrackSearch('');
+        }
     }
 
     function switchToAlbumsTab() {
@@ -1662,22 +1671,60 @@ $(document).ready(function() {
                 headers: getAuthHeaders()
             });
             currentAlbums = response || [];
-            renderAlbumGrid(currentAlbums);
+            applyAlbumSearch($('#searchAlbumsInput').val() || '');
         } catch (error) {
             console.error('Error loading albums:', error);
             if (error.status === 401) {
                 authenticate();
             } else {
-                renderAlbumGrid([]);
+                currentAlbums = [];
+                applyAlbumSearch($('#searchAlbumsInput').val() || '');
             }
         }
     }
 
-    function renderAlbumGrid(albums) {
+    function applyAlbumSearch(searchTerm) {
+        const term = (searchTerm || '').trim().toLowerCase();
+        if (!term) {
+            renderAlbumGrid(currentAlbums);
+            return;
+        }
+        const filtered = currentAlbums.filter(album => {
+            const fields = [
+                album.name,
+                album.artist,
+                album.source_url,
+                album.external_playlist_id,
+                album.description,
+            ];
+            return fields.some(
+                value => typeof value === 'string' && value.toLowerCase().includes(term)
+            );
+        });
+        renderAlbumGrid(filtered, searchTerm);
+    }
+
+    function renderAlbumGrid(albums, searchTerm = '') {
         const container = $('#albumGrid');
         container.empty();
 
         if (!albums.length) {
+            if (searchTerm) {
+                container.html(`
+                    <div class="yd-empty-state" style="grid-column: 1 / -1;">
+                        <i class="bi bi-search yd-empty-state__icon"></i>
+                        <p class="yd-empty-state__title">Nenhum resultado para "${escapeHtml(searchTerm)}"</p>
+                        <p class="yd-empty-state__desc">Tente outra palavra ou limpe a busca.</p>
+                        <button type="button" class="btn btn-sm btn-outline-secondary mt-2" data-clear-target="#searchAlbumsInput">
+                            <i class="bi bi-x-lg me-1"></i>Limpar busca
+                        </button>
+                    </div>
+                `);
+                container.find('[data-clear-target]').on('click', () => {
+                    $('#searchAlbumsInput').val('').trigger('input');
+                });
+                return;
+            }
             container.html(`
                 <div class="yd-empty-state" style="grid-column: 1 / -1;">
                     <i class="bi bi-disc yd-empty-state__icon"></i>
@@ -1692,11 +1739,17 @@ $(document).ready(function() {
             const cover = albumCoverUrl(album);
             const artist = album.artist || 'Vários';
             const tracks = album.track_count || 0;
+            const titleHtml = searchTerm
+                ? highlightText(album.name || '', searchTerm)
+                : escapeHtml(album.name || '');
+            const artistHtml = searchTerm
+                ? highlightText(artist, searchTerm)
+                : escapeHtml(artist);
             const card = $(`
                 <button type="button" class="yd-album-card" data-id="${escapeHtml(album.id)}">
                     <div class="yd-album-cover yd-album-cover--card"></div>
-                    <div class="yd-album-card__title" title="${escapeHtml(album.name)}">${escapeHtml(album.name)}</div>
-                    <p class="yd-album-card__artist">${escapeHtml(artist)}</p>
+                    <div class="yd-album-card__title" title="${escapeHtml(album.name)}">${titleHtml}</div>
+                    <p class="yd-album-card__artist">${artistHtml}</p>
                     <p class="yd-album-card__meta">${tracks} faixa${tracks === 1 ? '' : 's'}</p>
                 </button>
             `);
@@ -1784,9 +1837,44 @@ $(document).ready(function() {
         const canPlay = tracks.some(t => t.download_status === 'ready');
         $('#albumPlayAllBtn').prop('disabled', !canPlay);
 
+        applyAlbumTrackSearch($('#searchAlbumTracksInput').val() || '');
+    }
+
+    function applyAlbumTrackSearch(searchTerm) {
+        const tracks = (currentAlbum && currentAlbum.tracks) || [];
+        const term = (searchTerm || '').trim().toLowerCase();
+        if (!term) {
+            renderAlbumTrackList(tracks);
+            return;
+        }
+        const filtered = tracks.filter(track => {
+            const fields = [
+                track.title,
+                track.name,
+                track.url,
+                track.youtube_id,
+                track.external_id,
+            ];
+            const kw = track.keywords;
+            if (Array.isArray(kw) && kw.some(k => typeof k === 'string' && k.toLowerCase().includes(term))) {
+                return true;
+            }
+            if (typeof kw === 'string' && kw.toLowerCase().includes(term)) {
+                return true;
+            }
+            return fields.some(
+                value => typeof value === 'string' && value.toLowerCase().includes(term)
+            );
+        });
+        renderAlbumTrackList(filtered, searchTerm);
+    }
+
+    function renderAlbumTrackList(tracks, searchTerm = '') {
         const list = $('#albumTrackList');
         list.empty();
-        if (!tracks.length) {
+
+        const allTracks = (currentAlbum && currentAlbum.tracks) || [];
+        if (!allTracks.length) {
             list.html(`
                 <div class="yd-empty-state">
                     <i class="bi bi-music-note-list yd-empty-state__icon"></i>
@@ -1796,17 +1884,51 @@ $(document).ready(function() {
             return;
         }
 
-        tracks.forEach((track, idx) => {
-            const num = track.track_number != null ? track.track_number : idx + 1;
+        if (!tracks.length) {
+            if (searchTerm) {
+                list.html(`
+                    <div class="yd-empty-state">
+                        <i class="bi bi-search yd-empty-state__icon"></i>
+                        <p class="yd-empty-state__title">Nenhum resultado para "${escapeHtml(searchTerm)}"</p>
+                        <p class="yd-empty-state__desc">Tente outra palavra ou limpe a busca.</p>
+                        <button type="button" class="btn btn-sm btn-outline-secondary mt-2" data-clear-target="#searchAlbumTracksInput">
+                            <i class="bi bi-x-lg me-1"></i>Limpar busca
+                        </button>
+                    </div>
+                `);
+                list.find('[data-clear-target]').on('click', () => {
+                    $('#searchAlbumTracksInput').val('').trigger('input');
+                });
+                return;
+            }
+            list.html(`
+                <div class="yd-empty-state">
+                    <i class="bi bi-music-note-list yd-empty-state__icon"></i>
+                    <p class="yd-empty-state__title">Sem faixas</p>
+                </div>
+            `);
+            return;
+        }
+
+        tracks.forEach((track) => {
+            // Prefer original playlist order number when available
+            const originalIdx = allTracks.findIndex(t => t.id === track.id);
+            const num = track.track_number != null
+                ? track.track_number
+                : (originalIdx >= 0 ? originalIdx + 1 : 1);
             const readyTrack = track.download_status === 'ready';
             const statusLabel = readyTrack
                 ? ''
                 : `<span class="badge bg-secondary">${escapeHtml(track.download_status || 'pendente')}</span>`;
             const playing = queueIndex >= 0 && albumQueue[queueIndex] && albumQueue[queueIndex].id === track.id;
+            const title = track.title || track.name || '';
+            const titleHtml = searchTerm
+                ? highlightText(title, searchTerm)
+                : escapeHtml(title);
             const row = $(`
                 <div class="yd-album-track ${readyTrack ? 'is-ready' : ''} ${playing ? 'is-playing' : ''}" data-id="${escapeHtml(track.id)}">
                     <span class="yd-album-track__num">${num}</span>
-                    <span class="yd-album-track__title" title="${escapeHtml(track.title || track.name)}">${escapeHtml(track.title || track.name)}</span>
+                    <span class="yd-album-track__title" title="${escapeHtml(title)}">${titleHtml}</span>
                     ${statusLabel}
                     <button type="button" class="btn btn-sm btn-outline-danger yd-action-btn album-track-play" ${readyTrack ? '' : 'disabled'} title="Tocar">
                         <i class="bi bi-play-fill"></i>
@@ -2959,6 +3081,26 @@ $(document).ready(function() {
         }, 300);
     });
 
+    let albumSearchTimeout;
+    $('#searchAlbumsInput').on('input', function() {
+        clearTimeout(albumSearchTimeout);
+        const searchTerm = $(this).val();
+        syncClearButton(this);
+        albumSearchTimeout = setTimeout(() => {
+            applyAlbumSearch(searchTerm);
+        }, 300);
+    });
+
+    let albumTrackSearchTimeout;
+    $('#searchAlbumTracksInput').on('input', function() {
+        clearTimeout(albumTrackSearchTimeout);
+        const searchTerm = $(this).val();
+        syncClearButton(this);
+        albumTrackSearchTimeout = setTimeout(() => {
+            applyAlbumTrackSearch(searchTerm);
+        }, 300);
+    });
+
     // Click-to-play a partir do item de Transcrições.
     // Troca para a aba correspondente (Áudios ou Vídeos) e dispara o player.
     // Reproveita as funções existentes playAudio/playVideo — não duplica lógica.
@@ -3096,7 +3238,7 @@ $(document).ready(function() {
         applyTranscriptionSearch();
     });
 
-    // Botões de limpar (×) compartilhados nos 3 inputs
+    // Botões de limpar (×) compartilhados nos inputs de busca
     $(document).on('click', '.yd-search-clear', function() {
         const target = $(this).data('target');
         $(target).val('').trigger('input').focus();
@@ -3116,7 +3258,11 @@ $(document).ready(function() {
         const tag = (e.target.tagName || '').toLowerCase();
         if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) return;
         const activePane = $('.tab-pane.active');
-        const $input = activePane.find('.yd-search-input').first();
+        // Prefer the search field that is actually visible (library vs album detail).
+        let $input = activePane.find('.yd-search-input:visible').first();
+        if (!$input.length) {
+            $input = activePane.find('.yd-search-input').first();
+        }
         if ($input.length) {
             e.preventDefault();
             $input.trigger('focus').select();

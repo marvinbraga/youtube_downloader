@@ -51,6 +51,16 @@ class Folder(Base):
     icon: Mapped[Optional[str]] = mapped_column(
         String(50), nullable=True
     )  # Para UI (ex: "folder", "star")
+    # kind: "folder" | "playlist" | "album" — album = music playlist (audio)
+    kind: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="folder", index=True
+    )
+    source_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    external_playlist_id: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, index=True
+    )
+    cover_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    artist: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     created_date: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.now
     )
@@ -79,6 +89,11 @@ class Folder(Base):
             "description": self.description,
             "color": self.color,
             "icon": self.icon,
+            "kind": self.kind or "folder",
+            "source_url": self.source_url,
+            "external_playlist_id": self.external_playlist_id,
+            "cover_url": self.cover_url,
+            "artist": self.artist,
             "created_date": self.created_date.isoformat()
             if self.created_date
             else None,
@@ -157,6 +172,7 @@ class Audio(Base):
         String(100), ForeignKey("folders.id"), nullable=True, index=True
     )
     folder: Mapped[Optional["Folder"]] = relationship("Folder", back_populates="audios")
+    track_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # Metadados
     keywords: Mapped[str] = mapped_column(
@@ -193,6 +209,7 @@ class Audio(Base):
             "transcription_status": self.transcription_status,
             "transcription_path": self.transcription_path,
             "folder_id": self.folder_id,
+            "track_number": self.track_number,
             "keywords": json.loads(self.keywords) if self.keywords else [],
             "created_date": self.created_date.isoformat()
             if self.created_date

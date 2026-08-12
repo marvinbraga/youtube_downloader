@@ -2,9 +2,11 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import timedelta
+from enum import Enum
 from pathlib import Path
-from typing import Optional, List
+from typing import Any, Dict, Optional, List
 
 from fastapi import FastAPI, HTTPException, Depends, Query, BackgroundTasks, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,6 +41,8 @@ from app.models.folder import (
     FolderPathResponse,
     MoveItemRequest,
     BulkMoveRequest,
+    AlbumResponse,
+    AlbumDetailResponse,
 )
 from app.services.configs import (
     video_mapping,
@@ -46,6 +50,8 @@ from app.services.configs import (
     audio_mapping,
     DOWNLOADS_DIR,
     TRANSCRIPTION_CONCURRENCY,
+    DEFAULT_TRANSCRIPTION_PROVIDER,
+    DEFAULT_TRANSCRIPTION_LANGUAGE,
 )
 from app.services.storage import (
     get_storage,
@@ -124,6 +130,11 @@ async def lifespan(app: FastAPI):
         f"Fila de transcrição: limite de {TRANSCRIPTION_CONCURRENCY} simultâneas"
     )
 
+    # Recuperação de fila no startup: re-enfileira transcrições órfãs. O
+    # _transcription_executor (módulo-level) já existe neste ponto e o banco já
+    # foi inicializado/migrado acima — pré-requisitos para a recuperação.
+    await recover_pending_transcriptions()
+
     logger.info("Aplicação iniciada com sucesso!")
     yield
 
@@ -160,6 +171,494 @@ _transcription_executor = ThreadPoolExecutor(
 )
 
 MAX_PLAYLIST_ENTRIES = 200
+
+
+# ---------------------------------------------------------------------------
+# Núcleo reutilizável de enfileiramento de transcrição
+# ---------------------------------------------------------------------------
+#
+# Tanto o endpoint POST /audio/transcribe quanto a recuperação de fila no
+# startup precisam montar e submeter a MESMA tarefa de transcrição (resolução
+# do caminho da mídia incl. S3 -> tempfile, checagem de cancelamento, escrita
+# de status, submit ao executor dedicado). Para evitar duplicação, essa lógica
+# vive em ``enqueue_transcription``. O endpoint mantém suas respostas HTTP
+# (already-in-progress, already-ended, 404) inalteradas, mapeando o
+# ``EnqueueOutcome`` retornado.
+
+
+class EnqueueOutcome(str, Enum):
+    """Resultado de uma tentativa de (re)enfileirar uma transcrição."""
+
+    SUBMITTED = "submitted"  # tarefa submetida ao executor (status "queued")
+    ALREADY_ENDED = "already_ended"  # já transcrito; nada a fazer (idempotente)
+    IN_PROGRESS = "in_progress"  # já "queued"/"started"; não re-submeter
+    NOT_FOUND = "not_found"  # arquivo/registro não encontrado
+
+
+@dataclass
+class EnqueueResult:
+    """Retorno de ``enqueue_transcription``.
+
+    ``transcription_file`` é o caminho .md resolvido (relativo a DOWNLOADS_DIR
+    materializado em Path absoluto) quando aplicável — o endpoint o devolve ao
+    cliente tal como antes.
+    """
+
+    outcome: EnqueueOutcome
+    transcription_file: Optional[Path] = None
+    detail: Optional[str] = None
+
+
+async def _resolve_media_path(
+    info: Dict[str, Any],
+) -> Path:
+    """Resolve o caminho local da mídia a partir do registro (áudio/vídeo).
+
+    Para registros S3, materializa o objeto em um tempfile (o chamador é
+    responsável por removê-lo após o uso — a closure de transcrição faz isso no
+    ``finally``). Para registros locais, valida a existência em disco.
+    """
+    if info.get("storage_backend") == "s3" and info.get("s3_key"):
+        storage = get_storage()
+        media_path = await storage.download_to_temp(info["s3_key"])
+        logger.info(
+            f"Mídia S3 materializada em tempfile para transcrição: {media_path}"
+        )
+        return Path(media_path)
+    media_path = DOWNLOADS_DIR / info["path"]
+    if not media_path.exists():
+        raise FileNotFoundError(str(media_path))
+    return media_path
+
+
+def _build_transcribe_task(
+    *,
+    audio_info: Optional[Dict[str, Any]],
+    video_info: Optional[Dict[str, Any]],
+    media_path: Path,
+    media_is_tempfile: bool,
+    transcription_file: Path,
+    provider: str,
+    language: str,
+):
+    """Monta a closure ``transcribe_task`` (mesma lógica do handler original).
+
+    Parametriza ``provider``/``language`` para que a recuperação possa usar os
+    defaults sem um pedido HTTP. O ciclo de status e a checagem de cancelamento
+    (``_is_cancelled``) são preservados; o tempfile S3 é limpo no ``finally``.
+    """
+    _audio_info = audio_info
+    _video_info = video_info
+    _media_path = media_path
+    _media_is_tempfile = media_is_tempfile
+
+    def transcribe_task():
+        def _is_cancelled() -> bool:
+            """Re-lê o status corrente; se for 'none', considera cancelado.
+
+            Fecha o caminho mais frequente da race em que o usuário pediu
+            cancelamento (DELETE /audio/transcription/{id}) enquanto o worker
+            estava executando. Ainda existe uma pequena janela entre este check
+            e o write subsequente, mas ela é estreita o bastante para ser
+            aceitável.
+            """
+            try:
+                if _audio_info:
+                    info = asyncio.run(audio_manager.get_audio_info(_audio_info["id"]))
+                elif _video_info:
+                    info = asyncio.run(video_manager.get_video_info(_video_info["id"]))
+                else:
+                    return False
+                return (info or {}).get("transcription_status") == "none"
+            except Exception:
+                return False
+
+        try:
+            # Cancelamento de enfileiradas: se o usuário cancelou (status "none"
+            # via DELETE /audio/transcription/{id}) enquanto a tarefa esperava na
+            # fila do executor, abortar sem processar. O `finally` ainda roda e
+            # limpa o tempfile S3, se houver.
+            if _is_cancelled():
+                logger.info(
+                    "Transcrição cancelada enquanto enfileirada; abortando antes de iniciar."
+                )
+                return
+
+            # Worker pegou a tarefa de fato: agora sim vira "started".
+            if _audio_info:
+                asyncio.run(
+                    audio_manager.update_transcription_status(
+                        _audio_info["id"], "started"
+                    )
+                )
+            elif _video_info:
+                asyncio.run(
+                    video_manager.update_transcription_status(
+                        _video_info["id"], "started"
+                    )
+                )
+
+            resolved_provider = TranscriptionProvider(provider)
+
+            docs = TranscriptionService.transcribe_audio(
+                file_path=str(_media_path),
+                provider=resolved_provider,
+                language=language,
+            )
+
+            if docs:
+                output_path = str(transcription_file)
+                transcription_path = TranscriptionService.save_transcription(
+                    docs, output_path
+                )
+
+                if _is_cancelled():
+                    # Usuário cancelou enquanto o worker rodava — limpa o arquivo
+                    # recém-escrito e não regrava o status.
+                    try:
+                        Path(transcription_path).unlink(missing_ok=True)
+                    except Exception as e:
+                        logger.warning(
+                            f"Cancelado: falha ao remover {transcription_path}: {e}"
+                        )
+                    logger.info(
+                        f"Transcrição cancelada pelo usuário; arquivo removido: {transcription_path}"
+                    )
+                elif _audio_info:
+                    rel_path = Path(transcription_path).relative_to(DOWNLOADS_DIR)
+                    asyncio.run(
+                        audio_manager.update_transcription_status(
+                            _audio_info["id"], "ended", str(rel_path)
+                        )
+                    )
+                    logger.success(f"Transcrição concluída: {output_path}")
+                elif _video_info:
+                    rel_path = Path(transcription_path).relative_to(DOWNLOADS_DIR)
+                    asyncio.run(
+                        video_manager.update_transcription_status(
+                            _video_info["id"], "ended", str(rel_path)
+                        )
+                    )
+                    logger.success(f"Transcrição concluída: {output_path}")
+            else:
+                if _is_cancelled():
+                    logger.info(
+                        "Transcrição cancelada pelo usuário (sem conteúdo gerado)"
+                    )
+                elif _audio_info:
+                    asyncio.run(
+                        audio_manager.update_transcription_status(
+                            _audio_info["id"], "error"
+                        )
+                    )
+                elif _video_info:
+                    asyncio.run(
+                        video_manager.update_transcription_status(
+                            _video_info["id"], "error"
+                        )
+                    )
+                if not _is_cancelled():
+                    logger.error("Falha na transcrição: nenhum conteúdo gerado")
+        except Exception as e:
+            if _is_cancelled():
+                logger.info(f"Transcrição cancelada pelo usuário (após erro): {e}")
+            elif _audio_info:
+                asyncio.run(
+                    audio_manager.update_transcription_status(
+                        _audio_info["id"], "error"
+                    )
+                )
+                logger.exception(f"Erro na tarefa de transcrição: {str(e)}")
+            elif _video_info:
+                asyncio.run(
+                    video_manager.update_transcription_status(
+                        _video_info["id"], "error"
+                    )
+                )
+                logger.exception(f"Erro na tarefa de transcrição: {str(e)}")
+        finally:
+            # Quando a mídia foi materializada do S3 em /tmp, remove o tempfile
+            # após a transcrição terminar (sucesso OU erro).
+            if _media_is_tempfile:
+                try:
+                    Path(_media_path).unlink(missing_ok=True)
+                    logger.debug(f"Tempfile S3 removido: {_media_path}")
+                except Exception as cleanup_err:
+                    logger.warning(
+                        f"Falha ao remover tempfile S3 {_media_path}: {cleanup_err}"
+                    )
+
+    return transcribe_task
+
+
+async def enqueue_transcription(
+    file_id: str,
+    provider: str,
+    language: str,
+    *,
+    is_video: bool = False,
+    force: bool = False,
+) -> EnqueueResult:
+    """Resolve, prepara e submete a transcrição de ``file_id`` ao executor.
+
+    Núcleo reutilizado pelo endpoint POST /audio/transcribe e pela recuperação
+    de fila no startup. NÃO levanta HTTPException (pode rodar fora de um
+    contexto HTTP) — sinaliza o resultado via ``EnqueueResult.outcome``.
+
+    Comportamento:
+      * Resolve o registro (áudio primeiro; depois vídeo). ``is_video`` é uma
+        dica usada apenas pela recuperação, que já sabe a origem; o endpoint não
+        a fornece e a resolução padrão (áudio→vídeo→busca) é mantida.
+      * Idempotência: se já "ended" com arquivo presente -> ``ALREADY_ENDED``
+        (vale mesmo com ``force=True``; nunca re-transcreve o que já terminou).
+      * Se já "queued"/"started" -> ``IN_PROGRESS`` (o endpoint devolve
+        "processing"). A recuperação no startup passa ``force=True`` para PULAR
+        essa guarda: itens órfãos estão justamente em "queued"/"started", e sem
+        o bypass o re-enfileiramento seria um no-op silencioso (a tarefa nunca
+        chegaria ao ``submit``).
+      * Caso contrário (ou ``force=True``): marca "queued", monta a task e
+        submete ao executor; retorna ``SUBMITTED`` com o ``transcription_file``.
+    """
+    audio_info: Optional[Dict[str, Any]] = None
+    video_info: Optional[Dict[str, Any]] = None
+    media_path: Optional[Path] = None
+
+    # Resolução do registro. ``is_video`` permite à recuperação pular direto
+    # para o vídeo; o endpoint não passa a dica e mantém a ordem áudio->vídeo.
+    if not is_video:
+        audio_info = await audio_manager.get_audio_info(file_id)
+    if audio_info is None:
+        video_info = await video_manager.get_video_info(file_id)
+
+    if audio_info:
+        info = audio_info
+    elif video_info:
+        info = video_info
+    else:
+        info = None
+
+    if info is not None:
+        try:
+            media_path = await _resolve_media_path(info)
+        except FileNotFoundError as exc:
+            # Preserva a mensagem por tipo (áudio/vídeo) do handler original.
+            kind = "áudio" if audio_info else "vídeo"
+            detail = f"Arquivo de {kind} não encontrado: {exc}"
+            logger.error(detail)
+            return EnqueueResult(EnqueueOutcome.NOT_FOUND, detail=detail)
+
+        transcription_status = info.get("transcription_status", "none")
+
+        if transcription_status == "ended" and info.get("transcription_path"):
+            transcription_path = DOWNLOADS_DIR / info["transcription_path"]
+            if transcription_path.exists():
+                logger.info(f"Transcrição já existe: {transcription_path}")
+                if info.get("storage_backend") == "s3" and media_path is not None:
+                    _cleanup_tempfile(media_path)
+                return EnqueueResult(
+                    EnqueueOutcome.ALREADY_ENDED,
+                    transcription_file=transcription_path,
+                )
+        elif transcription_status in ("started", "queued") and not force:
+            logger.info(f"Transcrição já está em andamento para: {file_id}")
+            if info.get("storage_backend") == "s3" and media_path is not None:
+                _cleanup_tempfile(media_path)
+            return EnqueueResult(EnqueueOutcome.IN_PROGRESS)
+        elif transcription_status == "error":
+            logger.warning("Erro anterior na transcrição. Tentando novamente.")
+    else:
+        # Sem registro: tenta localizar o arquivo por busca no disco local.
+        try:
+            media_path = await TranscriptionService.find_audio_file(file_id)
+            logger.debug(f"Arquivo encontrado por busca: {media_path}")
+        except FileNotFoundError:
+            logger.error(f"Arquivo de áudio/vídeo não encontrado: '{file_id}'")
+            return EnqueueResult(
+                EnqueueOutcome.NOT_FOUND,
+                detail=f"Arquivo de áudio/vídeo não encontrado: {file_id}",
+            )
+
+    if media_path is None:  # garantido pelos ramos acima; guarda explícita
+        raise RuntimeError(f"media_path não resolvido para file_id={file_id}")
+
+    # Caminho do .md derivado da coluna `path` do registro (sempre relativa a
+    # DOWNLOADS_DIR), pois para registros S3 media_path é um /tmp/... e os
+    # irmãos dele não ficam sob DOWNLOADS_DIR. Fallback (sem registro):
+    # media_path é um arquivo real em disco sob DOWNLOADS_DIR.
+    if audio_info and audio_info.get("path"):
+        transcription_file = DOWNLOADS_DIR / Path(audio_info["path"]).with_suffix(".md")
+    elif video_info and video_info.get("path"):
+        transcription_file = DOWNLOADS_DIR / Path(video_info["path"]).with_suffix(".md")
+    else:
+        transcription_file = media_path.with_suffix(".md")
+
+    media_is_tempfile = bool(
+        (audio_info and audio_info.get("storage_backend") == "s3")
+        or (video_info and video_info.get("storage_backend") == "s3")
+    )
+
+    if transcription_file.exists():
+        logger.info(f"Transcrição já existe: {transcription_file}")
+        if media_is_tempfile:
+            _cleanup_tempfile(media_path)
+        rel_path = str(transcription_file.relative_to(DOWNLOADS_DIR))
+        if audio_info:
+            await audio_manager.update_transcription_status(
+                audio_info["id"], "ended", rel_path
+            )
+        elif video_info:
+            await video_manager.update_transcription_status(
+                video_info["id"], "ended", rel_path
+            )
+        return EnqueueResult(
+            EnqueueOutcome.ALREADY_ENDED, transcription_file=transcription_file
+        )
+
+    # Garante o diretório de saída (o dir-pai da mídia pode ter sido limpo após
+    # upload para S3).
+    transcription_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Enfileiramento: o item entra como "queued". O status só vira "started"
+    # dentro de transcribe_task, quando um worker do executor pega a tarefa.
+    if audio_info:
+        await audio_manager.update_transcription_status(audio_info["id"], "queued")
+    elif video_info:
+        await video_manager.update_transcription_status(video_info["id"], "queued")
+
+    transcribe_task = _build_transcribe_task(
+        audio_info=audio_info,
+        video_info=video_info,
+        media_path=media_path,
+        media_is_tempfile=media_is_tempfile,
+        transcription_file=transcription_file,
+        provider=provider,
+        language=language,
+    )
+
+    # Submete ao executor dedicado. Se já houver TRANSCRIPTION_CONCURRENCY
+    # transcrições rodando, esta aguarda na fila interna do executor.
+    _transcription_executor.submit(transcribe_task)
+
+    return EnqueueResult(
+        EnqueueOutcome.SUBMITTED, transcription_file=transcription_file
+    )
+
+
+def _cleanup_tempfile(path: Path) -> None:
+    """Remove um tempfile S3 best-effort, logando falhas sem propagar."""
+    try:
+        Path(path).unlink(missing_ok=True)
+    except Exception as cleanup_err:
+        logger.warning(f"Falha ao remover tempfile S3 {path}: {cleanup_err}")
+
+
+# Estados de transcrição que ficam órfãos quando o servidor reinicia: a fila
+# vivia só na memória do executor, então itens "queued" (esperando) e "started"
+# (que estavam rodando) nunca mais progridem após um restart.
+_PENDING_TRANSCRIPTION_STATES = ["queued", "started"]
+
+
+async def recover_pending_transcriptions() -> int:
+    """Re-enfileira transcrições órfãs no startup.
+
+    Busca áudios E vídeos com ``transcription_status`` em ("queued","started").
+    Para cada item:
+      * Se estava "started" (estava rodando quando o servidor caiu), reseta para
+        "queued" — o ciclo de status volta a queued -> started -> ended/error.
+      * Chama ``enqueue_transcription`` com os defaults
+        ``DEFAULT_TRANSCRIPTION_PROVIDER`` / ``DEFAULT_TRANSCRIPTION_LANGUAGE``
+        (provider/idioma NÃO são persistidos por item).
+
+    Idempotência: itens já "ended" não são selecionados pela query, e a própria
+    ``enqueue_transcription`` retorna ``ALREADY_ENDED`` se o arquivo .md já
+    existir, sem re-submeter. Erros são tratados por item — uma falha não aborta
+    o startup nem impede a recuperação dos demais. Retorna quantos itens foram
+    de fato re-submetidos.
+    """
+    provider = DEFAULT_TRANSCRIPTION_PROVIDER
+    language = DEFAULT_TRANSCRIPTION_LANGUAGE
+
+    try:
+        async with get_db_context() as session:
+            audio_repo = AudioRepository(session)
+            video_repo = VideoRepository(session)
+            pending_audios = await audio_repo.get_by_transcription_status(
+                _PENDING_TRANSCRIPTION_STATES
+            )
+            pending_videos = await video_repo.get_by_transcription_status(
+                _PENDING_TRANSCRIPTION_STATES
+            )
+            # Materializa apenas os campos necessários antes de fechar a sessão.
+            audio_items = [(a.id, a.transcription_status) for a in pending_audios]
+            video_items = [(v.id, v.transcription_status) for v in pending_videos]
+    except Exception as exc:
+        logger.exception(
+            f"Recuperação de fila: falha ao listar transcrições pendentes: {exc}"
+        )
+        return 0
+
+    total_pending = len(audio_items) + len(video_items)
+    if total_pending == 0:
+        logger.info("Recuperação de fila: nenhuma transcrição pendente encontrada.")
+        return 0
+
+    logger.info(
+        f"Recuperação de fila: {total_pending} transcrição(ões) pendente(s) "
+        f"encontrada(s) ({len(audio_items)} áudio, {len(video_items)} vídeo). "
+        f"Usando defaults provider='{provider}', language='{language}'."
+    )
+
+    recovered = 0
+
+    async def _recover_one(file_id: str, status: str, *, is_video: bool) -> None:
+        nonlocal recovered
+        kind = "vídeo" if is_video else "áudio"
+        try:
+            # started -> queued: o worker que rodava sumiu com o restart.
+            if status == "started":
+                if is_video:
+                    await video_manager.update_transcription_status(file_id, "queued")
+                else:
+                    await audio_manager.update_transcription_status(file_id, "queued")
+                logger.info(
+                    f"Recuperação de fila: {kind} {file_id} resetado de 'started' "
+                    f"para 'queued'."
+                )
+
+            # force=True: o item está em "queued"/"started" (é exatamente o que
+            # define um órfão); sem o bypass da guarda in-progress o
+            # re-enfileiramento seria um no-op silencioso.
+            result = await enqueue_transcription(
+                file_id,
+                provider=provider,
+                language=language,
+                is_video=is_video,
+                force=True,
+            )
+            if result.outcome is EnqueueOutcome.SUBMITTED:
+                recovered += 1
+                logger.info(
+                    f"Recuperação de fila: {kind} {file_id} re-submetido ao executor."
+                )
+            else:
+                logger.info(
+                    f"Recuperação de fila: {kind} {file_id} pulado "
+                    f"(outcome={result.outcome.value})."
+                )
+        except Exception as exc:
+            logger.exception(
+                f"Recuperação de fila: falha ao re-enfileirar {kind} {file_id}: {exc}"
+            )
+
+    for file_id, status in audio_items:
+        await _recover_one(file_id, status, is_video=False)
+    for file_id, status in video_items:
+        await _recover_one(file_id, status, is_video=True)
+
+    logger.info(
+        f"Recuperação de fila: {recovered} transcrições re-enfileiradas no startup."
+    )
+    return recovered
 
 
 # Callbacks da fila de downloads
@@ -519,6 +1018,11 @@ async def download_audio_playlist(
         entries = playlist_info["entries"]
         playlist_title = playlist_info["title"]
         playlist_url = playlist_info["webpage_url"]
+        cover_url = playlist_info.get("thumbnail")
+        if not cover_url and entries:
+            cover_url = f"https://i.ytimg.com/vi/{entries[0]['id']}/hqdefault.jpg"
+        artist = playlist_info.get("uploader")
+        external_playlist_id = playlist_info.get("playlist_id")
 
         if len(entries) > MAX_PLAYLIST_ENTRIES:
             raise HTTPException(
@@ -534,18 +1038,23 @@ async def download_audio_playlist(
                 name=playlist_title[:255],
                 description="Playlist",
                 icon="playlist",
+                kind="album",
+                source_url=playlist_url,
+                external_playlist_id=external_playlist_id,
+                cover_url=cover_url,
+                artist=(artist[:500] if artist else None),
             )
             created_folder = await folder_repo.create(folder)
             folder_id = created_folder.id
 
-        logger.info(f"Folder created: {folder_id} ('{playlist_title}')")
+        logger.info(f"Album folder created: {folder_id} ('{playlist_title}')")
 
         tasks: List[PlaylistTaskItem] = []
         queued_count = 0
         skipped_count = 0
         failed_count = 0
 
-        for entry in entries:
+        for track_number, entry in enumerate(entries, start=1):
             video_id = entry["id"]
             title = entry["title"]
             watch_url = entry["url"]
@@ -556,10 +1065,12 @@ async def download_audio_playlist(
             ) not in ("error", "")
 
             if already_exists and request.skip_existing:
-                if existing.get("folder_id") is None:
-                    async with get_db_context() as session:
-                        repo = AudioRepository(session)
-                        await repo.update_folder(existing["id"], folder_id)
+                async with get_db_context() as session:
+                    repo = AudioRepository(session)
+                    update_kwargs = {"track_number": track_number}
+                    if existing.get("folder_id") is None:
+                        update_kwargs["folder_id"] = folder_id
+                    await repo.update(existing["id"], **update_kwargs)
 
                 tasks.append(
                     PlaylistTaskItem(
@@ -597,7 +1108,9 @@ async def download_audio_playlist(
             try:
                 async with get_db_context() as session:
                     repo = AudioRepository(session)
-                    await repo.update_folder(audio_id, folder_id)
+                    await repo.update(
+                        audio_id, folder_id=folder_id, track_number=track_number
+                    )
 
                 task_id = await download_queue.add_download(
                     audio_id=audio_id,
@@ -733,6 +1246,11 @@ async def download_video_playlist(
         entries = playlist_info["entries"]
         playlist_title = playlist_info["title"]
         playlist_url = playlist_info["webpage_url"]
+        cover_url = playlist_info.get("thumbnail")
+        if not cover_url and entries:
+            cover_url = f"https://i.ytimg.com/vi/{entries[0]['id']}/hqdefault.jpg"
+        artist = playlist_info.get("uploader")
+        external_playlist_id = playlist_info.get("playlist_id")
 
         if len(entries) > MAX_PLAYLIST_ENTRIES:
             raise HTTPException(
@@ -750,6 +1268,11 @@ async def download_video_playlist(
                 name=playlist_title[:255],
                 description="Playlist",
                 icon="playlist",
+                kind="playlist",
+                source_url=playlist_url,
+                external_playlist_id=external_playlist_id,
+                cover_url=cover_url,
+                artist=(artist[:500] if artist else None),
             )
             created_folder = await folder_repo.create(folder)
             folder_id = created_folder.id
@@ -1030,393 +1553,48 @@ async def transcribe_audio(
     request: TranscriptionRequest,
     token_data: dict = Depends(verify_token),
 ):
-    """Transcreve um arquivo de áudio ou vídeo"""
+    """Transcreve um arquivo de áudio ou vídeo.
+
+    Delegação fina ao núcleo reutilizável ``enqueue_transcription`` — o mesmo
+    usado pela recuperação de fila no startup. As respostas HTTP (processing,
+    success, 404) são preservadas exatamente como antes.
+    """
     try:
         logger.info(f"Solicitação de transcrição para arquivo ID: '{request.file_id}'")
 
-        # Verifica se existe informação do áudio
-        audio_info = await audio_manager.get_audio_info(request.file_id)
-        video_info = None
-        media_path = None
+        result = await enqueue_transcription(
+            request.file_id,
+            provider=request.provider.value,
+            language=request.language,
+        )
 
-        if audio_info:
-            logger.debug(f"Áudio encontrado: {audio_info['id']}")
-            # C1 fix: for S3-backed rows, the local path may not exist (the file
-            # was uploaded and possibly cleaned up). Materialize from S3 to a
-            # tempfile so the downstream transcribe_task can read it. The tempfile
-            # is cleaned up in the `finally` of transcribe_task (see M1 fix below).
-            if audio_info.get("storage_backend") == "s3" and audio_info.get("s3_key"):
-                storage = get_storage()
-                media_path = await storage.download_to_temp(audio_info["s3_key"])
-                logger.info(
-                    f"S3 audio materializado em tempfile para transcrição: {media_path}"
-                )
-            else:
-                media_path = DOWNLOADS_DIR / audio_info["path"]
-                if not media_path.exists():
-                    logger.error(f"Arquivo de áudio não encontrado: {media_path}")
-                    raise HTTPException(
-                        status_code=404,
-                        detail=f"Arquivo de áudio não encontrado: {media_path}",
-                    )
-
-            transcription_status = audio_info.get("transcription_status", "none")
-
-            if transcription_status == "ended" and audio_info.get("transcription_path"):
-                transcription_path = DOWNLOADS_DIR / audio_info["transcription_path"]
-                if transcription_path.exists():
-                    logger.info(f"Transcrição já existe: {transcription_path}")
-                    # The S3 tempfile (if any) is no longer needed in this branch.
-                    if audio_info.get("storage_backend") == "s3":
-                        try:
-                            Path(media_path).unlink(missing_ok=True)
-                        except Exception as cleanup_err:
-                            logger.warning(
-                                f"Falha ao remover tempfile S3 {media_path}: {cleanup_err}"
-                            )
-                    return TranscriptionResponse(
-                        file_id=request.file_id,
-                        transcription_path=str(transcription_path),
-                        status="success",
-                        message="Transcrição já existe",
-                    )
-
-            elif transcription_status in ("started", "queued"):
-                logger.info(f"Transcrição já está em andamento para: {request.file_id}")
-                # Drop the tempfile — the running transcription task owns the work.
-                if audio_info.get("storage_backend") == "s3":
-                    try:
-                        Path(media_path).unlink(missing_ok=True)
-                    except Exception as cleanup_err:
-                        logger.warning(
-                            f"Falha ao remover tempfile S3 {media_path}: {cleanup_err}"
-                        )
-                return TranscriptionResponse(
-                    file_id=request.file_id,
-                    transcription_path="",
-                    status="processing",
-                    message="A transcrição já está em andamento",
-                )
-
-            elif transcription_status == "error":
-                logger.warning("Erro anterior na transcrição. Tentando novamente.")
-        else:
-            # Se não encontrou como áudio, tenta como vídeo
-            video_info = await video_manager.get_video_info(request.file_id)
-
-            if video_info:
-                logger.debug(f"Vídeo encontrado: {video_info['id']}")
-                # C1 fix: same S3-aware materialization as for audio (above).
-                if video_info.get("storage_backend") == "s3" and video_info.get(
-                    "s3_key"
-                ):
-                    storage = get_storage()
-                    media_path = await storage.download_to_temp(video_info["s3_key"])
-                    logger.info(
-                        f"S3 video materializado em tempfile para transcrição: {media_path}"
-                    )
-                else:
-                    media_path = DOWNLOADS_DIR / video_info["path"]
-                    if not media_path.exists():
-                        logger.error(f"Arquivo de vídeo não encontrado: {media_path}")
-                        raise HTTPException(
-                            status_code=404,
-                            detail=f"Arquivo de vídeo não encontrado: {media_path}",
-                        )
-
-                transcription_status = video_info.get("transcription_status", "none")
-
-                if transcription_status == "ended" and video_info.get(
-                    "transcription_path"
-                ):
-                    transcription_path = (
-                        DOWNLOADS_DIR / video_info["transcription_path"]
-                    )
-                    if transcription_path.exists():
-                        logger.info(f"Transcrição já existe: {transcription_path}")
-                        # The S3 tempfile (if any) is no longer needed in this branch.
-                        if video_info.get("storage_backend") == "s3":
-                            try:
-                                Path(media_path).unlink(missing_ok=True)
-                            except Exception as cleanup_err:
-                                logger.warning(
-                                    f"Falha ao remover tempfile S3 {media_path}: {cleanup_err}"
-                                )
-                        return TranscriptionResponse(
-                            file_id=request.file_id,
-                            transcription_path=str(transcription_path),
-                            status="success",
-                            message="Transcrição já existe",
-                        )
-
-                elif transcription_status in ("started", "queued"):
-                    logger.info(
-                        f"Transcrição já está em andamento para: {request.file_id}"
-                    )
-                    # Drop the tempfile — the running transcription task owns the work.
-                    if video_info.get("storage_backend") == "s3":
-                        try:
-                            Path(media_path).unlink(missing_ok=True)
-                        except Exception as cleanup_err:
-                            logger.warning(
-                                f"Falha ao remover tempfile S3 {media_path}: {cleanup_err}"
-                            )
-                    return TranscriptionResponse(
-                        file_id=request.file_id,
-                        transcription_path="",
-                        status="processing",
-                        message="A transcrição já está em andamento",
-                    )
-
-                elif transcription_status == "error":
-                    logger.warning("Erro anterior na transcrição. Tentando novamente.")
-            else:
-                # Tenta encontrar o arquivo por busca
-                try:
-                    media_path = await TranscriptionService.find_audio_file(
-                        request.file_id
-                    )
-                    logger.debug(f"Arquivo encontrado por busca: {media_path}")
-                except FileNotFoundError:
-                    logger.error(
-                        f"Arquivo de áudio/vídeo não encontrado: '{request.file_id}'"
-                    )
-                    raise HTTPException(
-                        status_code=404,
-                        detail=f"Arquivo de áudio/vídeo não encontrado: {request.file_id}",
-                    )
-
-        # C1 fix: derive the transcript path from the row's `path` column (which is
-        # ALWAYS the relative-to-DOWNLOADS_DIR location set at row creation, regardless
-        # of storage_backend). For S3 rows, media_path is a /tmp/... file from
-        # download_to_temp — siblings of that path are NOT under DOWNLOADS_DIR, so
-        # `media_path.with_suffix('.md')` + `relative_to(AUDIO_DIR.parent)` would crash.
-        # Fallback (no row at all): media_path is a real on-disk file inside
-        # DOWNLOADS_DIR (find_audio_file scanned local dirs), so the legacy behavior
-        # holds.
-        if audio_info and audio_info.get("path"):
-            transcription_file = DOWNLOADS_DIR / Path(audio_info["path"]).with_suffix(
-                ".md"
+        if result.outcome is EnqueueOutcome.NOT_FOUND:
+            raise HTTPException(
+                status_code=404,
+                detail=result.detail
+                or f"Arquivo de áudio/vídeo não encontrado: {request.file_id}",
             )
-        elif video_info and video_info.get("path"):
-            transcription_file = DOWNLOADS_DIR / Path(video_info["path"]).with_suffix(
-                ".md"
-            )
-        else:
-            transcription_file = media_path.with_suffix(".md")
 
-        # M1 fix: if find_audio_file materialized an S3 object as a /tmp file, we must
-        # clean it up after the background task finishes. This flag is only true when
-        # neither audio_info nor video_info was provided AND the row backing media_path
-        # is S3 (find_audio_file already returned the temp path in that branch).
-        # In the current flow both rows are looked up above first; the fallback branch
-        # only runs when neither was found — and in that case find_audio_file scanned
-        # the local filesystem (no S3 lookup), so no tempfile to clean. We still pass
-        # the explicit storage_backend hints from the row to be safe.
-        media_is_tempfile = False
-        if audio_info and audio_info.get("storage_backend") == "s3":
-            media_is_tempfile = True
-        elif video_info and video_info.get("storage_backend") == "s3":
-            media_is_tempfile = True
-
-        if transcription_file.exists():
-            logger.info(f"Transcrição já existe: {transcription_file}")
-
-            # The /tmp media copy (if any) is no longer needed.
-            if media_is_tempfile:
-                try:
-                    Path(media_path).unlink(missing_ok=True)
-                except Exception as cleanup_err:
-                    logger.warning(
-                        f"Falha ao remover tempfile S3 {media_path}: {cleanup_err}"
-                    )
-
-            if audio_info:
-                rel_path = str(transcription_file.relative_to(DOWNLOADS_DIR))
-                await audio_manager.update_transcription_status(
-                    audio_info["id"], "ended", rel_path
-                )
-            elif video_info:
-                rel_path = str(transcription_file.relative_to(DOWNLOADS_DIR))
-                await video_manager.update_transcription_status(
-                    video_info["id"], "ended", rel_path
-                )
-
+        if result.outcome is EnqueueOutcome.IN_PROGRESS:
             return TranscriptionResponse(
                 file_id=request.file_id,
-                transcription_path=str(transcription_file),
+                transcription_path="",
+                status="processing",
+                message="A transcrição já está em andamento",
+            )
+
+        if result.outcome is EnqueueOutcome.ALREADY_ENDED:
+            return TranscriptionResponse(
+                file_id=request.file_id,
+                transcription_path=str(result.transcription_file),
                 status="success",
                 message="Transcrição já existe",
             )
 
-        # Ensure the transcript output directory exists for S3 rows (the audio
-        # parent dir may have been cleaned up after upload).
-        transcription_file.parent.mkdir(parents=True, exist_ok=True)
-
-        # Enfileiramento: o item entra como "queued". O status só vira "started"
-        # dentro de transcribe_task, quando um worker do executor de fato pega a
-        # tarefa. Assim itens aguardando na fila aparecem "queued" e apenas os
-        # que estão rodando aparecem "started".
-        if audio_info:
-            await audio_manager.update_transcription_status(audio_info["id"], "queued")
-        elif video_info:
-            await video_manager.update_transcription_status(video_info["id"], "queued")
-
-        # Captura as variáveis para a closure
-        _audio_info = audio_info
-        _video_info = video_info
-        _media_path = media_path
-        _media_is_tempfile = media_is_tempfile
-
-        # Tarefa em segundo plano para transcrição
-        def transcribe_task():
-            def _is_cancelled() -> bool:
-                """Re-lê o status corrente; se for 'none', considera cancelado.
-
-                Fecha o caminho mais frequente da race em que o usuário pediu
-                cancelamento (DELETE /audio/transcription/{id}) enquanto o
-                worker estava executando. Ainda existe uma pequena janela
-                entre este check e o write subsequente, mas ela é estreita o
-                bastante para ser aceitável.
-                """
-                try:
-                    if _audio_info:
-                        info = asyncio.run(
-                            audio_manager.get_audio_info(_audio_info["id"])
-                        )
-                    elif _video_info:
-                        info = asyncio.run(
-                            video_manager.get_video_info(_video_info["id"])
-                        )
-                    else:
-                        return False
-                    return (info or {}).get("transcription_status") == "none"
-                except Exception:
-                    return False
-
-            try:
-                # Cancelamento de enfileiradas: se o usuário cancelou (status
-                # "none" via DELETE /audio/transcription/{id}) enquanto a tarefa
-                # esperava na fila do executor, abortar sem processar. O `finally`
-                # ainda roda e limpa o tempfile S3, se houver.
-                if _is_cancelled():
-                    logger.info(
-                        "Transcrição cancelada enquanto enfileirada; abortando antes de iniciar."
-                    )
-                    return
-
-                # Worker pegou a tarefa de fato: agora sim vira "started".
-                if _audio_info:
-                    asyncio.run(
-                        audio_manager.update_transcription_status(
-                            _audio_info["id"], "started"
-                        )
-                    )
-                elif _video_info:
-                    asyncio.run(
-                        video_manager.update_transcription_status(
-                            _video_info["id"], "started"
-                        )
-                    )
-
-                provider = TranscriptionProvider(request.provider)
-
-                docs = TranscriptionService.transcribe_audio(
-                    file_path=str(_media_path),
-                    provider=provider,
-                    language=request.language,
-                )
-
-                if docs:
-                    output_path = str(transcription_file)
-                    transcription_path = TranscriptionService.save_transcription(
-                        docs, output_path
-                    )
-
-                    if _is_cancelled():
-                        # Usuário cancelou enquanto o worker rodava — limpa o
-                        # arquivo recém-escrito e não regrava o status.
-                        try:
-                            Path(transcription_path).unlink(missing_ok=True)
-                        except Exception as e:
-                            logger.warning(
-                                f"Cancelado: falha ao remover {transcription_path}: {e}"
-                            )
-                        logger.info(
-                            f"Transcrição cancelada pelo usuário; arquivo removido: {transcription_path}"
-                        )
-                    elif _audio_info:
-                        rel_path = Path(transcription_path).relative_to(DOWNLOADS_DIR)
-                        asyncio.run(
-                            audio_manager.update_transcription_status(
-                                _audio_info["id"], "ended", str(rel_path)
-                            )
-                        )
-                        logger.success(f"Transcrição concluída: {output_path}")
-                    elif _video_info:
-                        rel_path = Path(transcription_path).relative_to(DOWNLOADS_DIR)
-                        asyncio.run(
-                            video_manager.update_transcription_status(
-                                _video_info["id"], "ended", str(rel_path)
-                            )
-                        )
-                        logger.success(f"Transcrição concluída: {output_path}")
-                else:
-                    if _is_cancelled():
-                        logger.info(
-                            "Transcrição cancelada pelo usuário (sem conteúdo gerado)"
-                        )
-                    elif _audio_info:
-                        asyncio.run(
-                            audio_manager.update_transcription_status(
-                                _audio_info["id"], "error"
-                            )
-                        )
-                    elif _video_info:
-                        asyncio.run(
-                            video_manager.update_transcription_status(
-                                _video_info["id"], "error"
-                            )
-                        )
-                    if not _is_cancelled():
-                        logger.error("Falha na transcrição: nenhum conteúdo gerado")
-            except Exception as e:
-                if _is_cancelled():
-                    logger.info(f"Transcrição cancelada pelo usuário (após erro): {e}")
-                elif _audio_info:
-                    asyncio.run(
-                        audio_manager.update_transcription_status(
-                            _audio_info["id"], "error"
-                        )
-                    )
-                    logger.exception(f"Erro na tarefa de transcrição: {str(e)}")
-                elif _video_info:
-                    asyncio.run(
-                        video_manager.update_transcription_status(
-                            _video_info["id"], "error"
-                        )
-                    )
-                    logger.exception(f"Erro na tarefa de transcrição: {str(e)}")
-            finally:
-                # M1 fix (option b): when media was materialized from S3 into /tmp,
-                # delete the tempfile after transcription completes (success OR error).
-                if _media_is_tempfile:
-                    try:
-                        Path(_media_path).unlink(missing_ok=True)
-                        logger.debug(f"Tempfile S3 removido: {_media_path}")
-                    except Exception as cleanup_err:
-                        logger.warning(
-                            f"Falha ao remover tempfile S3 {_media_path}: {cleanup_err}"
-                        )
-
-        # Submete ao executor dedicado. Se já houver TRANSCRIPTION_CONCURRENCY
-        # transcrições rodando, esta aguarda na fila interna do executor (status
-        # "queued") até um worker liberar.
-        _transcription_executor.submit(transcribe_task)
-
+        # SUBMITTED
         return TranscriptionResponse(
             file_id=request.file_id,
-            transcription_path=str(transcription_file),
+            transcription_path=str(result.transcription_file),
             status="processing",
             message="A transcrição foi enfileirada",
         )
@@ -2137,6 +2315,60 @@ async def cleanup_queue(
 # ============================================================================
 # ENDPOINTS DE PASTAS (FOLDERS)
 # ============================================================================
+
+
+@app.get("/albums", response_model=List[AlbumResponse])
+async def list_albums(token_data: dict = Depends(verify_token)):
+    """Lista álbuns (pastas kind=album) com contagem de faixas."""
+    try:
+        async with get_db_context() as session:
+            folder_repo = FolderRepository(session)
+            albums = await folder_repo.get_albums()
+            result = []
+            for album in albums:
+                counts = await folder_repo.count_items(album.id)
+                ready = await folder_repo.count_ready_audios(album.id)
+                data = album.to_dict()
+                data["track_count"] = counts["audios"]
+                data["ready_count"] = ready
+                result.append(AlbumResponse(**data))
+            return result
+    except Exception as e:
+        logger.error(f"Erro ao listar álbuns: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro ao listar álbuns: {str(e)}")
+
+
+@app.get("/albums/{folder_id}", response_model=AlbumDetailResponse)
+async def get_album(folder_id: str, token_data: dict = Depends(verify_token)):
+    """Detalhe do álbum com faixas ordenadas por track_number."""
+    try:
+        async with get_db_context() as session:
+            folder_repo = FolderRepository(session)
+            audio_repo = AudioRepository(session)
+
+            folder = await folder_repo.get_by_id(folder_id)
+            if not folder:
+                raise HTTPException(
+                    status_code=404, detail=f"Álbum não encontrado: {folder_id}"
+                )
+            if (folder.kind or "folder") != "album":
+                raise HTTPException(
+                    status_code=404, detail=f"Pasta não é um álbum: {folder_id}"
+                )
+
+            tracks = await audio_repo.get_by_folder(folder_id)
+            counts = await folder_repo.count_items(folder_id)
+            ready = await folder_repo.count_ready_audios(folder_id)
+            data = folder.to_dict()
+            data["track_count"] = counts["audios"]
+            data["ready_count"] = ready
+            data["tracks"] = [t.to_dict() for t in tracks]
+            return AlbumDetailResponse(**data)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao obter álbum: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro ao obter álbum: {str(e)}")
 
 
 @app.post("/folders", response_model=FolderResponse)

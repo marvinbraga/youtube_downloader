@@ -155,6 +155,69 @@ async def _apply_schema_migrations(conn) -> None:
         "CREATE INDEX IF NOT EXISTS ix_videos_storage_backend ON videos(storage_backend)"
     )
 
+    # --- folders.kind / album metadata ---
+    result = await conn.exec_driver_sql("PRAGMA table_info(folders)")
+    folder_cols = {row[1] for row in result.fetchall()}
+    await _add_column_if_missing(
+        conn,
+        "folders",
+        "kind",
+        "VARCHAR(20) NOT NULL DEFAULT 'folder'",
+        folder_cols,
+    )
+    await _add_column_if_missing(
+        conn, "folders", "source_url", "VARCHAR(1000)", folder_cols
+    )
+    await _add_column_if_missing(
+        conn, "folders", "external_playlist_id", "VARCHAR(100)", folder_cols
+    )
+    await _add_column_if_missing(
+        conn, "folders", "cover_url", "VARCHAR(1000)", folder_cols
+    )
+    await _add_column_if_missing(conn, "folders", "artist", "VARCHAR(500)", folder_cols)
+    await conn.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_folders_kind ON folders(kind)"
+    )
+    await conn.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_folders_external_playlist_id "
+        "ON folders(external_playlist_id)"
+    )
+
+    # Backfill: legacy audio playlists → album; video-only playlists → playlist
+    await conn.exec_driver_sql(
+        """
+        UPDATE folders
+        SET kind = 'album'
+        WHERE kind = 'folder'
+          AND (icon = 'playlist' OR description = 'Playlist')
+          AND EXISTS (
+              SELECT 1 FROM audios a WHERE a.folder_id = folders.id
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM videos v WHERE v.folder_id = folders.id
+          )
+        """
+    )
+    await conn.exec_driver_sql(
+        """
+        UPDATE folders
+        SET kind = 'playlist'
+        WHERE kind = 'folder'
+          AND (icon = 'playlist' OR description = 'Playlist')
+          AND EXISTS (
+              SELECT 1 FROM videos v WHERE v.folder_id = folders.id
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM audios a WHERE a.folder_id = folders.id
+          )
+        """
+    )
+
+    # --- audios.track_number ---
+    result = await conn.exec_driver_sql("PRAGMA table_info(audios)")
+    audio_cols = {row[1] for row in result.fetchall()}
+    await _add_column_if_missing(conn, "audios", "track_number", "INTEGER", audio_cols)
+
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency para obter uma sessão do banco"""

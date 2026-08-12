@@ -36,6 +36,7 @@ def _make_db_mock(folder_id="folder-uuid-123"):
     folder_repo.create = AsyncMock(return_value=MagicMock(id=folder_id))
     audio_repo = MagicMock()
     audio_repo.update_folder = AsyncMock()
+    audio_repo.update = AsyncMock()
     video_repo = MagicMock()
     video_repo.update_folder = AsyncMock()
 
@@ -239,6 +240,46 @@ def test_audio_playlist_playlist_title_truncated_at_255_chars(client):
     call_args = folder_repo.create.call_args
     folder_arg = call_args[0][0]
     assert len(folder_arg.name) == 255
+    assert folder_arg.kind == "album"
+
+
+def test_audio_playlist_sets_track_numbers_on_skip_existing(client):
+    existing_audio = {
+        "id": "existing-db-id",
+        "download_status": "ready",
+        "folder_id": None,
+    }
+    mock_db, folder_repo, audio_repo, _ = _make_db_mock()
+    audio_repo.update = AsyncMock()
+    with (
+        patch(
+            "app.uwtv.main.audio_manager.extract_playlist_info",
+            new=AsyncMock(
+                return_value={
+                    "title": "Test Playlist",
+                    "webpage_url": PLAYLIST_URL,
+                    "entries": [SAMPLE_PLAYLIST_INFO["entries"][0]],
+                    "playlist_id": "PLtest123",
+                }
+            ),
+        ),
+        patch(
+            "app.uwtv.main.audio_manager.get_audio_by_youtube_id",
+            new=AsyncMock(return_value=existing_audio),
+        ),
+        patch("app.uwtv.main.get_db_context", mock_db),
+        patch("app.uwtv.main.FolderRepository", return_value=folder_repo),
+        patch("app.uwtv.main.AudioRepository", return_value=audio_repo),
+    ):
+        resp = client.post(
+            "/audio/playlist", json={"url": PLAYLIST_URL, "skip_existing": True}
+        )
+
+    assert resp.status_code == 200
+    audio_repo.update.assert_called()
+    kwargs = audio_repo.update.call_args.kwargs
+    assert kwargs.get("folder_id") == "folder-uuid-123"
+    assert kwargs.get("track_number") == 1
 
 
 # ---------------------------------------------------------------------------

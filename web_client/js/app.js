@@ -32,6 +32,15 @@ $(document).ready(function() {
     let folderPath = [];  // breadcrumb path
     let selectedItems = [];  // {id, type} - itens selecionados para mover em lote
 
+    // Album player state
+    let currentAlbums = [];
+    let currentAlbum = null;
+    let albumQueue = [];
+    let queueIndex = -1;
+    let albumRepeatMode = 'off'; // off | all | one
+    let albumShuffle = false;
+    let albumSeeking = false;
+
     // ========================================
     // Theme Toggle
     // ========================================
@@ -704,8 +713,13 @@ $(document).ready(function() {
                 pollDownloadStatus(task.item_id, 'audio');
             });
 
+            const folderId = response.folder_id;
             showToast(`Playlist enfileirada para download (${queued} itens)`, 'success');
             $('#audioUrl').val('');
+
+            if (folderId && window.confirm('Abrir o álbum na aba Álbuns?')) {
+                openAlbumById(folderId, { autoplay: false });
+            }
 
         } catch (error) {
             hideLoading();
@@ -1087,6 +1101,10 @@ $(document).ready(function() {
             // Reaplica a busca atual (se houver) sobre a lista recém-carregada.
             applyTranscriptionSearch();
 
+            // (Re)inicia o poller global se a lista recém-renderizada tiver
+            // itens ativos (queued/started). Singleton: limpa timer anterior.
+            startTranscriptionStatusPoller();
+
         } catch (error) {
             console.error('Error loading transcription media list:', error);
             if (error.status === 401) {
@@ -1267,8 +1285,14 @@ $(document).ready(function() {
             if (response.status === 'processing' || response.status === 'success') {
                 // Feedback visual imediato no próprio item (sem re-render global).
                 $group.find('.yd-badge').replaceWith(getTranscriptionStatusBadge('queued'));
+                // Mantém o cache em dia para sobreviver a re-renders (busca/aba).
+                // Tipo vem da própria linha (vídeos também têm botão "Transcrever").
+                const mediaType = $btn.closest('.yd-media-item').attr('data-type') || 'audio';
+                updateCachedTranscriptionStatus(fileId, mediaType, 'queued');
                 showToast('Adicionado à fila de transcrição.', 'success');
-                pollTranscriptionStatus(fileId);
+                // Poller GLOBAL cuida das transições seguintes (Aguardando→Em
+                // andamento→Transcrito) in-place, para todos os itens ativos.
+                startTranscriptionStatusPoller();
             } else if (response.message && response.message.includes('já existe')) {
                 $btn.prop('disabled', false);
                 showToast('Transcrição já existe para este arquivo.', 'info');
@@ -1285,29 +1309,151 @@ $(document).ready(function() {
         }
     }
 
-    async function pollTranscriptionStatus(fileId) {
-        if (!authToken) return;
+    // ========================================
+    // Poller GLOBAL de status de transcrição
+    // ========================================
+    // Substitui o antigo polling POR ITEM (pollTranscriptionStatus). Em vez de
+    // um timer por arquivo clicado e um re-render completo ao concluir, mantemos
+    // UM único timer que, a cada ~4s, busca o status de TODOS os itens (áudios +
+    // vídeos, pois a aba mistura os dois) e aplica o resultado IN-PLACE em cada
+    // linha já renderizada — sem recriar o DOM, sem piscar e sem perder o scroll.
+    const TRANSCRIPTION_POLL_INTERVAL_MS = 4000;
+    const ACTIVE_TRANSCRIPTION_STATUSES = ['queued', 'started'];
+    let transcriptionPollTimer = null;
+
+    // Há alguma linha renderizada em estado ativo (Aguardando/Em andamento)?
+    // É o gatilho para iniciar e a condição de parada do poller.
+    function hasActiveTranscriptionRows() {
+        let active = false;
+        $('#transcriptionMediaList .yd-media-item[data-id]').each(function () {
+            const $row = $(this);
+            const $start = $row.find('.start-transcription-btn');
+            const $view = $row.find('.view-transcription-btn');
+            // Estado ativo = botão "Transcrever" desabilitado e "Ver" desabilitado.
+            // (queued/started desabilitam Transcrever; ended habilita Ver.)
+            if ($start.prop('disabled') && $view.prop('disabled')) {
+                active = true;
+                return false; // break
+            }
+        });
+        return active;
+    }
+
+    // Aplica o novo status numa linha específica (DOM + modelo em cache), sem
+    // re-render. Espelha exatamente o que renderTranscriptionMediaList produz
+    // (linhas ~1170-1183), para que linhas "patcheadas" não divirjam das recém
+    // renderizadas após uma busca/re-render.
+    function patchTranscriptionRow($row, newStatus) {
+        const isActive = ACTIVE_TRANSCRIPTION_STATUSES.includes(newStatus);
+
+        // Badge de status (único .yd-badge dentro do .yd-action-group; o badge
+        // de tipo Áudio/Vídeo fica em .yd-media-meta). Mesmo seletor de startTranscription.
+        $row.find('.yd-action-group .yd-badge').first()
+            .replaceWith(getTranscriptionStatusBadge(newStatus));
+
+        // Botão "Transcrever": desabilitado enquanto queued/started.
+        $row.find('.start-transcription-btn').prop('disabled', isActive);
+
+        // Botão "Ver Transcrição": habilitado apenas quando ended.
+        $row.find('.view-transcription-btn').prop('disabled', newStatus !== 'ended');
+
+        // Botão "Excluir/Cancelar": desabilitado quando none; título conforme estado.
+        $row.find('.delete-transcription-btn')
+            .prop('disabled', newStatus === 'none')
+            .attr('title', isActive ? 'Cancelar Transcrição' : 'Excluir Transcrição');
+    }
+
+    // Localiza no cache (currentTranscriptionMedia) o item correspondente à linha,
+    // casando por id + tipo (áudio/vídeo podem compartilhar id entre as listas).
+    function updateCachedTranscriptionStatus(id, mediaType, newStatus) {
+        const entry = currentTranscriptionMedia.find(
+            m => String(m.id) === String(id) && m.mediaType === mediaType
+        );
+        if (entry) {
+            entry.transcription_status = newStatus;
+        }
+    }
+
+    async function pollTranscriptionStatusTick() {
+        if (!authToken) {
+            stopTranscriptionStatusPoller();
+            return;
+        }
+
+        // Só vale a pena buscar se ainda houver itens ativos visíveis.
+        if (!hasActiveTranscriptionRows()) {
+            stopTranscriptionStatusPoller();
+            return;
+        }
 
         try {
-            const response = await $.ajax({
-                url: `${API_BASE_URL}/audio/transcription_status/${fileId}`,
-                method: 'GET',
-                headers: getAuthHeaders()
+            const [audioResponse, videoResponse] = await Promise.all([
+                $.ajax({ url: `${API_BASE_URL}/audio/list`, method: 'GET', headers: getAuthHeaders() }),
+                $.ajax({ url: `${API_BASE_URL}/video/list-downloads`, method: 'GET', headers: getAuthHeaders() })
+            ]);
+
+            // Mapa id|tipo -> status, a partir de ambas as listas.
+            const statusByKey = {};
+            (audioResponse.audio_files || []).forEach(a => {
+                statusByKey[`${a.id}|audio`] = a.transcription_status;
+            });
+            (videoResponse.videos || []).forEach(v => {
+                statusByKey[`${v.id}|video`] = v.transcription_status;
             });
 
-            if (response.status === 'ended') {
-                showToast('Transcrição concluída!', 'success');
-                loadTranscriptionMediaList();
-            } else if (response.status === 'error') {
-                showToast('Erro na transcrição', 'error');
-                loadTranscriptionMediaList();
-            } else if (response.status === 'queued' || response.status === 'started') {
-                // Estados ativos não-finais: continua o polling.
-                setTimeout(() => pollTranscriptionStatus(fileId), 5000);
+            // Patcha cada linha já renderizada cujo status mudou.
+            $('#transcriptionMediaList .yd-media-item[data-id]').each(function () {
+                const $row = $(this);
+                const id = $row.attr('data-id');
+                const mediaType = $row.attr('data-type');
+                const newStatus = statusByKey[`${id}|${mediaType}`];
+                if (newStatus === undefined) return;
+
+                // Compara contra o status REAL anterior guardado no cache. O DOM
+                // dos botões não distingue queued de started (ambos só desabilitam
+                // "Transcrever"), então usar o cache é o que permite a transição
+                // Aguardando→Em andamento aparecer. Após o patch, o cache fica
+                // igual ao servidor → ticks seguintes não repetem toast/patch.
+                const entry = currentTranscriptionMedia.find(
+                    m => String(m.id) === String(id) && m.mediaType === mediaType
+                );
+                const prevStatus = entry ? entry.transcription_status : undefined;
+
+                if (newStatus !== prevStatus) {
+                    patchTranscriptionRow($row, newStatus);
+                    updateCachedTranscriptionStatus(id, mediaType, newStatus);
+                    if (newStatus === 'ended') {
+                        showToast('Transcrição concluída!', 'success');
+                    } else if (newStatus === 'error') {
+                        showToast('Erro na transcrição', 'error');
+                    }
+                }
+            });
+
+            // Se nada mais estiver ativo, encerra o ciclo.
+            if (!hasActiveTranscriptionRows()) {
+                stopTranscriptionStatusPoller();
             }
 
         } catch (error) {
             console.error('Error polling transcription status:', error);
+            if (error.status === 401) {
+                stopTranscriptionStatusPoller();
+            }
+        }
+    }
+
+    // Singleton: limpa qualquer timer anterior antes de (re)iniciar.
+    function startTranscriptionStatusPoller() {
+        stopTranscriptionStatusPoller();
+        if (!authToken || !hasActiveTranscriptionRows()) return;
+        transcriptionPollTimer = setInterval(pollTranscriptionStatusTick, TRANSCRIPTION_POLL_INTERVAL_MS);
+    }
+
+    function stopTranscriptionStatusPoller() {
+        if (transcriptionPollTimer !== null) {
+            clearInterval(transcriptionPollTimer);
+            transcriptionPollTimer = null;
         }
     }
 
@@ -1452,6 +1598,404 @@ $(document).ready(function() {
     }
 
     // ========================================
+    // Album / music player
+    // ========================================
+    function escapeHtml(str) {
+        return String(str == null ? '' : str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function formatAlbumTime(seconds) {
+        if (!isFinite(seconds) || seconds < 0) return '0:00';
+        const m = Math.floor(seconds / 60);
+        const s = Math.floor(seconds % 60);
+        return `${m}:${s.toString().padStart(2, '0')}`;
+    }
+
+    function albumCoverUrl(album, tracks) {
+        if (album && album.cover_url) return album.cover_url;
+        const first = (tracks || []).find(t => t.youtube_id) || (tracks || [])[0];
+        if (first && first.youtube_id) {
+            return `https://i.ytimg.com/vi/${first.youtube_id}/hqdefault.jpg`;
+        }
+        return null;
+    }
+
+    function setCoverElement($el, url) {
+        if (url) {
+            $el.css('background-image', `url("${url}")`).empty();
+        } else {
+            $el.css('background-image', 'none').html('<i class="bi bi-music-note-beamed"></i>');
+        }
+    }
+
+    function showAlbumsLibrary() {
+        $('#albumsDetailView').addClass('d-none');
+        $('#albumsLibraryView').removeClass('d-none');
+        currentAlbum = null;
+    }
+
+    function showAlbumDetail() {
+        $('#albumsLibraryView').addClass('d-none');
+        $('#albumsDetailView').removeClass('d-none');
+    }
+
+    function switchToAlbumsTab() {
+        const tab = document.getElementById('albums-tab');
+        if (tab) {
+            bootstrap.Tab.getOrCreateInstance(tab).show();
+        }
+    }
+
+    async function loadAlbums() {
+        if (!authToken) {
+            await authenticate();
+            return;
+        }
+        try {
+            const response = await $.ajax({
+                url: `${API_BASE_URL}/albums`,
+                method: 'GET',
+                headers: getAuthHeaders()
+            });
+            currentAlbums = response || [];
+            renderAlbumGrid(currentAlbums);
+        } catch (error) {
+            console.error('Error loading albums:', error);
+            if (error.status === 401) {
+                authenticate();
+            } else {
+                renderAlbumGrid([]);
+            }
+        }
+    }
+
+    function renderAlbumGrid(albums) {
+        const container = $('#albumGrid');
+        container.empty();
+
+        if (!albums.length) {
+            container.html(`
+                <div class="yd-empty-state" style="grid-column: 1 / -1;">
+                    <i class="bi bi-disc yd-empty-state__icon"></i>
+                    <p class="yd-empty-state__title">Nenhum álbum ainda</p>
+                    <p class="yd-empty-state__desc">Baixe uma playlist de áudio para criar um álbum</p>
+                </div>
+            `);
+            return;
+        }
+
+        albums.forEach(album => {
+            const cover = albumCoverUrl(album);
+            const artist = album.artist || 'Vários';
+            const tracks = album.track_count || 0;
+            const card = $(`
+                <button type="button" class="yd-album-card" data-id="${escapeHtml(album.id)}">
+                    <div class="yd-album-cover yd-album-cover--card"></div>
+                    <div class="yd-album-card__title" title="${escapeHtml(album.name)}">${escapeHtml(album.name)}</div>
+                    <p class="yd-album-card__artist">${escapeHtml(artist)}</p>
+                    <p class="yd-album-card__meta">${tracks} faixa${tracks === 1 ? '' : 's'}</p>
+                </button>
+            `);
+            setCoverElement(card.find('.yd-album-cover'), cover);
+            card.on('click', () => openAlbumById(album.id));
+            container.append(card);
+        });
+    }
+
+    async function openAlbumById(folderId, opts = {}) {
+        const { autoplay = false } = opts;
+        if (!authToken) {
+            await authenticate();
+            return;
+        }
+        switchToAlbumsTab();
+        try {
+            const album = await $.ajax({
+                url: `${API_BASE_URL}/albums/${folderId}`,
+                method: 'GET',
+                headers: getAuthHeaders()
+            });
+            currentAlbum = album;
+            renderAlbumDetail(album);
+            showAlbumDetail();
+            if (autoplay) {
+                playAlbumAll();
+            }
+        } catch (error) {
+            console.error('Error opening album:', error);
+            if (error.status === 401) {
+                authenticate();
+            } else if (error.status === 404) {
+                // Pasta legada ainda não marcada como album: tenta itens da pasta
+                try {
+                    const items = await $.ajax({
+                        url: `${API_BASE_URL}/folders/${folderId}/items`,
+                        method: 'GET',
+                        headers: getAuthHeaders()
+                    });
+                    const folder = await $.ajax({
+                        url: `${API_BASE_URL}/folders/${folderId}`,
+                        method: 'GET',
+                        headers: getAuthHeaders()
+                    });
+                    currentAlbum = {
+                        ...folder,
+                        tracks: items.audios || [],
+                        track_count: (items.audios || []).length,
+                        ready_count: (items.audios || []).filter(a => a.download_status === 'ready').length
+                    };
+                    renderAlbumDetail(currentAlbum);
+                    showAlbumDetail();
+                    if (autoplay) playAlbumAll();
+                } catch (e2) {
+                    showToast('Álbum não encontrado', 'error');
+                }
+            } else {
+                showToast('Erro ao abrir álbum', 'error');
+            }
+        }
+    }
+
+    function renderAlbumDetail(album) {
+        const tracks = album.tracks || [];
+        const cover = albumCoverUrl(album, tracks);
+        const artist = album.artist || 'Vários';
+        const ready = album.ready_count != null
+            ? album.ready_count
+            : tracks.filter(t => t.download_status === 'ready').length;
+
+        $('#albumDetailTitle').text(album.name || 'Álbum');
+        $('#albumDetailArtist').text(artist);
+        $('#albumDetailMeta').text(
+            `${tracks.length} faixa${tracks.length === 1 ? '' : 's'}` +
+            (ready < tracks.length ? ` · ${ready} pronta${ready === 1 ? '' : 's'}` : '')
+        );
+        setCoverElement($('#albumDetailCover'), cover);
+        if (cover) {
+            $('#albumHeroBackdrop').css('background-image', `url("${cover}")`);
+        } else {
+            $('#albumHeroBackdrop').css('background-image', 'none');
+        }
+
+        const canPlay = tracks.some(t => t.download_status === 'ready');
+        $('#albumPlayAllBtn').prop('disabled', !canPlay);
+
+        const list = $('#albumTrackList');
+        list.empty();
+        if (!tracks.length) {
+            list.html(`
+                <div class="yd-empty-state">
+                    <i class="bi bi-music-note-list yd-empty-state__icon"></i>
+                    <p class="yd-empty-state__title">Sem faixas</p>
+                </div>
+            `);
+            return;
+        }
+
+        tracks.forEach((track, idx) => {
+            const num = track.track_number != null ? track.track_number : idx + 1;
+            const readyTrack = track.download_status === 'ready';
+            const statusLabel = readyTrack
+                ? ''
+                : `<span class="badge bg-secondary">${escapeHtml(track.download_status || 'pendente')}</span>`;
+            const playing = queueIndex >= 0 && albumQueue[queueIndex] && albumQueue[queueIndex].id === track.id;
+            const row = $(`
+                <div class="yd-album-track ${readyTrack ? 'is-ready' : ''} ${playing ? 'is-playing' : ''}" data-id="${escapeHtml(track.id)}">
+                    <span class="yd-album-track__num">${num}</span>
+                    <span class="yd-album-track__title" title="${escapeHtml(track.title || track.name)}">${escapeHtml(track.title || track.name)}</span>
+                    ${statusLabel}
+                    <button type="button" class="btn btn-sm btn-outline-danger yd-action-btn album-track-play" ${readyTrack ? '' : 'disabled'} title="Tocar">
+                        <i class="bi bi-play-fill"></i>
+                    </button>
+                </div>
+            `);
+            if (readyTrack) {
+                row.on('click', (e) => {
+                    if ($(e.target).closest('.album-track-play').length) return;
+                    playAlbumFromTrack(track.id);
+                });
+                row.find('.album-track-play').on('click', (e) => {
+                    e.stopPropagation();
+                    playAlbumFromTrack(track.id);
+                });
+            }
+            list.append(row);
+        });
+    }
+
+    function buildAlbumQueue(startTrackId) {
+        const tracks = (currentAlbum && currentAlbum.tracks) || [];
+        const ready = tracks.filter(t => t.download_status === 'ready');
+        if (!ready.length) {
+            albumQueue = [];
+            queueIndex = -1;
+            return false;
+        }
+        let ordered = ready.slice();
+        if (albumShuffle) {
+            for (let i = ordered.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [ordered[i], ordered[j]] = [ordered[j], ordered[i]];
+            }
+        }
+        albumQueue = ordered;
+        if (startTrackId) {
+            const idx = albumQueue.findIndex(t => t.id === startTrackId);
+            queueIndex = idx >= 0 ? idx : 0;
+        } else {
+            queueIndex = 0;
+        }
+        return true;
+    }
+
+    function playAlbumAll() {
+        if (!buildAlbumQueue()) {
+            showToast('Nenhuma faixa pronta para tocar', 'warning');
+            return;
+        }
+        playAlbumAtIndex(queueIndex);
+    }
+
+    function playAlbumFromTrack(trackId) {
+        if (!buildAlbumQueue(trackId)) {
+            showToast('Faixa ainda não está pronta', 'warning');
+            return;
+        }
+        playAlbumAtIndex(queueIndex);
+    }
+
+    function playAlbumAtIndex(index) {
+        if (index < 0 || index >= albumQueue.length) return;
+        queueIndex = index;
+        const track = albumQueue[queueIndex];
+        const audio = document.getElementById('albumAudioPlayer');
+        if (!audio || !authToken) {
+            showToast('Não autenticado', 'error');
+            return;
+        }
+
+        // Pausa o player da aba Áudios para evitar sobreposição
+        const mainPlayer = document.getElementById('audioPlayer');
+        if (mainPlayer) {
+            mainPlayer.pause();
+        }
+
+        audio.src = `${API_BASE_URL}/audio/stream/${track.id}?token=${authToken}`;
+        audio.load();
+        const playPromise = audio.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch(err => {
+                console.error('Album play error:', err);
+                showToast('Erro ao reproduzir faixa', 'error');
+            });
+        }
+
+        const artist = (currentAlbum && currentAlbum.artist) || 'Vários';
+        const cover = albumCoverUrl(currentAlbum, albumQueue);
+        $('#albumPlayerTitle').text(track.title || track.name || 'Faixa');
+        $('#albumPlayerArtist').text(artist);
+        setCoverElement($('#albumPlayerCover'), cover);
+        setAlbumPlayIcon(true);
+        highlightPlayingTrack(track.id);
+    }
+
+    function highlightPlayingTrack(trackId) {
+        $('#albumTrackList .yd-album-track').removeClass('is-playing');
+        if (trackId) {
+            $(`#albumTrackList .yd-album-track[data-id="${trackId}"]`).addClass('is-playing');
+        }
+    }
+
+    function setAlbumPlayIcon(playing) {
+        const icon = $('#albumPlayPauseBtn i');
+        icon.toggleClass('bi-play-fill', !playing);
+        icon.toggleClass('bi-pause-fill', playing);
+    }
+
+    function toggleAlbumPlayPause() {
+        const audio = document.getElementById('albumAudioPlayer');
+        if (!audio) return;
+        if (!audio.src || queueIndex < 0) {
+            playAlbumAll();
+            return;
+        }
+        if (audio.paused) {
+            audio.play().catch(() => showToast('Erro ao reproduzir faixa', 'error'));
+        } else {
+            audio.pause();
+        }
+    }
+
+    function playAlbumNext() {
+        if (!albumQueue.length) return;
+        if (queueIndex < albumQueue.length - 1) {
+            playAlbumAtIndex(queueIndex + 1);
+        } else if (albumRepeatMode === 'all') {
+            playAlbumAtIndex(0);
+        }
+    }
+
+    function playAlbumPrev() {
+        const audio = document.getElementById('albumAudioPlayer');
+        if (audio && audio.currentTime > 3) {
+            audio.currentTime = 0;
+            return;
+        }
+        if (!albumQueue.length) return;
+        if (queueIndex > 0) {
+            playAlbumAtIndex(queueIndex - 1);
+        } else if (albumRepeatMode === 'all') {
+            playAlbumAtIndex(albumQueue.length - 1);
+        } else if (audio) {
+            audio.currentTime = 0;
+        }
+    }
+
+    function cycleAlbumRepeat() {
+        const modes = ['off', 'all', 'one'];
+        const next = modes[(modes.indexOf(albumRepeatMode) + 1) % modes.length];
+        albumRepeatMode = next;
+        const btn = $('#albumRepeatBtn');
+        btn.attr('data-mode', next);
+        btn.toggleClass('is-active', next !== 'off');
+        const icon = btn.find('i');
+        icon.removeClass('bi-repeat bi-repeat-1');
+        icon.addClass(next === 'one' ? 'bi-repeat-1' : 'bi-repeat');
+        btn.attr('title', next === 'off' ? 'Repetir' : next === 'all' ? 'Repetir álbum' : 'Repetir faixa');
+    }
+
+    function onAlbumTimeUpdate() {
+        if (albumSeeking) return;
+        const audio = document.getElementById('albumAudioPlayer');
+        if (!audio) return;
+        const cur = audio.currentTime || 0;
+        const dur = audio.duration || 0;
+        $('#albumCurrentTime').text(formatAlbumTime(cur));
+        $('#albumDuration').text(formatAlbumTime(dur));
+        if (dur > 0) {
+            $('#albumSeekBar').val((cur / dur) * 100);
+        }
+    }
+
+    function onAlbumEnded() {
+        if (albumRepeatMode === 'one') {
+            playAlbumAtIndex(queueIndex);
+            return;
+        }
+        if (queueIndex < albumQueue.length - 1) {
+            playAlbumAtIndex(queueIndex + 1);
+        } else if (albumRepeatMode === 'all') {
+            playAlbumAtIndex(0);
+        } else {
+            setAlbumPlayIcon(false);
+        }
+    }
+
+    // ========================================
     // Folder Functions
     // ========================================
     async function loadFolders(parentId = null) {
@@ -1519,6 +2063,14 @@ $(document).ready(function() {
         folders.forEach(folder => {
             const iconClass = folder.icon || 'folder2';
             const colorStyle = folder.color ? `color: ${folder.color}` : 'color: var(--yd-warning)';
+            // kind=album always; legacy playlist folders may still lack kind until restart backfill
+            const isAlbum = folder.kind === 'album' ||
+                (folder.kind !== 'playlist' && (folder.icon === 'playlist' || folder.description === 'Playlist'));
+            const playAlbumBtn = isAlbum
+                ? `<button class="btn btn-sm btn-outline-danger yd-action-btn play-album-btn" data-id="${folder.id}" title="Tocar álbum">
+                       <i class="bi bi-play-fill"></i>
+                   </button>`
+                : '';
 
             const item = $(`
                 <a href="#" class="yd-folder-item" data-id="${folder.id}">
@@ -1531,6 +2083,7 @@ $(document).ready(function() {
                             ${folder.description ? `<small class="yd-media-meta">${folder.description}</small>` : ''}
                         </div>
                         <div class="ms-2 yd-action-group">
+                            ${playAlbumBtn}
                             <button class="btn btn-sm btn-outline-secondary yd-action-btn edit-folder-btn" data-id="${folder.id}" title="Editar">
                                 <i class="bi bi-pencil"></i>
                             </button>
@@ -1544,10 +2097,16 @@ $(document).ready(function() {
 
             // Navigate into folder
             item.on('click', (e) => {
-                if ($(e.target).closest('.edit-folder-btn, .delete-folder-btn').length === 0) {
+                if ($(e.target).closest('.edit-folder-btn, .delete-folder-btn, .play-album-btn').length === 0) {
                     e.preventDefault();
                     navigateToFolder(folder);
                 }
+            });
+
+            item.find('.play-album-btn').on('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                openAlbumById(folder.id, { autoplay: true });
             });
 
             // Edit folder
@@ -2567,6 +3126,11 @@ $(document).ready(function() {
     // Tab change events
     $('button[data-bs-toggle="pill"]').on('shown.bs.tab', function(e) {
         const target = $(e.target).attr('data-bs-target');
+        // Sair da aba de transcrições para o poller global (Bootstrap pills
+        // apenas ocultam o pane; sem isto o timer continuaria disparando).
+        if (target !== '#transcription-pane') {
+            stopTranscriptionStatusPoller();
+        }
         if (target === '#audio-pane') {
             loadAudioList();
         } else if (target === '#video-pane') {
@@ -2575,8 +3139,49 @@ $(document).ready(function() {
             loadTranscriptionMediaList();
         } else if (target === '#folders-pane') {
             loadFolders(currentFolderId);
+        } else if (target === '#albums-pane') {
+            loadAlbums();
         }
     });
+
+    // Album player controls
+    $('#refreshAlbumsBtn').on('click', () => {
+        loadAlbums();
+        showToast('Lista de álbuns atualizada', 'info');
+    });
+    $('#albumBackBtn').on('click', showAlbumsLibrary);
+    $('#albumPlayAllBtn').on('click', () => playAlbumAll());
+    $('#albumPlayPauseBtn').on('click', toggleAlbumPlayPause);
+    $('#albumPrevBtn').on('click', playAlbumPrev);
+    $('#albumNextBtn').on('click', playAlbumNext);
+    $('#albumShuffleBtn').on('click', () => {
+        albumShuffle = !albumShuffle;
+        $('#albumShuffleBtn').toggleClass('is-active', albumShuffle);
+    });
+    $('#albumRepeatBtn').on('click', cycleAlbumRepeat);
+    $('#albumSeekBar').on('input', function() {
+        albumSeeking = true;
+        const audio = document.getElementById('albumAudioPlayer');
+        if (audio && audio.duration) {
+            $('#albumCurrentTime').text(formatAlbumTime((this.value / 100) * audio.duration));
+        }
+    });
+    $('#albumSeekBar').on('change', function() {
+        const audio = document.getElementById('albumAudioPlayer');
+        if (audio && audio.duration) {
+            audio.currentTime = (this.value / 100) * audio.duration;
+        }
+        albumSeeking = false;
+    });
+
+    const albumAudioEl = document.getElementById('albumAudioPlayer');
+    if (albumAudioEl) {
+        albumAudioEl.addEventListener('timeupdate', onAlbumTimeUpdate);
+        albumAudioEl.addEventListener('loadedmetadata', onAlbumTimeUpdate);
+        albumAudioEl.addEventListener('play', () => setAlbumPlayIcon(true));
+        albumAudioEl.addEventListener('pause', () => setAlbumPlayIcon(false));
+        albumAudioEl.addEventListener('ended', onAlbumEnded);
+    }
 
     // Folder buttons
     $('#createFolderBtn').on('click', openCreateFolderModal);

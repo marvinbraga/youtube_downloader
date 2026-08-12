@@ -41,6 +41,11 @@ class FolderResponse(BaseModel):
     description: Optional[str] = None
     color: Optional[str] = None
     icon: Optional[str] = None
+    kind: str = "folder"
+    source_url: Optional[str] = None
+    external_playlist_id: Optional[str] = None
+    cover_url: Optional[str] = None
+    artist: Optional[str] = None
     created_date: Optional[datetime] = None
     modified_date: Optional[datetime] = None
 
@@ -61,6 +66,19 @@ class FolderWithItemsResponse(FolderResponse):
     audios: List[dict] = []
     videos: List[dict] = []
     item_count: int = 0
+
+
+class AlbumResponse(FolderResponse):
+    """Álbum (playlist de áudio) com contagens de faixas."""
+
+    track_count: int = 0
+    ready_count: int = 0
+
+
+class AlbumDetailResponse(AlbumResponse):
+    """Detalhe do álbum com faixas ordenadas."""
+
+    tracks: List[dict] = []
 
 
 class FolderPathResponse(BaseModel):

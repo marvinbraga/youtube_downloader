@@ -51,6 +51,20 @@ class AudioRepository:
         )
         return list(result.scalars().all())
 
+    async def get_by_transcription_status(self, statuses: List[str]) -> List[Audio]:
+        """Lista áudios cujo transcription_status está em ``statuses``.
+
+        Usado pela recuperação de fila no startup para encontrar transcrições
+        órfãs (``queued``/``started``) deixadas para trás por um restart do
+        servidor.
+        """
+        if not statuses:
+            return []
+        result = await self.session.execute(
+            select(Audio).where(Audio.transcription_status.in_(statuses))
+        )
+        return list(result.scalars().all())
+
     async def create(self, audio: Audio) -> Audio:
         """Cria um novo áudio"""
         self.session.add(audio)
@@ -126,14 +140,18 @@ class AudioRepository:
         return await self.update(audio_id, folder_id=folder_id)
 
     async def get_by_folder(self, folder_id: Optional[str]) -> List[Audio]:
-        """Lista áudios por pasta"""
+        """Lista áudios por pasta (track_number ASC nulls last, then created_date)."""
+        order = (
+            Audio.track_number.asc().nulls_last(),
+            Audio.created_date.asc(),
+        )
         if folder_id is None:
             result = await self.session.execute(
-                select(Audio).where(Audio.folder_id.is_(None))
+                select(Audio).where(Audio.folder_id.is_(None)).order_by(*order)
             )
         else:
             result = await self.session.execute(
-                select(Audio).where(Audio.folder_id == folder_id)
+                select(Audio).where(Audio.folder_id == folder_id).order_by(*order)
             )
         return list(result.scalars().all())
 
@@ -178,6 +196,20 @@ class VideoRepository:
         """Lista vídeos por status de download"""
         result = await self.session.execute(
             select(Video).where(Video.download_status == status)
+        )
+        return list(result.scalars().all())
+
+    async def get_by_transcription_status(self, statuses: List[str]) -> List[Video]:
+        """Lista vídeos cujo transcription_status está em ``statuses``.
+
+        Usado pela recuperação de fila no startup para encontrar transcrições
+        órfãs (``queued``/``started``) deixadas para trás por um restart do
+        servidor.
+        """
+        if not statuses:
+            return []
+        result = await self.session.execute(
+            select(Video).where(Video.transcription_status.in_(statuses))
         )
         return list(result.scalars().all())
 
@@ -380,3 +412,22 @@ class FolderRepository:
             "videos": video_count,
             "total": audio_count + video_count,
         }
+
+    async def get_albums(self) -> List[Folder]:
+        """Lista pastas do tipo álbum (playlists de áudio)."""
+        result = await self.session.execute(
+            select(Folder).where(Folder.kind == "album").order_by(Folder.name.asc())
+        )
+        return list(result.scalars().all())
+
+    async def count_ready_audios(self, folder_id: str) -> int:
+        """Conta faixas prontas (download_status=ready) em uma pasta."""
+        from sqlalchemy import func
+
+        result = await self.session.execute(
+            select(func.count(Audio.id)).where(
+                Audio.folder_id == folder_id,
+                Audio.download_status == "ready",
+            )
+        )
+        return result.scalar() or 0

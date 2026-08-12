@@ -128,6 +128,19 @@ def get_yt_dlp_cookies_opts(source: str = "youtube") -> Dict[str, Any]:
 # executor's internal queue (status "queued") instead of grabbing extra threads.
 TRANSCRIPTION_CONCURRENCY = int(os.getenv("TRANSCRIPTION_CONCURRENCY", "2"))
 
+# Provider/idioma usados quando a transcrição é (re)enfileirada sem um pedido
+# HTTP explícito — notadamente a RECUPERAÇÃO DE FILA NO STARTUP. O provider e o
+# idioma NÃO são persistidos no banco junto do item, então itens recuperados
+# após um restart do servidor são re-submetidos usando estes defaults. Para
+# escolher provider/idioma diferentes, refaça a transcrição via
+# POST /audio/transcribe (que aceita provider/language no corpo).
+DEFAULT_TRANSCRIPTION_PROVIDER = os.getenv(
+    "DEFAULT_TRANSCRIPTION_PROVIDER", "groq"
+).strip()
+DEFAULT_TRANSCRIPTION_LANGUAGE = os.getenv(
+    "DEFAULT_TRANSCRIPTION_LANGUAGE", "pt"
+).strip()
+
 
 # ---------------------------------------------------------------------------
 # Storage backend configuration

@@ -179,3 +179,12 @@ data/
 # negation below from re-including the file).
 cookies/*
 !cookies/.gitkeep
+
+# --- secrets: never commit ---
+.env.*
+!.env.example
+!.env*.example
+.env.local
+.streamlit/secrets.toml
+secrets.toml
+!.streamlit/secrets.toml.example

@@ -49,6 +49,41 @@ YDL_REMOTE_COMPONENTS = ["ejs:github"]
 _YOUTUBE_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{11}$")
 
 
+def _playlist_info_payload(info: dict, url: str, entries: list) -> dict:
+    """Normalize yt-dlp playlist metadata for audio/video playlist endpoints."""
+    import urllib.parse
+
+    webpage_url = info.get("webpage_url") or str(url)
+    playlist_id = info.get("id") or info.get("playlist_id")
+    if not playlist_id:
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse(str(url)).query)
+        playlist_id = (qs.get("list") or [None])[0]
+
+    thumbnail = info.get("thumbnail")
+    if not thumbnail:
+        thumbs = info.get("thumbnails") or []
+        if thumbs and isinstance(thumbs[-1], dict):
+            thumbnail = thumbs[-1].get("url")
+    if not thumbnail and entries:
+        thumbnail = f"https://i.ytimg.com/vi/{entries[0]['id']}/hqdefault.jpg"
+
+    uploader = (
+        info.get("uploader")
+        or info.get("channel")
+        or info.get("playlist_uploader")
+        or info.get("playlist_channel")
+    )
+
+    return {
+        "title": info.get("title") or info.get("webpage_title") or "Playlist",
+        "webpage_url": webpage_url,
+        "entries": entries,
+        "thumbnail": thumbnail,
+        "uploader": uploader,
+        "playlist_id": playlist_id,
+    }
+
+
 def extract_external_id(url: str) -> tuple:
     """Return ``(source, external_id)`` for ``url``.
 
@@ -773,11 +808,7 @@ class AudioDownloadManager:
             len(entries),
         )
 
-        return {
-            "title": info.get("title") or info.get("webpage_title") or "Playlist",
-            "webpage_url": info.get("webpage_url") or str(url),
-            "entries": entries,
-        }
+        return _playlist_info_payload(info, url, entries)
 
 
 class VideoDownloadManager:
@@ -1401,8 +1432,4 @@ class VideoDownloadManager:
             len(entries),
         )
 
-        return {
-            "title": info.get("title") or info.get("webpage_title") or "Playlist",
-            "webpage_url": info.get("webpage_url") or str(url),
-            "entries": entries,
-        }
+        return _playlist_info_payload(info, url, entries)

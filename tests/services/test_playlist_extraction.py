@@ -21,6 +21,9 @@ async def test_happy_path_returns_entries(mock_ydl_cls, manager):
     mock_ydl.extract_info.return_value = {
         "title": "My Playlist",
         "webpage_url": "https://www.youtube.com/playlist?list=PL1",
+        "id": "PL1",
+        "uploader": "Channel X",
+        "thumbnail": "https://i.ytimg.com/vi/abc1234567a/hqdefault.jpg",
         "entries": [
             {"id": "abc1234567a", "title": "Track 1"},
             {"id": "xyz9876543z", "title": "Track 2"},
@@ -35,6 +38,9 @@ async def test_happy_path_returns_entries(mock_ydl_cls, manager):
     assert len(result["entries"]) == 2
     assert result["entries"][0]["url"] == "https://www.youtube.com/watch?v=abc1234567a"
     assert result["entries"][1]["url"] == "https://www.youtube.com/watch?v=xyz9876543z"
+    assert result["playlist_id"] == "PL1"
+    assert result["uploader"] == "Channel X"
+    assert result["thumbnail"] == "https://i.ytimg.com/vi/abc1234567a/hqdefault.jpg"
 
 
 @pytest.mark.anyio

@@ -213,10 +213,49 @@ async def _apply_schema_migrations(conn) -> None:
         """
     )
 
-    # --- audios.track_number ---
+    # --- audios.track_number / audios.artist ---
     result = await conn.exec_driver_sql("PRAGMA table_info(audios)")
     audio_cols = {row[1] for row in result.fetchall()}
     await _add_column_if_missing(conn, "audios", "track_number", "INTEGER", audio_cols)
+    await _add_column_if_missing(conn, "audios", "artist", "VARCHAR(500)", audio_cols)
+
+
+async def recompute_album_artists_from_tracks() -> None:
+    """Set each album folder.artist from majority track artists, else NULL.
+
+    Clears wrong playlist-owner names when tracks do not share that artist.
+    """
+    from collections import Counter
+
+    from sqlalchemy import select
+
+    from app.db.models import Audio, Folder
+
+    async with get_db_context() as session:
+        result = await session.execute(select(Folder).where(Folder.kind == "album"))
+        albums = result.scalars().all()
+        changed = 0
+        for album in albums:
+            tracks_result = await session.execute(
+                select(Audio.artist).where(Audio.folder_id == album.id)
+            )
+            artists = [row[0] for row in tracks_result.all()]
+            total = len(artists)
+            non_null = [a.strip() for a in artists if isinstance(a, str) and a.strip()]
+            new_artist = None
+            if total > 0 and non_null:
+                ranked = Counter(non_null).most_common(2)
+                common, count = ranked[0]
+                if count * 2 >= total and (len(ranked) == 1 or ranked[1][1] != count):
+                    new_artist = common[:500]
+            if album.artist != new_artist:
+                album.artist = new_artist
+                changed += 1
+        if changed:
+            logger.info(
+                "Album artist recompute: updated {} album folder(s) from tracks",
+                changed,
+            )
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

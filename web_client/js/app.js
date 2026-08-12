@@ -40,6 +40,8 @@ $(document).ready(function() {
     let albumRepeatMode = 'off'; // off | all | one
     let albumShuffle = false;
     let albumSeeking = false;
+    /** Folder ids already auto-refreshed for missing track artists (session). */
+    const refreshedArtistsFor = new Set();
 
     // ========================================
     // Theme Toggle
@@ -413,6 +415,12 @@ $(document).ready(function() {
         try {
             currentAudioId = audio.id;
             $('#currentAudioTitle').text(audio.title || audio.name);
+            const audioArtist = (audio.artist && String(audio.artist).trim()) || '';
+            if (audioArtist) {
+                $('#currentAudioArtist').text(audioArtist).show();
+            } else {
+                $('#currentAudioArtist').text('').hide();
+            }
 
             // Update active state in list
             $('.yd-media-item').removeClass('active');
@@ -999,6 +1007,7 @@ $(document).ready(function() {
                 audioPlayer.src = '';
                 currentAudioId = null;
                 $('#currentAudioTitle').text('Selecione um áudio para reproduzir');
+                $('#currentAudioArtist').text('').hide();
             }
 
             // Atualiza a lista e depois fecha o loading
@@ -1767,7 +1776,7 @@ $(document).ready(function() {
         }
         switchToAlbumsTab();
         try {
-            const album = await $.ajax({
+            let album = await $.ajax({
                 url: `${API_BASE_URL}/albums/${folderId}`,
                 method: 'GET',
                 headers: getAuthHeaders()
@@ -1775,6 +1784,11 @@ $(document).ready(function() {
             currentAlbum = album;
             renderAlbumDetail(album);
             showAlbumDetail();
+            album = await maybeAutoRefreshAlbumArtists(album);
+            if (album && album.id === folderId) {
+                currentAlbum = album;
+                renderAlbumDetail(album);
+            }
             if (autoplay) {
                 playAlbumAll();
             }
@@ -1813,10 +1827,126 @@ $(document).ready(function() {
         }
     }
 
+    function parseArtistFromTitle(title) {
+        if (!title || typeof title !== 'string') return '';
+        const t = title.trim();
+        // "Artist - Title" / en-dash / em-dash
+        const dashMatch = t.match(/^(.+?)\s+[-–—]\s+(.+)$/);
+        if (dashMatch && dashMatch[1].trim() && dashMatch[2].trim() && dashMatch[1].trim().length <= 80) {
+            return dashMatch[1].trim();
+        }
+        // YT Music style: "Title · Artist"
+        const midDotMatch = t.match(/^(.+?)\s+[·•]\s+(.+)$/);
+        if (midDotMatch && midDotMatch[2].trim() && midDotMatch[2].trim().length <= 80) {
+            return midDotMatch[2].trim();
+        }
+        return '';
+    }
+
+    function resolveTrackListArtist(track) {
+        if (track && typeof track.artist === 'string' && track.artist.trim()) {
+            return track.artist.trim();
+        }
+        const fromTitle = parseArtistFromTitle((track && (track.title || track.name)) || '');
+        // Do NOT fall back to album.artist (often playlist owner)
+        return fromTitle || '';
+    }
+
+    function resolveAlbumDisplayArtist(album) {
+        // Majority of track.artist only — never trust folder.artist (may be owner)
+        const tracks = (album && album.tracks) || [];
+        const counts = {};
+        tracks.forEach(t => {
+            if (t && typeof t.artist === 'string' && t.artist.trim()) {
+                const a = t.artist.trim();
+                counts[a] = (counts[a] || 0) + 1;
+            }
+        });
+        const ranked = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+        if (!ranked.length) return 'Vários';
+        // Unique majority ≥50%; ties → "Vários"
+        if (ranked[0][1] * 2 >= tracks.length &&
+            (ranked.length === 1 || ranked[1][1] !== ranked[0][1])) {
+            return ranked[0][0];
+        }
+        return 'Vários';
+    }
+
+    function resolvePlayingArtist(track) {
+        if (track && typeof track.artist === 'string' && track.artist.trim()) {
+            return track.artist.trim();
+        }
+        const fromTitle = parseArtistFromTitle((track && (track.title || track.name)) || '');
+        if (fromTitle) return fromTitle;
+        // Never fall back to currentAlbum.artist (playlist owner bug)
+        return 'Artista desconhecido';
+    }
+
+    async function refreshAlbumArtists(folderId, { silent = false } = {}) {
+        if (!folderId || !authToken) return null;
+        const $btn = $('#albumRefreshArtistsBtn');
+        $btn.prop('disabled', true);
+        if (!silent) {
+            showToast('Atualizando artistas…', 'info');
+        }
+        try {
+            const result = await $.ajax({
+                url: `${API_BASE_URL}/albums/${folderId}/refresh-artists`,
+                method: 'POST',
+                headers: getAuthHeaders()
+            });
+            refreshedArtistsFor.add(folderId);
+            if (!silent) {
+                const n = (result && result.updated) || 0;
+                showToast(
+                    n > 0 ? `${n} artista(s) atualizado(s)` : 'Nenhum artista novo encontrado',
+                    n > 0 ? 'success' : 'info'
+                );
+            }
+            return result;
+        } catch (error) {
+            console.error('refresh-artists error:', error);
+            if (error.status === 401) {
+                authenticate();
+            } else if (!silent) {
+                showToast('Erro ao atualizar artistas', 'error');
+            }
+            return null;
+        } finally {
+            $btn.prop('disabled', false);
+        }
+    }
+
+    async function maybeAutoRefreshAlbumArtists(album) {
+        if (!album || !album.id) return album;
+        if (refreshedArtistsFor.has(album.id)) return album;
+        const tracks = album.tracks || [];
+        const missing = tracks.some(
+            t => t && t.download_status === 'ready' &&
+                !(typeof t.artist === 'string' && t.artist.trim())
+        );
+        if (!missing) {
+            refreshedArtistsFor.add(album.id);
+            return album;
+        }
+        const result = await refreshAlbumArtists(album.id, { silent: true });
+        if (!result) return album;
+        try {
+            const reloaded = await $.ajax({
+                url: `${API_BASE_URL}/albums/${album.id}`,
+                method: 'GET',
+                headers: getAuthHeaders()
+            });
+            return reloaded;
+        } catch (e) {
+            return album;
+        }
+    }
+
     function renderAlbumDetail(album) {
         const tracks = album.tracks || [];
         const cover = albumCoverUrl(album, tracks);
-        const artist = album.artist || 'Vários';
+        const artist = resolveAlbumDisplayArtist(album);
         const ready = album.ready_count != null
             ? album.ready_count
             : tracks.filter(t => t.download_status === 'ready').length;
@@ -1851,6 +1981,7 @@ $(document).ready(function() {
             const fields = [
                 track.title,
                 track.name,
+                track.artist,
                 track.url,
                 track.youtube_id,
                 track.external_id,
@@ -1925,10 +2056,17 @@ $(document).ready(function() {
             const titleHtml = searchTerm
                 ? highlightText(title, searchTerm)
                 : escapeHtml(title);
+            const artistName = resolveTrackListArtist(track);
+            const artistHtml = artistName
+                ? (searchTerm ? highlightText(artistName, searchTerm) : escapeHtml(artistName))
+                : '<span class="text-secondary">Artista desconhecido</span>';
             const row = $(`
                 <div class="yd-album-track ${readyTrack ? 'is-ready' : ''} ${playing ? 'is-playing' : ''}" data-id="${escapeHtml(track.id)}">
                     <span class="yd-album-track__num">${num}</span>
-                    <span class="yd-album-track__title" title="${escapeHtml(title)}">${titleHtml}</span>
+                    <div class="yd-album-track__meta">
+                        <span class="yd-album-track__title" title="${escapeHtml(title)}">${titleHtml}</span>
+                        <span class="yd-album-track__artist" title="${escapeHtml(artistName || 'Artista desconhecido')}">${artistHtml}</span>
+                    </div>
                     ${statusLabel}
                     <button type="button" class="btn btn-sm btn-outline-danger yd-action-btn album-track-play" ${readyTrack ? '' : 'disabled'} title="Tocar">
                         <i class="bi bi-play-fill"></i>
@@ -2016,10 +2154,10 @@ $(document).ready(function() {
             });
         }
 
-        const artist = (currentAlbum && currentAlbum.artist) || 'Vários';
+        const artist = resolvePlayingArtist(track);
         const cover = albumCoverUrl(currentAlbum, albumQueue);
         $('#albumPlayerTitle').text(track.title || track.name || 'Faixa');
-        $('#albumPlayerArtist').text(artist);
+        $('#albumPlayerArtist').text(artist || 'Artista desconhecido');
         setCoverElement($('#albumPlayerCover'), cover);
         setAlbumPlayIcon(true);
         highlightPlayingTrack(track.id);
@@ -3297,6 +3435,22 @@ $(document).ready(function() {
     });
     $('#albumBackBtn').on('click', showAlbumsLibrary);
     $('#albumPlayAllBtn').on('click', () => playAlbumAll());
+    $('#albumRefreshArtistsBtn').on('click', async () => {
+        if (!currentAlbum || !currentAlbum.id) return;
+        const result = await refreshAlbumArtists(currentAlbum.id);
+        if (!result) return;
+        try {
+            const album = await $.ajax({
+                url: `${API_BASE_URL}/albums/${currentAlbum.id}`,
+                method: 'GET',
+                headers: getAuthHeaders()
+            });
+            currentAlbum = album;
+            renderAlbumDetail(album);
+        } catch (e) {
+            console.error('reload album after refresh-artists:', e);
+        }
+    });
     $('#albumPlayPauseBtn').on('click', toggleAlbumPlayPause);
     $('#albumPrevBtn').on('click', playAlbumPrev);
     $('#albumNextBtn').on('click', playAlbumNext);

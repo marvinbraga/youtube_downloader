@@ -22,11 +22,13 @@ SAMPLE_PLAYLIST_INFO = {
             "id": "video1234567",
             "title": "Track 1",
             "url": "https://www.youtube.com/watch?v=video1234567",
+            "artist": "Miles Davis",
         },
         {
             "id": "video7654321",
             "title": "Track 2",
             "url": "https://www.youtube.com/watch?v=video7654321",
+            "artist": "John Coltrane",
         },
     ],
 }
@@ -81,7 +83,8 @@ def test_audio_playlist_creates_folder_as_album(client):
     assert folder_arg.source_url == PLAYLIST_URL
     assert folder_arg.external_playlist_id == "PLtest123"
     assert folder_arg.cover_url == SAMPLE_PLAYLIST_INFO["thumbnail"]
-    assert folder_arg.artist == "Jazz Channel"
+    # Uploader is playlist owner — not used as folder artist (mixed track artists)
+    assert folder_arg.artist is None
 
     # track_number 1-based assigned on register path
     update_calls = audio_repo.update.call_args_list
@@ -93,6 +96,8 @@ def test_audio_playlist_creates_folder_as_album(client):
         c.kwargs.get("track_number") for c in update_calls if "track_number" in c.kwargs
     ]
     assert track_numbers == [1, 2]
+    artists = [c.kwargs.get("artist") for c in update_calls if "artist" in c.kwargs]
+    assert artists == ["Miles Davis", "John Coltrane"]
 
 
 def test_video_playlist_creates_folder_as_playlist_not_album(client):
@@ -200,6 +205,7 @@ def test_get_album_detail_returns_ordered_tracks(client):
         "title": "Track 1",
         "name": "Track 1",
         "track_number": 1,
+        "artist": "Miles Davis",
         "download_status": "ready",
         "youtube_id": "video1234567",
     }
@@ -209,6 +215,7 @@ def test_get_album_detail_returns_ordered_tracks(client):
         "title": "Track 2",
         "name": "Track 2",
         "track_number": 2,
+        "artist": "John Coltrane",
         "download_status": "downloading",
         "youtube_id": "video7654321",
     }
@@ -241,7 +248,9 @@ def test_get_album_detail_returns_ordered_tracks(client):
     assert body["ready_count"] == 1
     assert len(body["tracks"]) == 2
     assert body["tracks"][0]["track_number"] == 1
+    assert body["tracks"][0]["artist"] == "Miles Davis"
     assert body["tracks"][1]["download_status"] == "downloading"
+    assert body["tracks"][1]["artist"] == "John Coltrane"
 
 
 def test_get_album_rejects_non_album_folder(client):
@@ -322,3 +331,65 @@ def test_audio_to_dict_includes_track_number():
     )
     data = audio.to_dict()
     assert data["track_number"] == 3
+
+
+def test_audio_to_dict_includes_artist():
+    from app.db.models import Audio
+
+    audio = Audio(
+        id="a1",
+        title="T",
+        name="T",
+        artist="Marcus Vinicius Braga",
+    )
+    data = audio.to_dict()
+    assert data["artist"] == "Marcus Vinicius Braga"
+
+
+def test_audio_playlist_sets_majority_artist_when_uploader_missing(client):
+    mock_db, folder_repo, audio_repo = _make_db_mock()
+    playlist = {
+        "title": "Same Artist Album",
+        "webpage_url": PLAYLIST_URL,
+        "playlist_id": "PLsame",
+        "entries": [
+            {
+                "id": "video1234567",
+                "title": "T1",
+                "url": "https://www.youtube.com/watch?v=video1234567",
+                "artist": "Marcus Vinicius Braga",
+            },
+            {
+                "id": "video7654321",
+                "title": "T2",
+                "url": "https://www.youtube.com/watch?v=video7654321",
+                "artist": "Marcus Vinicius Braga",
+            },
+        ],
+    }
+    with (
+        patch(
+            "app.uwtv.main.audio_manager.extract_playlist_info",
+            new=AsyncMock(return_value=playlist),
+        ),
+        patch(
+            "app.uwtv.main.audio_manager.get_audio_by_youtube_id",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "app.uwtv.main.audio_manager.register_audio_for_download",
+            new=AsyncMock(side_effect=["audio-id-1", "audio-id-2"]),
+        ),
+        patch(
+            "app.uwtv.main.download_queue.add_download",
+            new=AsyncMock(side_effect=["task-id-1", "task-id-2"]),
+        ),
+        patch("app.uwtv.main.get_db_context", mock_db),
+        patch("app.uwtv.main.FolderRepository", return_value=folder_repo),
+        patch("app.uwtv.main.AudioRepository", return_value=audio_repo),
+    ):
+        resp = client.post("/audio/playlist", json={"url": PLAYLIST_URL})
+
+    assert resp.status_code == 200
+    folder_arg = folder_repo.create.call_args[0][0]
+    assert folder_arg.artist == "Marcus Vinicius Braga"

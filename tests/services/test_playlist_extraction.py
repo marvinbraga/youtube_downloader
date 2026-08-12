@@ -4,7 +4,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.services.managers import AudioDownloadManager, VideoDownloadManager
+from app.services.managers import (
+    AudioDownloadManager,
+    VideoDownloadManager,
+    extract_artist_from_info,
+)
 
 
 @pytest.fixture(params=[AudioDownloadManager, VideoDownloadManager])
@@ -241,3 +245,85 @@ async def test_skips_entries_with_invalid_id_format(mock_ydl_cls, manager):
 
     assert len(result["entries"]) == 1
     assert result["entries"][0]["id"] == "abc1234567a"
+
+
+# ---------------------------------------------------------------------------
+# extract_artist_from_info
+# ---------------------------------------------------------------------------
+
+
+def test_extract_artist_prefers_artist_field():
+    assert extract_artist_from_info({"artist": "A", "uploader": "B"}) == "A"
+
+
+def test_extract_artist_album_artist_fallback():
+    assert extract_artist_from_info({"album_artist": "Album Artist"}) == "Album Artist"
+
+
+def test_extract_artist_from_artists_list_of_strings():
+    assert extract_artist_from_info({"artists": ["One", "Two"]}) == "One, Two"
+
+
+def test_extract_artist_from_artists_list_of_dicts():
+    assert (
+        extract_artist_from_info({"artists": [{"name": "X"}, {"name": "Y"}]}) == "X, Y"
+    )
+
+
+def test_extract_artist_ignores_uploader_channel():
+    """Uploader/channel are playlist owner — never treated as track artist."""
+    assert extract_artist_from_info({"uploader": "Channel"}) is None
+    assert extract_artist_from_info({"channel": "Ch"}) is None
+    assert extract_artist_from_info({"creator": "Creator"}) is None
+    assert extract_artist_from_info({"playlist_uploader": "Owner"}) is None
+    assert extract_artist_from_info({"playlist_channel": "Owner Ch"}) is None
+
+
+def test_extract_artist_empty_or_missing():
+    assert extract_artist_from_info(None) is None
+    assert extract_artist_from_info({}) is None
+    assert extract_artist_from_info({"artist": "  "}) is None
+
+
+def test_extract_artist_from_title_dash_pattern():
+    assert (
+        extract_artist_from_info({"title": "Artist Name - Song Title"}) == "Artist Name"
+    )
+    assert extract_artist_from_info({"title": "Band – Hit"}) == "Band"
+    assert extract_artist_from_info({"title": "Solo — Ballad"}) == "Solo"
+
+
+def test_extract_artist_from_title_bullet_pattern():
+    assert (
+        extract_artist_from_info({"title": "Song Title · Artist Name"}) == "Artist Name"
+    )
+    assert extract_artist_from_info({"title": "Ballad • Singer"}) == "Singer"
+
+
+def test_extract_artist_title_pattern_requires_both_sides():
+    assert extract_artist_from_info({"title": "Just a title"}) is None
+    assert extract_artist_from_info({"title": " - only right"}) is None
+
+
+@pytest.mark.anyio
+@patch("app.services.managers.YoutubeDL")
+async def test_entry_includes_artist_when_present(mock_ydl_cls, manager):
+    """Flat playlist entries include artist from music fields only."""
+    mock_ydl = MagicMock()
+    mock_ydl_cls.return_value.__enter__.return_value = mock_ydl
+    mock_ydl.extract_info.return_value = {
+        "title": "My Playlist",
+        "webpage_url": "https://www.youtube.com/playlist?list=PL1",
+        "id": "PL1",
+        "entries": [
+            {"id": "abc1234567a", "title": "Track 1", "artist": "Singer One"},
+            {"id": "xyz9876543z", "title": "Track 2", "uploader": "Channel Two"},
+        ],
+    }
+
+    result = await manager.extract_playlist_info(
+        "https://www.youtube.com/playlist?list=PL1"
+    )
+
+    assert result["entries"][0]["artist"] == "Singer One"
+    assert "artist" not in result["entries"][1]

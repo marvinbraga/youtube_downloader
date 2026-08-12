@@ -49,6 +49,79 @@ YDL_REMOTE_COMPONENTS = ["ejs:github"]
 _YOUTUBE_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{11}$")
 
 
+def extract_artist_from_info(info: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Extract artist from yt-dlp info/entry.
+
+    Music-only fields — never uploader/channel/creator/playlist owner.
+    Optional last resort: parse common title patterns.
+    """
+    if not info or not isinstance(info, dict):
+        return None
+
+    artist = info.get("artist")
+    if isinstance(artist, str) and artist.strip():
+        return artist.strip()[:500]
+
+    album_artist = info.get("album_artist")
+    if isinstance(album_artist, str) and album_artist.strip():
+        return album_artist.strip()[:500]
+
+    artists = info.get("artists")
+    if isinstance(artists, list) and artists:
+        names: list[str] = []
+        for item in artists:
+            if isinstance(item, str) and item.strip():
+                names.append(item.strip())
+            elif isinstance(item, dict):
+                name = item.get("name")
+                if isinstance(name, str) and name.strip():
+                    names.append(name.strip())
+        if names:
+            return ", ".join(names)[:500]
+
+    # Title patterns as last resort (not channel/uploader)
+    title = info.get("title") or info.get("webpage_title") or ""
+    if isinstance(title, str) and title.strip():
+        # "Artist - Title" / en-dash / em-dash
+        m = re.match(r"^(.+?)\s+[-–—]\s+(.+)$", title.strip())
+        if m:
+            left, right = m.group(1).strip(), m.group(2).strip()
+            if left and right and len(left) <= 80:
+                return left[:500]
+        # "Title · Artist" / bullet
+        m = re.match(r"^(.+?)\s+[·•]\s+(.+)$", title.strip())
+        if m:
+            right = m.group(2).strip()
+            if right and len(right) <= 80:
+                return right[:500]
+
+    return None
+
+
+def majority_artist_from_names(
+    names: list, total: Optional[int] = None
+) -> Optional[str]:
+    """Return a shared artist if it uniquely covers ≥50% of *total* items.
+
+    Ties for the top count (e.g. 1/2 + 1/2) return None — not a random winner.
+    """
+    cleaned = [n.strip() for n in names if isinstance(n, str) and n.strip()]
+    if not cleaned:
+        return None
+    n_total = total if total is not None else len(cleaned)
+    if n_total <= 0:
+        return None
+    from collections import Counter
+
+    ranked = Counter(cleaned).most_common(2)
+    common, count = ranked[0]
+    if count * 2 < n_total:
+        return None
+    if len(ranked) > 1 and ranked[1][1] == count:
+        return None
+    return common[:500]
+
+
 def _playlist_info_payload(info: dict, url: str, entries: list) -> dict:
     """Normalize yt-dlp playlist metadata for audio/video playlist endpoints."""
     import urllib.parse
@@ -73,6 +146,8 @@ def _playlist_info_payload(info: dict, url: str, entries: list) -> dict:
         or info.get("playlist_uploader")
         or info.get("playlist_channel")
     )
+    # Music fields only — never treat playlist owner as album artist
+    album_artist = extract_artist_from_info(info)
 
     return {
         "title": info.get("title") or info.get("webpage_title") or "Playlist",
@@ -80,6 +155,7 @@ def _playlist_info_payload(info: dict, url: str, entries: list) -> dict:
         "entries": entries,
         "thumbnail": thumbnail,
         "uploader": uploader,
+        "album_artist": album_artist,
         "playlist_id": playlist_id,
     }
 
@@ -379,6 +455,7 @@ class AudioDownloadManager:
 
             # Atualizar no banco
             actual_title = info.get("title", "").strip()
+            artist = extract_artist_from_info(info)
             async with get_db_context() as session:
                 repo = AudioRepository(session)
                 await repo.complete_download(
@@ -388,12 +465,15 @@ class AudioDownloadManager:
                     filesize=filename.stat().st_size if filename.exists() else 0,
                 )
                 # Corrige o título se ficou como fallback (Video_{id})
+                # e persiste artista extraído do yt-dlp quando disponível.
+                update_fields: Dict[str, Any] = {}
                 if actual_title and actual_title != f"Video_{audio_id}":
-                    await repo.update(
-                        audio_id,
-                        title=actual_title,
-                        name=f"{actual_title}.m4a",
-                    )
+                    update_fields["title"] = actual_title
+                    update_fields["name"] = f"{actual_title}.m4a"
+                if artist:
+                    update_fields["artist"] = artist
+                if update_fields:
+                    await repo.update(audio_id, **update_fields)
 
             # Storage strategy hook: upload to S3 if STORAGE_BACKEND=s3,
             # then optionally remove the local file. No-op for local backend.
@@ -794,7 +874,11 @@ class AudioDownloadManager:
                 entry.get("title") or entry.get("webpage_title") or f"Video_{video_id}"
             )
             watch_url = f"https://www.youtube.com/watch?v={video_id}"
-            entries.append({"id": video_id, "title": title, "url": watch_url})
+            item = {"id": video_id, "title": title, "url": watch_url}
+            entry_artist = extract_artist_from_info(entry)
+            if entry_artist:
+                item["artist"] = entry_artist
+            entries.append(item)
 
         if not entries:
             raise ValueError(
@@ -809,6 +893,45 @@ class AudioDownloadManager:
         )
 
         return _playlist_info_payload(info, url, entries)
+
+    async def fetch_track_artist(self, url_or_id: str) -> Optional[str]:
+        """Fetch track artist via yt-dlp metadata only (no download).
+
+        Accepts a full watch URL or an 11-char YouTube video id.
+        Uses music fields / title patterns only — never channel/uploader.
+        """
+        if _YOUTUBE_ID_RE.match(str(url_or_id).strip()):
+            url = f"https://www.youtube.com/watch?v={str(url_or_id).strip()}"
+        else:
+            url = str(url_or_id)
+
+        ydl_opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "js_runtimes": YDL_JS_RUNTIMES,
+            "remote_components": YDL_REMOTE_COMPONENTS,
+            **get_yt_dlp_cookies_opts(),
+        }
+
+        def _extract():
+            with YoutubeDL(ydl_opts) as ydl:
+                return ydl.extract_info(url, download=False)
+
+        try:
+            loop = asyncio.get_running_loop()
+            info = await loop.run_in_executor(None, _extract)
+        except Exception as exc:
+            logger.warning(
+                "fetch_track_artist failed for %s: %s",
+                url_or_id,
+                str(exc)[:200],
+            )
+            return None
+
+        if not info:
+            return None
+        return extract_artist_from_info(info)
 
 
 class VideoDownloadManager:
@@ -1418,7 +1541,11 @@ class VideoDownloadManager:
                 entry.get("title") or entry.get("webpage_title") or f"Video_{video_id}"
             )
             watch_url = f"https://www.youtube.com/watch?v={video_id}"
-            entries.append({"id": video_id, "title": title, "url": watch_url})
+            item = {"id": video_id, "title": title, "url": watch_url}
+            entry_artist = extract_artist_from_info(entry)
+            if entry_artist:
+                item["artist"] = entry_artist
+            entries.append(item)
 
         if not entries:
             raise ValueError(

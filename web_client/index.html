@@ -202,7 +202,10 @@
                 <div class="card mb-4">
                     <div class="card-header d-flex align-items-center gap-2">
                         <i class="bi bi-headphones text-danger fs-5"></i>
-                        <h5 class="mb-0 text-truncate" id="currentAudioTitle">Selecione um áudio para reproduzir</h5>
+                        <div class="min-w-0 flex-grow-1">
+                            <h5 class="mb-0 text-truncate" id="currentAudioTitle">Selecione um áudio para reproduzir</h5>
+                            <div class="text-muted small text-truncate" id="currentAudioArtist" style="display:none"></div>
+                        </div>
                     </div>
                     <div class="card-body">
                         <audio id="audioPlayer" class="w-100" controls>
@@ -436,9 +439,14 @@
                                     <h3 class="yd-album-title text-truncate mb-1" id="albumDetailTitle">—</h3>
                                     <p class="yd-album-artist mb-2" id="albumDetailArtist">Vários</p>
                                     <p class="text-secondary small mb-3" id="albumDetailMeta">0 faixas</p>
-                                    <button class="btn btn-danger" id="albumPlayAllBtn" disabled>
-                                        <i class="bi bi-play-fill me-1"></i>Tocar tudo
-                                    </button>
+                                    <div class="d-flex flex-wrap gap-2 justify-content-center justify-content-md-start">
+                                        <button class="btn btn-danger" id="albumPlayAllBtn" disabled>
+                                            <i class="bi bi-play-fill me-1"></i>Tocar tudo
+                                        </button>
+                                        <button class="btn btn-outline-secondary" id="albumRefreshArtistsBtn" type="button" title="Buscar artistas das faixas">
+                                            <i class="bi bi-person-lines-fill me-1"></i>Atualizar artistas
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>

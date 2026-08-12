@@ -173,6 +173,7 @@ class Audio(Base):
     )
     folder: Mapped[Optional["Folder"]] = relationship("Folder", back_populates="audios")
     track_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    artist: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
     # Metadados
     keywords: Mapped[str] = mapped_column(
@@ -210,6 +211,7 @@ class Audio(Base):
             "transcription_path": self.transcription_path,
             "folder_id": self.folder_id,
             "track_number": self.track_number,
+            "artist": self.artist,
             "keywords": json.loads(self.keywords) if self.keywords else [],
             "created_date": self.created_date.isoformat()
             if self.created_date

@@ -65,6 +65,7 @@ from app.services.managers import (
     VideoStreamManager,
     AudioDownloadManager,
     VideoDownloadManager,
+    majority_artist_from_names,
 )
 from app.services.securities import (
     AUTHORIZED_CLIENTS,
@@ -77,7 +78,12 @@ from app.services.transcription.service import TranscriptionService
 from app.services.downloaders import is_playlist_url
 from app.services.sse_manager import sse_manager
 from app.services.download_queue import download_queue, DownloadTask
-from app.db.database import init_db, migrate_json_to_sqlite, get_db_context
+from app.db.database import (
+    init_db,
+    migrate_json_to_sqlite,
+    get_db_context,
+    recompute_album_artists_from_tracks,
+)
 from app.db.models import Folder
 from app.db.repositories import FolderRepository, AudioRepository, VideoRepository
 
@@ -92,6 +98,10 @@ async def lifespan(app: FastAPI):
     # Migrar dados do JSON se existirem
     logger.info("Verificando migração de dados JSON -> SQLite...")
     await migrate_json_to_sqlite()
+
+    # Clear playlist-owner names from album.artist; use majority track artists
+    logger.info("Recomputando artist de álbuns a partir das faixas...")
+    await recompute_album_artists_from_tracks()
 
     # Configurar callbacks da fila de downloads
     download_queue.on_download_started = on_download_started_callback
@@ -1021,7 +1031,13 @@ async def download_audio_playlist(
         cover_url = playlist_info.get("thumbnail")
         if not cover_url and entries:
             cover_url = f"https://i.ytimg.com/vi/{entries[0]['id']}/hqdefault.jpg"
-        artist = playlist_info.get("uploader")
+        # Music fields / majority track artist only — never playlist owner/uploader
+        artist = playlist_info.get("album_artist")
+        if not artist:
+            artist = majority_artist_from_names(
+                [e.get("artist") for e in entries],
+                total=len(entries),
+            )
         external_playlist_id = playlist_info.get("playlist_id")
 
         if len(entries) > MAX_PLAYLIST_ENTRIES:
@@ -1058,6 +1074,11 @@ async def download_audio_playlist(
             video_id = entry["id"]
             title = entry["title"]
             watch_url = entry["url"]
+            entry_artist = entry.get("artist")
+            if isinstance(entry_artist, str):
+                entry_artist = entry_artist[:500]
+            else:
+                entry_artist = None
 
             existing = await audio_manager.get_audio_by_youtube_id(video_id)
             already_exists = existing is not None and existing.get(
@@ -1070,6 +1091,8 @@ async def download_audio_playlist(
                     update_kwargs = {"track_number": track_number}
                     if existing.get("folder_id") is None:
                         update_kwargs["folder_id"] = folder_id
+                    if entry_artist:
+                        update_kwargs["artist"] = entry_artist
                     await repo.update(existing["id"], **update_kwargs)
 
                 tasks.append(
@@ -1108,9 +1131,13 @@ async def download_audio_playlist(
             try:
                 async with get_db_context() as session:
                     repo = AudioRepository(session)
-                    await repo.update(
-                        audio_id, folder_id=folder_id, track_number=track_number
-                    )
+                    update_kwargs = {
+                        "folder_id": folder_id,
+                        "track_number": track_number,
+                    }
+                    if entry_artist:
+                        update_kwargs["artist"] = entry_artist
+                    await repo.update(audio_id, **update_kwargs)
 
                 task_id = await download_queue.add_download(
                     audio_id=audio_id,
@@ -1249,7 +1276,13 @@ async def download_video_playlist(
         cover_url = playlist_info.get("thumbnail")
         if not cover_url and entries:
             cover_url = f"https://i.ytimg.com/vi/{entries[0]['id']}/hqdefault.jpg"
-        artist = playlist_info.get("uploader")
+        # Music fields / majority entry artist only — never playlist owner
+        artist = playlist_info.get("album_artist")
+        if not artist:
+            artist = majority_artist_from_names(
+                [e.get("artist") for e in entries],
+                total=len(entries),
+            )
         external_playlist_id = playlist_info.get("playlist_id")
 
         if len(entries) > MAX_PLAYLIST_ENTRIES:
@@ -2369,6 +2402,100 @@ async def get_album(folder_id: str, token_data: dict = Depends(verify_token)):
     except Exception as e:
         logger.error(f"Erro ao obter álbum: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erro ao obter álbum: {str(e)}")
+
+
+@app.post("/albums/{folder_id}/refresh-artists")
+async def refresh_album_artists(
+    folder_id: str, token_data: dict = Depends(verify_token)
+):
+    """Fill missing track artists via yt-dlp, then recompute folder.artist."""
+    try:
+        async with get_db_context() as session:
+            folder_repo = FolderRepository(session)
+            audio_repo = AudioRepository(session)
+
+            folder = await folder_repo.get_by_id(folder_id)
+            if not folder:
+                raise HTTPException(
+                    status_code=404, detail=f"Álbum não encontrado: {folder_id}"
+                )
+            if (folder.kind or "folder") != "album":
+                raise HTTPException(
+                    status_code=404, detail=f"Pasta não é um álbum: {folder_id}"
+                )
+
+            tracks = await audio_repo.get_by_folder(folder_id)
+            track_dicts = [t.to_dict() for t in tracks]
+
+        def _has_artist(t: dict) -> bool:
+            a = t.get("artist")
+            return isinstance(a, str) and bool(a.strip())
+
+        need_fetch = [
+            t
+            for t in track_dicts
+            if t.get("download_status") == "ready" and not _has_artist(t)
+        ]
+        skipped = len(track_dicts) - len(need_fetch)
+        updated = 0
+        failed = 0
+        sem = asyncio.Semaphore(2)
+
+        async def _fetch_and_update(track: dict) -> None:
+            nonlocal updated, failed
+            url_or_id = (
+                track.get("url")
+                or track.get("youtube_id")
+                or track.get("external_id")
+                or track.get("id")
+            )
+            if not url_or_id:
+                failed += 1
+                return
+            async with sem:
+                artist = await audio_manager.fetch_track_artist(str(url_or_id))
+            if not artist:
+                failed += 1
+                return
+            try:
+                async with get_db_context() as session:
+                    repo = AudioRepository(session)
+                    await repo.update(track["id"], artist=artist[:500])
+                track["artist"] = artist[:500]
+                updated += 1
+            except Exception as exc:
+                logger.warning(
+                    "refresh-artists update failed for %s: %s",
+                    track.get("id"),
+                    str(exc)[:200],
+                )
+                failed += 1
+
+        if need_fetch:
+            await asyncio.gather(*[_fetch_and_update(t) for t in need_fetch])
+
+        # Recompute folder artist from majority of track artists
+        all_artists = [t.get("artist") for t in track_dicts]
+        folder_artist = majority_artist_from_names(
+            all_artists, total=len(track_dicts) if track_dicts else 0
+        )
+        async with get_db_context() as session:
+            folder_repo = FolderRepository(session)
+            await folder_repo.update(folder_id, artist=folder_artist)
+
+        return {
+            "updated": updated,
+            "skipped": skipped,
+            "failed": failed,
+            "folder_artist": folder_artist,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Erro ao atualizar artistas do álbum: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Erro ao atualizar artistas: {str(e)}"
+        )
 
 
 @app.post("/folders", response_model=FolderResponse)

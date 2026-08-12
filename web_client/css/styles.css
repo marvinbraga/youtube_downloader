@@ -1782,18 +1782,38 @@ audio::-webkit-media-controls-panel {
     flex-shrink: 0;
 }
 
-.yd-album-track__title {
+.yd-album-track__meta {
     flex: 1;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.yd-album-track__title {
     color: var(--yd-text-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    line-height: 1.3;
+}
+
+.yd-album-track__artist {
+    color: var(--yd-text-tertiary);
+    font-size: 0.82rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.25;
 }
 
 .yd-album-track.is-playing .yd-album-track__title {
     color: var(--yd-accent-primary);
     font-weight: 600;
+}
+
+.yd-album-track.is-playing .yd-album-track__artist {
+    color: var(--yd-text-secondary);
 }
 
 .yd-album-player {
@@ -1829,6 +1849,9 @@ audio::-webkit-media-controls-panel {
 .yd-album-player__artist {
     font-size: 0.78rem;
     color: var(--yd-text-secondary);
+    min-height: 1.1em;
+    line-height: 1.25;
+    opacity: 0.95;
 }
 
 .yd-album-player__controls {

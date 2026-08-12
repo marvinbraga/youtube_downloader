@@ -42,6 +42,9 @@ $(document).ready(function() {
     let albumSeeking = false;
     /** Folder ids already auto-refreshed for missing track artists (session). */
     const refreshedArtistsFor = new Set();
+    /** Album player volume 0–1; mute remembers last non-zero level. */
+    let albumVolume = 1;
+    let albumVolumeBeforeMute = 1;
 
     // ========================================
     // Theme Toggle
@@ -2145,6 +2148,7 @@ $(document).ready(function() {
         }
 
         audio.src = `${API_BASE_URL}/audio/stream/${track.id}?token=${authToken}`;
+        applyAlbumVolume();
         audio.load();
         const playPromise = audio.play();
         if (playPromise && typeof playPromise.catch === 'function') {
@@ -2174,6 +2178,73 @@ $(document).ready(function() {
         const icon = $('#albumPlayPauseBtn i');
         icon.toggleClass('bi-play-fill', !playing);
         icon.toggleClass('bi-pause-fill', playing);
+    }
+
+    function loadAlbumVolume() {
+        const raw = localStorage.getItem('yd-album-volume');
+        let v = raw != null ? parseFloat(raw) : 1;
+        if (!Number.isFinite(v)) v = 1;
+        albumVolume = Math.min(1, Math.max(0, v));
+        if (albumVolume > 0) {
+            albumVolumeBeforeMute = albumVolume;
+        }
+        applyAlbumVolume();
+    }
+
+    function persistAlbumVolume() {
+        try {
+            localStorage.setItem('yd-album-volume', String(albumVolume));
+        } catch (e) {
+            /* ignore quota / private mode */
+        }
+    }
+
+    function updateAlbumVolumeIcon() {
+        const icon = $('#albumVolumeIcon');
+        if (!icon.length) return;
+        icon.removeClass('bi-volume-mute-fill bi-volume-off-fill bi-volume-down-fill bi-volume-up-fill');
+        if (albumVolume <= 0) {
+            icon.addClass('bi-volume-mute-fill');
+        } else if (albumVolume < 0.35) {
+            icon.addClass('bi-volume-down-fill');
+        } else {
+            icon.addClass('bi-volume-up-fill');
+        }
+        $('#albumMuteBtn').toggleClass('is-active', albumVolume <= 0);
+        $('#albumMuteBtn').attr('title', albumVolume <= 0 ? 'Ativar som' : 'Mudo');
+    }
+
+    function applyAlbumVolume() {
+        const audio = document.getElementById('albumAudioPlayer');
+        if (audio) {
+            audio.volume = albumVolume;
+            audio.muted = albumVolume <= 0;
+        }
+        const bar = document.getElementById('albumVolumeBar');
+        if (bar && Math.abs(parseFloat(bar.value) - albumVolume) > 0.001) {
+            bar.value = String(albumVolume);
+        }
+        updateAlbumVolumeIcon();
+    }
+
+    function setAlbumVolume(value, { persist = true } = {}) {
+        let v = parseFloat(value);
+        if (!Number.isFinite(v)) v = 1;
+        albumVolume = Math.min(1, Math.max(0, v));
+        if (albumVolume > 0) {
+            albumVolumeBeforeMute = albumVolume;
+        }
+        applyAlbumVolume();
+        if (persist) persistAlbumVolume();
+    }
+
+    function toggleAlbumMute() {
+        if (albumVolume > 0) {
+            albumVolumeBeforeMute = albumVolume;
+            setAlbumVolume(0);
+        } else {
+            setAlbumVolume(albumVolumeBeforeMute > 0 ? albumVolumeBeforeMute : 1);
+        }
     }
 
     function toggleAlbumPlayPause() {
@@ -3474,6 +3545,11 @@ $(document).ready(function() {
         albumSeeking = false;
     });
 
+    $('#albumVolumeBar').on('input', function() {
+        setAlbumVolume(this.value);
+    });
+    $('#albumMuteBtn').on('click', toggleAlbumMute);
+
     const albumAudioEl = document.getElementById('albumAudioPlayer');
     if (albumAudioEl) {
         albumAudioEl.addEventListener('timeupdate', onAlbumTimeUpdate);
@@ -3482,6 +3558,7 @@ $(document).ready(function() {
         albumAudioEl.addEventListener('pause', () => setAlbumPlayIcon(false));
         albumAudioEl.addEventListener('ended', onAlbumEnded);
     }
+    loadAlbumVolume();
 
     // Folder buttons
     $('#createFolderBtn').on('click', openCreateFolderModal);

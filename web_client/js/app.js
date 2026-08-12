@@ -2090,7 +2090,23 @@ $(document).ready(function() {
         });
     }
 
-    function buildAlbumQueue(startTrackId) {
+    function shuffleInPlace(list) {
+        for (let i = list.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [list[i], list[j]] = [list[j], list[i]];
+        }
+        return list;
+    }
+
+    /**
+     * Build play queue from ready tracks.
+     * @param {string} [startTrackId] keep this track as the current index
+     * @param {{ keepCurrentPlaying?: boolean }} [opts]
+     *   keepCurrentPlaying: when enabling shuffle mid-play, put current first
+     *   and only shuffle the remaining tracks (Spotify-style).
+     */
+    function buildAlbumQueue(startTrackId, opts = {}) {
+        const { keepCurrentPlaying = false } = opts;
         const tracks = (currentAlbum && currentAlbum.tracks) || [];
         const ready = tracks.filter(t => t.download_status === 'ready');
         if (!ready.length) {
@@ -2098,13 +2114,22 @@ $(document).ready(function() {
             queueIndex = -1;
             return false;
         }
+
         let ordered = ready.slice();
+
         if (albumShuffle) {
-            for (let i = ordered.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [ordered[i], ordered[j]] = [ordered[j], ordered[i]];
+            if (keepCurrentPlaying && startTrackId) {
+                const current = ordered.find(t => t.id === startTrackId);
+                const rest = ordered.filter(t => t.id !== startTrackId);
+                shuffleInPlace(rest);
+                ordered = current ? [current, ...rest] : rest;
+                albumQueue = ordered;
+                queueIndex = current ? 0 : 0;
+                return true;
             }
+            shuffleInPlace(ordered);
         }
+
         albumQueue = ordered;
         if (startTrackId) {
             const idx = albumQueue.findIndex(t => t.id === startTrackId);
@@ -2113,6 +2138,19 @@ $(document).ready(function() {
             queueIndex = 0;
         }
         return true;
+    }
+
+    /** Rebuild queue when shuffle is toggled without restarting the current track. */
+    function rebuildAlbumQueueForShuffleToggle() {
+        if (!currentAlbum) return;
+        const currentId = (queueIndex >= 0 && albumQueue[queueIndex])
+            ? albumQueue[queueIndex].id
+            : null;
+        if (!currentId) {
+            // Nothing playing yet — queue will be built on next Play.
+            return;
+        }
+        buildAlbumQueue(currentId, { keepCurrentPlaying: albumShuffle });
     }
 
     function playAlbumAll() {
@@ -2149,6 +2187,7 @@ $(document).ready(function() {
 
         audio.src = `${API_BASE_URL}/audio/stream/${track.id}?token=${authToken}`;
         applyAlbumVolume();
+        syncAlbumLoopAttribute();
         audio.load();
         const playPromise = audio.play();
         if (playPromise && typeof playPromise.catch === 'function') {
@@ -2262,10 +2301,23 @@ $(document).ready(function() {
     }
 
     function playAlbumNext() {
-        if (!albumQueue.length) return;
+        if (!albumQueue.length) {
+            if (currentAlbum) buildAlbumQueue();
+            if (!albumQueue.length) return;
+        }
         if (queueIndex < albumQueue.length - 1) {
             playAlbumAtIndex(queueIndex + 1);
-        } else if (albumRepeatMode === 'all') {
+            return;
+        }
+        if (albumRepeatMode === 'all') {
+            if (albumShuffle && albumQueue.length > 1) {
+                const lastId = albumQueue[queueIndex] && albumQueue[queueIndex].id;
+                buildAlbumQueue();
+                if (albumQueue.length > 1 && albumQueue[0].id === lastId) {
+                    const j = 1 + Math.floor(Math.random() * (albumQueue.length - 1));
+                    [albumQueue[0], albumQueue[j]] = [albumQueue[j], albumQueue[0]];
+                }
+            }
             playAlbumAtIndex(0);
         }
     }
@@ -2288,7 +2340,8 @@ $(document).ready(function() {
 
     function cycleAlbumRepeat() {
         const modes = ['off', 'all', 'one'];
-        const next = modes[(modes.indexOf(albumRepeatMode) + 1) % modes.length];
+        const idx = modes.indexOf(albumRepeatMode);
+        const next = modes[(idx >= 0 ? idx + 1 : 1) % modes.length];
         albumRepeatMode = next;
         const btn = $('#albumRepeatBtn');
         btn.attr('data-mode', next);
@@ -2296,7 +2349,13 @@ $(document).ready(function() {
         const icon = btn.find('i');
         icon.removeClass('bi-repeat bi-repeat-1');
         icon.addClass(next === 'one' ? 'bi-repeat-1' : 'bi-repeat');
-        btn.attr('title', next === 'off' ? 'Repetir' : next === 'all' ? 'Repetir álbum' : 'Repetir faixa');
+        const titles = {
+            off: 'Repetir: desligado',
+            all: 'Repetir: álbum',
+            one: 'Repetir: faixa',
+        };
+        btn.attr('title', titles[next] || 'Repetir');
+        syncAlbumLoopAttribute();
     }
 
     function onAlbumTimeUpdate() {
@@ -2312,18 +2371,52 @@ $(document).ready(function() {
         }
     }
 
+    function syncAlbumLoopAttribute() {
+        const audio = document.getElementById('albumAudioPlayer');
+        if (audio) {
+            // Native loop is more reliable than reloading the same src on ended.
+            audio.loop = albumRepeatMode === 'one';
+        }
+    }
+
     function onAlbumEnded() {
+        // With loop=true (repeat one), browsers usually do not fire ended.
+        // Keep this branch as a fallback if loop is unsupported.
         if (albumRepeatMode === 'one') {
-            playAlbumAtIndex(queueIndex);
+            const audio = document.getElementById('albumAudioPlayer');
+            if (audio) {
+                audio.currentTime = 0;
+                const p = audio.play();
+                if (p && typeof p.catch === 'function') {
+                    p.catch(() => showToast('Erro ao repetir faixa', 'error'));
+                }
+                setAlbumPlayIcon(true);
+            }
             return;
         }
         if (queueIndex < albumQueue.length - 1) {
             playAlbumAtIndex(queueIndex + 1);
-        } else if (albumRepeatMode === 'all') {
-            playAlbumAtIndex(0);
-        } else {
-            setAlbumPlayIcon(false);
+            return;
         }
+        // Last track
+        if (albumRepeatMode === 'all') {
+            if (albumShuffle && albumQueue.length > 1) {
+                // New random order for the next cycle; keep continuity by
+                // not forcing the same first track as the last one when possible.
+                const lastId = albumQueue[queueIndex] && albumQueue[queueIndex].id;
+                buildAlbumQueue();
+                if (albumQueue.length > 1 && albumQueue[0].id === lastId) {
+                    // Swap first with another random track
+                    const j = 1 + Math.floor(Math.random() * (albumQueue.length - 1));
+                    [albumQueue[0], albumQueue[j]] = [albumQueue[j], albumQueue[0]];
+                }
+                playAlbumAtIndex(0);
+            } else {
+                playAlbumAtIndex(0);
+            }
+            return;
+        }
+        setAlbumPlayIcon(false);
     }
 
     // ========================================
@@ -3528,6 +3621,12 @@ $(document).ready(function() {
     $('#albumShuffleBtn').on('click', () => {
         albumShuffle = !albumShuffle;
         $('#albumShuffleBtn').toggleClass('is-active', albumShuffle);
+        $('#albumShuffleBtn').attr(
+            'title',
+            albumShuffle ? 'Aleatório: ligado' : 'Aleatório: desligado'
+        );
+        // Rebuild queue immediately so Next/Prev respect the new mode.
+        rebuildAlbumQueueForShuffleToggle();
     });
     $('#albumRepeatBtn').on('click', cycleAlbumRepeat);
     $('#albumSeekBar').on('input', function() {

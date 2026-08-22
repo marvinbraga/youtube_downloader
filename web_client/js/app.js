@@ -287,6 +287,11 @@ $(document).ready(function() {
     // ========================================
     // Audio Functions
     // ========================================
+    function excludeAlbumTracks(audios, albums) {
+        const albumIds = new Set((albums || []).map(album => album.id));
+        return (audios || []).filter(audio => !audio.folder_id || !albumIds.has(audio.folder_id));
+    }
+
     async function loadAudioList() {
         if (!authToken) {
             await authenticate();
@@ -294,13 +299,26 @@ $(document).ready(function() {
         }
 
         try {
-            const response = await $.ajax({
-                url: `${API_BASE_URL}/audio/list`,
-                method: 'GET',
-                headers: getAuthHeaders()
-            });
+            const [response, albums] = await Promise.all([
+                $.ajax({
+                    url: `${API_BASE_URL}/audio/list`,
+                    method: 'GET',
+                    headers: getAuthHeaders()
+                }),
+                $.ajax({
+                    url: `${API_BASE_URL}/albums`,
+                    method: 'GET',
+                    headers: getAuthHeaders()
+                }).catch(error => {
+                    if (error.status === 401) {
+                        throw error;
+                    }
+                    console.warn('Could not load albums to filter audio list:', error);
+                    return [];
+                })
+            ]);
 
-            currentAudios = response.audio_files || [];
+            currentAudios = excludeAlbumTracks(response.audio_files || [], albums);
             renderAudioList(currentAudios);
 
         } catch (error) {

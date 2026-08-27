@@ -569,21 +569,25 @@ _PENDING_TRANSCRIPTION_STATES = ["queued", "started"]
 
 
 async def recover_pending_transcriptions() -> int:
-    """Re-enfileira transcrições órfãs no startup.
+    """Recupera transcrições órfãs no startup.
 
     Busca áudios E vídeos com ``transcription_status`` em ("queued","started").
     Para cada item:
-      * Se estava "started" (estava rodando quando o servidor caiu), reseta para
-        "queued" — o ciclo de status volta a queued -> started -> ended/error.
-      * Chama ``enqueue_transcription`` com os defaults
+      * ``queued`` (nunca chegou a rodar; só perdeu a fila in-memory): re-enfileira
+        com ``enqueue_transcription(..., force=True)`` e os defaults
         ``DEFAULT_TRANSCRIPTION_PROVIDER`` / ``DEFAULT_TRANSCRIPTION_LANGUAGE``
         (provider/idioma NÃO são persistidos por item).
+      * ``started`` (worker em voo quando o processo morreu — OOM, kill, crash):
+        NÃO re-enfileira. Marca ``error`` para a UI tostar e voltar a
+        "Não transcrito". Re-submeter um job que já OOM-matou o container
+        geraria um loop infinito de restarts.
 
     Idempotência: itens já "ended" não são selecionados pela query, e a própria
     ``enqueue_transcription`` retorna ``ALREADY_ENDED`` se o arquivo .md já
     existir, sem re-submeter. Erros são tratados por item — uma falha não aborta
-    o startup nem impede a recuperação dos demais. Retorna quantos itens foram
-    de fato re-submetidos.
+    o startup nem impede a recuperação dos demais. Retorna quantos itens
+    ``queued`` foram de fato re-submetidos (órfãos ``started`` não entram na
+    contagem).
     """
     provider = DEFAULT_TRANSCRIPTION_PROVIDER
     language = DEFAULT_TRANSCRIPTION_LANGUAGE
@@ -624,20 +628,25 @@ async def recover_pending_transcriptions() -> int:
         nonlocal recovered
         kind = "vídeo" if is_video else "áudio"
         try:
-            # started -> queued: o worker que rodava sumiu com o restart.
+            # started: o worker em voo sumiu com o processo (OOM/kill/crash).
+            # Não re-enfileira — um job que já derrubou o container voltaria a
+            # fazê-lo. Marca error para a UI tostar e resetar o badge.
             if status == "started":
                 if is_video:
-                    await video_manager.update_transcription_status(file_id, "queued")
+                    await video_manager.update_transcription_status(file_id, "error")
                 else:
-                    await audio_manager.update_transcription_status(file_id, "queued")
-                logger.info(
-                    f"Recuperação de fila: {kind} {file_id} resetado de 'started' "
-                    f"para 'queued'."
+                    await audio_manager.update_transcription_status(file_id, "error")
+                logger.warning(
+                    f"Recuperação de fila: {kind} {file_id} estava 'started' quando "
+                    f"o processo morreu; job em voo marcado como 'error' "
+                    f"(não re-enfileirado) para a UI exibir o erro e voltar a "
+                    f"'Não transcrito'."
                 )
+                return
 
-            # force=True: o item está em "queued"/"started" (é exatamente o que
-            # define um órfão); sem o bypass da guarda in-progress o
-            # re-enfileiramento seria um no-op silencioso.
+            # queued: só perdeu a fila in-memory. force=True bypassa a guarda
+            # in-progress (o órfão já está "queued"; sem isso o re-enfileiramento
+            # seria um no-op silencioso).
             result = await enqueue_transcription(
                 file_id,
                 provider=provider,

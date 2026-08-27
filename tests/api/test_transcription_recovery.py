@@ -7,8 +7,9 @@ Covers the core invariants of the recovery feature:
   (b) ``enqueue_transcription(force=True)`` BYPASSES the in-progress guard and
       DOES submit — this is the trap that would otherwise make recovery a silent
       no-op (every orphan is "queued"/"started");
-  (c) ``recover_pending_transcriptions`` resets "started" -> "queued", re-submits
-      both audio and video orphans, and reports the count;
+  (c) ``recover_pending_transcriptions`` marks "started" orphans as "error"
+      (no re-enqueue — avoids OOM/crash loops) and re-submits only "queued"
+      orphans with force=True; recovered count is the number actually submitted;
   (d) idempotency: a finished ("ended") row whose .md exists is never re-submitted
       even with force=True.
 
@@ -95,12 +96,14 @@ def test_enqueue_queued_with_force_submits():
 
 
 # ---------------------------------------------------------------------------
-# (c) recover_pending_transcriptions: started->queued, submits audio+video
+# (c) recover_pending_transcriptions: started->error (no enqueue);
+#     queued is re-submitted with force=True
 # ---------------------------------------------------------------------------
 
 
-def test_recover_resets_started_and_resubmits_audio_and_video():
-    # One audio orphan in "started", one video orphan in "queued".
+def test_recover_marks_started_error_and_resubmits_queued():
+    # One audio orphan in "started" (in-flight when the process died) and one
+    # video orphan in "queued" (never started; only lost the in-memory queue).
     audio_obj = MagicMock(id="audio-1", transcription_status="started")
     video_obj = MagicMock(id="video-1", transcription_status="queued")
 
@@ -145,14 +148,15 @@ def test_recover_resets_started_and_resubmits_audio_and_video():
     ):
         recovered = asyncio.run(main.recover_pending_transcriptions())
 
-    assert recovered == 2
-    # The "started" audio was reset to "queued".
-    audio_update.assert_awaited_once_with("audio-1", "queued")
-    # The already-"queued" video was NOT reset.
+    # Recovered count is items actually re-submitted (queued video only).
+    assert recovered == 1
+    # The "started" audio was marked failed, not reset to queued.
+    audio_update.assert_awaited_once_with("audio-1", "error")
+    # The already-"queued" video was NOT reset to error (nor to queued).
     video_update.assert_not_awaited()
-    # Both were re-enqueued with force=True.
-    assert ("audio-1", False, True) in calls
-    assert ("video-1", True, True) in calls
+    # Only the queued video is re-enqueued with force=True.
+    assert ("audio-1", False, True) not in calls
+    assert calls == [("video-1", True, True)]
 
 
 # ---------------------------------------------------------------------------

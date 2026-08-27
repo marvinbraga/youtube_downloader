@@ -1226,7 +1226,7 @@ $(document).ready(function() {
                             </button>
                             <button class="btn btn-sm btn-outline-danger yd-action-btn delete-transcription-btn" data-id="${media.id}"
                                     title="${media.transcription_status === 'started' || media.transcription_status === 'queued' ? 'Cancelar Transcrição' : 'Excluir Transcrição'}"
-                                    ${media.transcription_status === 'none' ? 'disabled' : ''}>
+                                    ${media.transcription_status === 'none' || media.transcription_status === 'error' ? 'disabled' : ''}>
                                 <i class="bi bi-trash"></i>
                             </button>
                         </div>
@@ -1275,7 +1275,7 @@ $(document).ready(function() {
             'ended': '<span class="yd-badge yd-badge--transcribed"><i class="bi bi-check-circle me-1"></i>Transcrito</span>',
             'queued': '<span class="yd-badge yd-badge--processing"><i class="bi bi-clock-history me-1"></i>Aguardando</span>',
             'started': '<span class="yd-badge yd-badge--processing"><i class="bi bi-hourglass-split me-1"></i>Em andamento</span>',
-            'error': '<span class="yd-badge yd-badge--error"><i class="bi bi-x-circle me-1"></i>Erro</span>',
+            'error': '<span class="yd-badge yd-badge--not-transcribed"><i class="bi bi-dash-circle me-1"></i>Não transcrito</span>',
             'none': '<span class="yd-badge yd-badge--not-transcribed"><i class="bi bi-dash-circle me-1"></i>Não transcrito</span>'
         };
         return badges[status] || badges['none'];
@@ -1375,11 +1375,15 @@ $(document).ready(function() {
     // renderizadas após uma busca/re-render.
     function patchTranscriptionRow($row, newStatus) {
         const isActive = ACTIVE_TRANSCRIPTION_STATUSES.includes(newStatus);
+        // Falha = nunca transcrito: mesmos botões de `none` (Transcrever ligado,
+        // Ver/Excluir desligados). O badge de `error` também reusa o visual de none.
+        const isIdle = newStatus === 'none' || newStatus === 'error';
+        const badgeStatus = newStatus === 'error' ? 'none' : newStatus;
 
         // Badge de status (único .yd-badge dentro do .yd-action-group; o badge
         // de tipo Áudio/Vídeo fica em .yd-media-meta). Mesmo seletor de startTranscription.
         $row.find('.yd-action-group .yd-badge').first()
-            .replaceWith(getTranscriptionStatusBadge(newStatus));
+            .replaceWith(getTranscriptionStatusBadge(badgeStatus));
 
         // Botão "Transcrever": desabilitado enquanto queued/started.
         $row.find('.start-transcription-btn').prop('disabled', isActive);
@@ -1387,9 +1391,9 @@ $(document).ready(function() {
         // Botão "Ver Transcrição": habilitado apenas quando ended.
         $row.find('.view-transcription-btn').prop('disabled', newStatus !== 'ended');
 
-        // Botão "Excluir/Cancelar": desabilitado quando none; título conforme estado.
+        // Botão "Excluir/Cancelar": desabilitado quando none/error; título conforme estado.
         $row.find('.delete-transcription-btn')
-            .prop('disabled', newStatus === 'none')
+            .prop('disabled', isIdle)
             .attr('title', isActive ? 'Cancelar Transcrição' : 'Excluir Transcrição');
     }
 
@@ -1450,12 +1454,18 @@ $(document).ready(function() {
                 const prevStatus = entry ? entry.transcription_status : undefined;
 
                 if (newStatus !== prevStatus) {
-                    patchTranscriptionRow($row, newStatus);
-                    updateCachedTranscriptionStatus(id, mediaType, newStatus);
-                    if (newStatus === 'ended') {
-                        showToast('Transcrição concluída!', 'success');
-                    } else if (newStatus === 'error') {
+                    if (newStatus === 'error') {
                         showToast('Erro na transcrição', 'error');
+                        // Visual/botões como `none`; cache fica `error` para o
+                        // próximo tick não re-tostar (newStatus === prevStatus).
+                        patchTranscriptionRow($row, 'none');
+                        updateCachedTranscriptionStatus(id, mediaType, 'error');
+                    } else {
+                        patchTranscriptionRow($row, newStatus);
+                        updateCachedTranscriptionStatus(id, mediaType, newStatus);
+                        if (newStatus === 'ended') {
+                            showToast('Transcrição concluída!', 'success');
+                        }
                     }
                 }
             });

@@ -102,8 +102,10 @@ services:
     image: traefik:v2.11
     container_name: traefik
     user: "0:955"
+    restart: unless-stopped
     command:
       - "--api.insecure=true"
+      - "--ping=true"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--entrypoints.web.address=:80"
@@ -112,6 +114,12 @@ services:
       - "58080:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
 
 # Named bind mounts are kept relative to the compose file so `docker compose
 # down` doesn't take the data with it. To enable Docker-managed volumes

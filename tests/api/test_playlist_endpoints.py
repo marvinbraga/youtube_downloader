@@ -342,6 +342,201 @@ def test_audio_download_single_video_with_list_param_is_allowed(client):
     assert body["task_id"] == "task-id-1"
 
 
+SINGLE_WATCH_URL = "https://www.youtube.com/watch?v=abc1234567a"
+
+
+def test_audio_download_without_folder_id_stays_avulso(client):
+    mock_db, folder_repo, audio_repo, _ = _make_db_mock()
+    with (
+        patch(
+            "app.uwtv.main.audio_manager.register_audio_for_download",
+            new=AsyncMock(return_value="audio-id-1"),
+        ),
+        patch(
+            "app.uwtv.main.download_queue.add_download",
+            new=AsyncMock(return_value="task-id-1"),
+        ),
+        patch("app.uwtv.main.get_db_context", mock_db),
+        patch("app.uwtv.main.FolderRepository", return_value=folder_repo),
+        patch("app.uwtv.main.AudioRepository", return_value=audio_repo),
+        patch(
+            "app.uwtv.main.wait_and_cleanup_album_errors", new_callable=AsyncMock
+        ) as waiter,
+    ):
+        resp = client.post("/audio/download", json={"url": SINGLE_WATCH_URL})
+
+    assert resp.status_code == 200
+    audio_repo.update_folder.assert_not_called()
+    audio_repo.update.assert_not_called()
+    folder_repo.get_by_id.assert_not_called()
+    waiter.assert_not_called()
+
+
+def test_audio_download_empty_folder_id_stays_avulso(client):
+    mock_db, folder_repo, audio_repo, _ = _make_db_mock()
+    with (
+        patch(
+            "app.uwtv.main.audio_manager.register_audio_for_download",
+            new=AsyncMock(return_value="audio-id-1"),
+        ),
+        patch(
+            "app.uwtv.main.download_queue.add_download",
+            new=AsyncMock(return_value="task-id-1"),
+        ),
+        patch("app.uwtv.main.get_db_context", mock_db),
+        patch("app.uwtv.main.FolderRepository", return_value=folder_repo),
+        patch("app.uwtv.main.AudioRepository", return_value=audio_repo),
+        patch(
+            "app.uwtv.main.wait_and_cleanup_album_errors", new_callable=AsyncMock
+        ) as waiter,
+    ):
+        resp = client.post(
+            "/audio/download", json={"url": SINGLE_WATCH_URL, "folder_id": ""}
+        )
+
+    assert resp.status_code == 200
+    audio_repo.update_folder.assert_not_called()
+    audio_repo.update.assert_not_called()
+    waiter.assert_not_called()
+
+
+def test_audio_download_with_album_folder_id_assigns_folder(client):
+    album_id = "album-folder-1"
+    mock_db, folder_repo, audio_repo, _ = _make_db_mock()
+    album = MagicMock()
+    album.id = album_id
+    album.kind = "album"
+    folder_repo.get_by_id = AsyncMock(return_value=album)
+    existing_track = MagicMock()
+    existing_track.track_number = 2
+    audio_repo.get_by_folder = AsyncMock(return_value=[existing_track])
+    with (
+        patch(
+            "app.uwtv.main.audio_manager.register_audio_for_download",
+            new=AsyncMock(return_value="audio-id-1"),
+        ),
+        patch(
+            "app.uwtv.main.download_queue.add_download",
+            new=AsyncMock(return_value="task-id-1"),
+        ),
+        patch("app.uwtv.main.get_db_context", mock_db),
+        patch("app.uwtv.main.FolderRepository", return_value=folder_repo),
+        patch("app.uwtv.main.AudioRepository", return_value=audio_repo),
+        patch(
+            "app.uwtv.main.wait_and_cleanup_album_errors", new_callable=AsyncMock
+        ) as waiter,
+    ):
+        resp = client.post(
+            "/audio/download",
+            json={"url": SINGLE_WATCH_URL, "folder_id": album_id},
+        )
+
+    assert resp.status_code == 200
+    folder_repo.get_by_id.assert_awaited_once_with(album_id)
+    audio_repo.update.assert_called()
+    kwargs = audio_repo.update.call_args.kwargs
+    assert kwargs.get("folder_id") == album_id
+    assert kwargs.get("track_number") == 3
+    waiter.assert_not_called()
+
+
+def test_audio_download_existing_audio_still_assigns_album_folder(client):
+    album_id = "album-folder-1"
+    existing_id = "already-in-db"
+    mock_db, folder_repo, audio_repo, _ = _make_db_mock()
+    album = MagicMock()
+    album.id = album_id
+    album.kind = "album"
+    folder_repo.get_by_id = AsyncMock(return_value=album)
+    audio_repo.get_by_folder = AsyncMock(return_value=[])
+    with (
+        patch(
+            "app.uwtv.main.audio_manager.register_audio_for_download",
+            new=AsyncMock(return_value=existing_id),
+        ),
+        patch(
+            "app.uwtv.main.download_queue.add_download",
+            new=AsyncMock(return_value="task-id-1"),
+        ),
+        patch("app.uwtv.main.get_db_context", mock_db),
+        patch("app.uwtv.main.FolderRepository", return_value=folder_repo),
+        patch("app.uwtv.main.AudioRepository", return_value=audio_repo),
+    ):
+        resp = client.post(
+            "/audio/download",
+            json={"url": SINGLE_WATCH_URL, "folder_id": album_id},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["audio_id"] == existing_id
+    kwargs = audio_repo.update.call_args.kwargs
+    assert kwargs.get("folder_id") == album_id
+    assert kwargs.get("track_number") == 1
+
+
+def test_audio_download_unknown_folder_id_returns_404(client):
+    mock_db, folder_repo, audio_repo, _ = _make_db_mock()
+    folder_repo.get_by_id = AsyncMock(return_value=None)
+    add_mock = AsyncMock(return_value="task-id-1")
+    with (
+        patch(
+            "app.uwtv.main.audio_manager.register_audio_for_download",
+            new=AsyncMock(return_value="audio-id-1"),
+        ),
+        patch("app.uwtv.main.download_queue.add_download", add_mock),
+        patch("app.uwtv.main.get_db_context", mock_db),
+        patch("app.uwtv.main.FolderRepository", return_value=folder_repo),
+        patch("app.uwtv.main.AudioRepository", return_value=audio_repo),
+        patch(
+            "app.uwtv.main.wait_and_cleanup_album_errors", new_callable=AsyncMock
+        ) as waiter,
+    ):
+        resp = client.post(
+            "/audio/download",
+            json={"url": SINGLE_WATCH_URL, "folder_id": "missing-folder"},
+        )
+
+    assert resp.status_code == 404
+    assert "não encontrada" in resp.json()["detail"].lower()
+    audio_repo.update.assert_not_called()
+    audio_repo.update_folder.assert_not_called()
+    add_mock.assert_not_called()
+    waiter.assert_not_called()
+
+
+def test_audio_download_non_album_folder_returns_400(client):
+    mock_db, folder_repo, audio_repo, _ = _make_db_mock()
+    generic = MagicMock()
+    generic.id = "folder-not-album"
+    generic.kind = "folder"
+    folder_repo.get_by_id = AsyncMock(return_value=generic)
+    add_mock = AsyncMock(return_value="task-id-1")
+    with (
+        patch(
+            "app.uwtv.main.audio_manager.register_audio_for_download",
+            new=AsyncMock(return_value="audio-id-1"),
+        ),
+        patch("app.uwtv.main.download_queue.add_download", add_mock),
+        patch("app.uwtv.main.get_db_context", mock_db),
+        patch("app.uwtv.main.FolderRepository", return_value=folder_repo),
+        patch("app.uwtv.main.AudioRepository", return_value=audio_repo),
+        patch(
+            "app.uwtv.main.wait_and_cleanup_album_errors", new_callable=AsyncMock
+        ) as waiter,
+    ):
+        resp = client.post(
+            "/audio/download",
+            json={"url": SINGLE_WATCH_URL, "folder_id": "folder-not-album"},
+        )
+
+    assert resp.status_code == 400
+    detail = resp.json()["detail"].lower()
+    assert "álbum" in detail or "album" in detail
+    audio_repo.update.assert_not_called()
+    add_mock.assert_not_called()
+    waiter.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # POST /video/playlist
 # ---------------------------------------------------------------------------

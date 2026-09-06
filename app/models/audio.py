@@ -34,6 +34,7 @@ class AudioInfo(BaseModel):
 class AudioDownloadRequest(BaseModel):
     url: HttpUrl
     high_quality: bool = True
+    folder_id: Optional[str] = None  # existing album; omitted/empty = avulso
 
 
 class VideoDownloadRequest(BaseModel):

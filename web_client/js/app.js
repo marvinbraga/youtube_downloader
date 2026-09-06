@@ -263,6 +263,7 @@ $(document).ready(function() {
             // Load initial data
             loadAudioList();
             loadVideoList();
+            loadAlbums();
 
         } catch (error) {
             console.error('Authentication error:', error);
@@ -656,9 +657,50 @@ $(document).ready(function() {
         }
     }
 
+    function populateAddToAlbumSelect() {
+        const $select = $('#addToAlbumSelect');
+        if (!$select.length) return;
+        const previous = $select.val();
+        $select.empty();
+        $select.append($('<option>', { value: '', text: 'Selecione um álbum' }));
+        (currentAlbums || []).forEach((album) => {
+            if (!album || !album.id) return;
+            $select.append($('<option>', {
+                value: album.id,
+                text: album.name || 'Álbum'
+            }));
+        });
+        if (previous) {
+            $select.val(previous);
+            if ($select.val() !== previous) {
+                $select.val('');
+            }
+        }
+    }
+
+    function setAddToAlbumSelectVisible(visible) {
+        const $wrap = $('#addToAlbumSelectWrap');
+        const $select = $('#addToAlbumSelect');
+        if (visible) {
+            $wrap.removeClass('d-none');
+            $select.prop('disabled', false);
+        } else {
+            $wrap.addClass('d-none');
+            $select.prop('disabled', true);
+        }
+    }
+
+    function syncAddToAlbumBlock() {
+        const url = ($('#audioUrl').val() || '').trim();
+        const hideForPlaylist = Boolean(url) && isPlaylistUrl(url);
+        $('#addToAlbumBlock').toggleClass('d-none', hideForPlaylist);
+    }
+
     async function downloadAudio() {
         const url = $('#audioUrl').val().trim();
         const highQuality = $('#highQuality').is(':checked');
+        const addToAlbum = $('#addToAlbum').is(':checked');
+        const folderId = ($('#addToAlbumSelect').val() || '').trim();
 
         if (!validateYouTubeUrl(url)) {
             showToast('Por favor, insira uma URL válida do YouTube ou Instagram', 'warning');
@@ -675,24 +717,38 @@ $(document).ready(function() {
             return;
         }
 
+        if (addToAlbum && !folderId) {
+            showToast('Selecione um álbum', 'error');
+            return;
+        }
+
         try {
             showLoading('Iniciando download de áudio...');
+
+            const payload = {
+                url: url,
+                high_quality: highQuality
+            };
+            if (addToAlbum && folderId) {
+                payload.folder_id = folderId;
+            }
 
             const response = await $.ajax({
                 url: `${API_BASE_URL}/audio/download`,
                 method: 'POST',
                 headers: getAuthHeaders(),
-                data: JSON.stringify({
-                    url: url,
-                    high_quality: highQuality
-                })
+                data: JSON.stringify(payload)
             });
 
             hideLoading();
 
             if (response.status === 'processando') {
-                showToast('Download de áudio iniciado com sucesso!', 'success');
+                showToast(
+                    addToAlbum ? 'Faixa adicionada ao álbum' : 'Download de áudio iniciado com sucesso!',
+                    'success'
+                );
                 $('#audioUrl').val('');
+                syncAddToAlbumBlock();
 
                 // Add to active downloads
                 addActiveDownload(response.audio_id, 'audio', response.title || 'Áudio');
@@ -746,6 +802,8 @@ $(document).ready(function() {
 
             showToast(`Playlist enfileirada para download (${queued} itens)`, 'success');
             $('#audioUrl').val('');
+            syncAddToAlbumBlock();
+            loadAlbums();
 
             if (folderId && window.confirm('Abrir o álbum na aba Álbuns?')) {
                 openAlbumById(folderId, { autoplay: false });
@@ -1798,6 +1856,7 @@ $(document).ready(function() {
             });
             currentAlbums = response || [];
             applyAlbumSearch($('#searchAlbumsInput').val() || '');
+            populateAddToAlbumSelect();
         } catch (error) {
             console.error('Error loading albums:', error);
             if (error.status === 401) {
@@ -1805,6 +1864,7 @@ $(document).ready(function() {
             } else {
                 currentAlbums = [];
                 applyAlbumSearch($('#searchAlbumsInput').val() || '');
+                populateAddToAlbumSelect();
             }
         }
     }
@@ -3567,6 +3627,19 @@ $(document).ready(function() {
     // Download buttons
     $('#downloadAudioBtn').on('click', downloadAudio);
     $('#downloadVideoBtn').on('click', downloadVideo);
+
+    $('#audioUrl').on('input', syncAddToAlbumBlock);
+    $('#addToAlbum').on('change', function() {
+        const checked = $(this).is(':checked');
+        setAddToAlbumSelectVisible(checked);
+        if (!checked) return;
+        if (!currentAlbums.length) {
+            loadAlbums();
+        } else {
+            populateAddToAlbumSelect();
+        }
+    });
+    syncAddToAlbumBlock();
 
     // Refresh buttons
     $('#refreshAudioBtn').on('click', () => {

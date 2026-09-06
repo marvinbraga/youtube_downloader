@@ -970,6 +970,35 @@ async def check_audio_exists(
         )
 
 
+async def _assign_downloaded_audio_to_album(audio_id: str, folder_id: str) -> None:
+    """Attach a standalone download to an existing album. No album cleanup."""
+    async with get_db_context() as session:
+        folder_repo = FolderRepository(session)
+        folder = await folder_repo.get_by_id(folder_id)
+        if folder is None:
+            raise HTTPException(
+                status_code=404, detail=f"Pasta não encontrada: {folder_id}"
+            )
+        if (folder.kind or "folder") != "album":
+            raise HTTPException(
+                status_code=400,
+                detail=f"A pasta informada não é um álbum: {folder_id}",
+            )
+        audio_repo = AudioRepository(session)
+        existing = await audio_repo.get_by_folder(folder_id)
+        max_track = 0
+        for track in existing:
+            track_number = track.track_number
+            if track_number is not None and track_number > max_track:
+                max_track = track_number
+        await audio_repo.update(
+            audio_id, folder_id=folder_id, track_number=max_track + 1
+        )
+        logger.info(
+            f"Áudio {audio_id} associado ao álbum {folder_id} (faixa {max_track + 1})"
+        )
+
+
 @app.post("/audio/download")
 async def download_audio(
     request: AudioDownloadRequest,
@@ -1001,6 +1030,10 @@ async def download_audio(
                 status_code=500, detail=f"Erro ao registrar áudio: {str(e)}"
             )
 
+        album_folder_id = (request.folder_id or "").strip()
+        if album_folder_id:
+            await _assign_downloaded_audio_to_album(audio_id, album_folder_id)
+
         # Adicionar à fila de downloads
         task_id = await download_queue.add_download(
             audio_id=audio_id,
@@ -1016,6 +1049,8 @@ async def download_audio(
             "task_id": task_id,
             "url": str(request.url),
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception(f"Erro ao iniciar download de áudio: {str(e)}")
         raise HTTPException(

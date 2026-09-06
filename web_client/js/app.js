@@ -732,6 +732,8 @@ $(document).ready(function() {
             // PlaylistDownloadResponse: playlist_title, total_items, queued_items, skipped_items, tasks[]
             const tasks = response.tasks || [];
             const queued = response.queued_items || 0;
+            const folderId = response.folder_id;
+            const polls = [];
 
             tasks.forEach((task) => {
                 // Pular itens já existentes ou sem registro no DB.
@@ -739,15 +741,23 @@ $(document).ready(function() {
                     return;
                 }
                 addActiveDownload(task.item_id, 'audio', task.title || 'Áudio');
-                pollDownloadStatus(task.item_id, 'audio');
+                polls.push(pollDownloadStatus(task.item_id, 'audio'));
             });
 
-            const folderId = response.folder_id;
             showToast(`Playlist enfileirada para download (${queued} itens)`, 'success');
             $('#audioUrl').val('');
 
             if (folderId && window.confirm('Abrir o álbum na aba Álbuns?')) {
                 openAlbumById(folderId, { autoplay: false });
+            }
+
+            if (folderId) {
+                Promise.all(polls)
+                    .then((results) => finishPlaylistCleanup(folderId, results))
+                    .catch((err) => {
+                        console.error('Error waiting playlist downloads:', err);
+                        finishPlaylistCleanup(folderId, []);
+                    });
             }
 
         } catch (error) {
@@ -901,50 +911,118 @@ $(document).ready(function() {
         });
     }
 
+    /** Resolves on ready, error, or poll catch. Single-audio callers need not await. */
     async function pollDownloadStatus(id, type) {
-        if (!authToken) return;
+        if (!authToken) return { status: 'stopped', id };
 
         const endpoint = type === 'video' ?
             `${API_BASE_URL}/video/download-status/${id}` :
             `${API_BASE_URL}/audio/download-status/${id}`;
 
-        try {
-            const response = await $.ajax({
-                url: endpoint,
-                method: 'GET',
-                headers: getAuthHeaders()
-            });
+        while (authToken) {
+            try {
+                const response = await $.ajax({
+                    url: endpoint,
+                    method: 'GET',
+                    headers: getAuthHeaders()
+                });
 
-            const download = activeDownloads.get(id);
-            if (download) {
+                const download = activeDownloads.get(id);
+                if (!download) {
+                    return { status: 'stopped', id };
+                }
+
                 download.progress = response.download_progress || 0;
                 download.status = response.download_status;
                 updateProgressUI();
 
                 if (response.download_status === 'ready') {
                     showToast(`Download concluído: ${download.title}`, 'success');
-                    // Remover imediatamente
                     activeDownloads.delete(id);
                     updateProgressUI();
 
-                    // Reload appropriate list
                     if (type === 'video') loadVideoList();
                     else loadAudioList();
+                    return { status: 'ready', id };
+                }
 
-                } else if (response.download_status === 'error') {
+                if (response.download_status === 'error') {
                     showToast(`Erro no download: ${download.title}`, 'error');
-                    // Remover imediatamente
                     activeDownloads.delete(id);
                     updateProgressUI();
+                    return { status: 'error', id };
+                }
 
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            } catch (error) {
+                console.error('Error polling status:', error);
+                return { status: 'error', id };
+            }
+        }
+
+        return { status: 'stopped', id };
+    }
+
+    async function finishPlaylistCleanup(folderId, stats) {
+        if (!folderId || !authToken) return;
+
+        const maxAttempts = 150;
+        let album = null;
+        let removed = 0;
+
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            try {
+                album = await $.ajax({
+                    url: `${API_BASE_URL}/albums/${folderId}`,
+                    method: 'GET',
+                    headers: getAuthHeaders()
+                });
+                const stillDownloading = (album.tracks || []).some(
+                    t => t && t.download_status === 'downloading'
+                );
+                if (!stillDownloading) break;
+            } catch (err) {
+                console.error('Error fetching album during playlist cleanup:', err);
+                if (err && err.status === 404) break;
+            }
+            if (attempt < maxAttempts - 1) {
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+        }
+
+        const errorTracks = ((album && album.tracks) || []).filter(
+            t => t && t.download_status === 'error' && t.id
+        );
+
+        for (const track of errorTracks) {
+            try {
+                await $.ajax({
+                    url: `${API_BASE_URL}/audio/${track.id}`,
+                    method: 'DELETE',
+                    headers: getAuthHeaders(),
+                    timeout: 30000
+                });
+                removed += 1;
+            } catch (err) {
+                if (err && err.status === 404) {
+                    removed += 1;
                 } else {
-                    // Continue polling
-                    setTimeout(() => pollDownloadStatus(id, type), 2000);
+                    console.error('Error deleting playlist error track:', err);
                 }
             }
+        }
 
-        } catch (error) {
-            console.error('Error polling status:', error);
+        if (currentAlbum && currentAlbum.id === folderId) {
+            await reloadCurrentAlbum();
+        }
+
+        if (removed > 0) {
+            const removal = removed === 1
+                ? '1 faixa indisponível removida'
+                : `${removed} faixas indisponíveis removidas`;
+            showToast(`Download da playlist concluído. ${removal}.`, 'warning');
+        } else {
+            showToast('Download da playlist concluído', 'success');
         }
     }
 
@@ -985,6 +1063,11 @@ $(document).ready(function() {
             deleteFolder(pendingDeleteFolder.id);
             pendingDeleteFolder = null;
             pendingDeleteType = null;
+        } else if (pendingDeleteType === 'album-errors') {
+            const ids = (pendingDeleteItem && pendingDeleteItem.ids) || [];
+            pendingDeleteItem = null;
+            pendingDeleteType = null;
+            deleteAlbumErrorTracks(ids);
         } else if (pendingDeleteItem && pendingDeleteType) {
             if (pendingDeleteType === 'audio') {
                 deleteAudio(pendingDeleteItem.id);
@@ -1033,6 +1116,9 @@ $(document).ready(function() {
 
             // Atualiza a lista e depois fecha o loading
             await loadAudioList();
+            if (currentAlbum && currentAlbum.id) {
+                await reloadCurrentAlbum();
+            }
             hideLoading();
             showToast('Áudio excluído com sucesso!', 'success');
 
@@ -1997,8 +2083,101 @@ $(document).ready(function() {
 
         const canPlay = tracks.some(t => t.download_status === 'ready');
         $('#albumPlayAllBtn').prop('disabled', !canPlay);
+        const errorCount = tracks.filter(t => t && t.download_status === 'error').length;
+        $('#albumRemoveErrorsBtn').toggleClass('d-none', errorCount === 0);
 
         applyAlbumTrackSearch($('#searchAlbumTracksInput').val() || '');
+    }
+
+    function getAlbumErrorTracks() {
+        const tracks = (currentAlbum && currentAlbum.tracks) || [];
+        return tracks.filter(t => t && t.download_status === 'error' && t.id);
+    }
+
+    /** Re-fetch the open album without switching tabs or resetting search. */
+    async function reloadCurrentAlbum() {
+        if (!currentAlbum || !currentAlbum.id || !authToken) return;
+        try {
+            const album = await $.ajax({
+                url: `${API_BASE_URL}/albums/${currentAlbum.id}`,
+                method: 'GET',
+                headers: getAuthHeaders()
+            });
+            currentAlbum = album;
+            renderAlbumDetail(album);
+        } catch (e) {
+            console.error('reload album:', e);
+        }
+    }
+
+    function confirmRemoveAlbumErrors() {
+        const errors = getAlbumErrorTracks();
+        if (!errors.length) return;
+        pendingDeleteTranscriptionId = null;
+        pendingDeleteTranscriptionTitle = null;
+        pendingDeleteFolder = null;
+        pendingDeleteItem = { ids: errors.map(t => t.id) };
+        pendingDeleteType = 'album-errors';
+        const n = errors.length;
+        $('#deleteItemTitle').text(
+            n === 1 ? '1 faixa com erro neste álbum' : `${n} faixas com erro neste álbum`
+        );
+        $('#deleteModalLabel').html('<i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>Remover erros');
+        deleteModal.show();
+    }
+
+    async function deleteAlbumErrorTracks(ids) {
+        if (!authToken) {
+            showToast('Não autenticado', 'error');
+            return;
+        }
+        const allowed = new Set(getAlbumErrorTracks().map(t => t.id));
+        const toDelete = (ids || []).filter(id => allowed.has(id));
+        if (!toDelete.length) {
+            showToast('Nenhuma faixa com erro', 'info');
+            return;
+        }
+
+        showLoading(
+            toDelete.length === 1
+                ? 'Removendo faixa com erro...'
+                : `Removendo ${toDelete.length} faixas com erro...`
+        );
+        let removed = 0;
+        let failed = 0;
+        try {
+            for (const audioId of toDelete) {
+                try {
+                    await $.ajax({
+                        url: `${API_BASE_URL}/audio/${audioId}`,
+                        method: 'DELETE',
+                        headers: getAuthHeaders(),
+                        timeout: 30000
+                    });
+                    removed += 1;
+                } catch (err) {
+                    failed += 1;
+                    console.error('Error deleting album error track:', err);
+                }
+            }
+            await loadAudioList();
+            await reloadCurrentAlbum();
+            hideLoading();
+            if (removed && !failed) {
+                showToast(
+                    removed === 1 ? '1 faixa com erro removida' : `${removed} faixas com erro removidas`,
+                    'success'
+                );
+            } else if (removed && failed) {
+                showToast(`${removed} removida(s), ${failed} falhou(ram)`, 'warning');
+            } else {
+                showToast('Não foi possível remover as faixas com erro', 'error');
+            }
+        } catch (error) {
+            hideLoading();
+            console.error('Error deleting album error tracks:', error);
+            showToast(formatDeleteError(error, 'faixas com erro'), 'error');
+        }
     }
 
     function applyAlbumTrackSearch(searchTerm) {
@@ -2079,6 +2258,7 @@ $(document).ready(function() {
                 ? track.track_number
                 : (originalIdx >= 0 ? originalIdx + 1 : 1);
             const readyTrack = track.download_status === 'ready';
+            const errorTrack = track.download_status === 'error';
             const statusLabel = readyTrack
                 ? ''
                 : `<span class="badge bg-secondary">${escapeHtml(track.download_status || 'pendente')}</span>`;
@@ -2091,6 +2271,11 @@ $(document).ready(function() {
             const artistHtml = artistName
                 ? (searchTerm ? highlightText(artistName, searchTerm) : escapeHtml(artistName))
                 : '<span class="text-secondary">Artista desconhecido</span>';
+            const deleteBtnHtml = errorTrack
+                ? `<button type="button" class="btn btn-sm btn-outline-danger yd-action-btn album-track-delete" aria-label="Excluir faixa com erro" title="Excluir faixa com erro">
+                        <i class="bi bi-trash"></i>
+                    </button>`
+                : '';
             const row = $(`
                 <div class="yd-album-track ${readyTrack ? 'is-ready' : ''} ${playing ? 'is-playing' : ''}" data-id="${escapeHtml(track.id)}">
                     <span class="yd-album-track__num">${num}</span>
@@ -2099,19 +2284,29 @@ $(document).ready(function() {
                         <span class="yd-album-track__artist" title="${escapeHtml(artistName || 'Artista desconhecido')}">${artistHtml}</span>
                     </div>
                     ${statusLabel}
-                    <button type="button" class="btn btn-sm btn-outline-danger yd-action-btn album-track-play" ${readyTrack ? '' : 'disabled'} title="Tocar">
-                        <i class="bi bi-play-fill"></i>
-                    </button>
+                    <div class="yd-action-group">
+                        <button type="button" class="btn btn-sm btn-outline-danger yd-action-btn album-track-play" ${readyTrack ? '' : 'disabled'} title="Tocar">
+                            <i class="bi bi-play-fill"></i>
+                        </button>
+                        ${deleteBtnHtml}
+                    </div>
                 </div>
             `);
             if (readyTrack) {
                 row.on('click', (e) => {
-                    if ($(e.target).closest('.album-track-play').length) return;
+                    if ($(e.target).closest('.album-track-play, .album-track-delete').length) return;
                     playAlbumFromTrack(track.id);
                 });
                 row.find('.album-track-play').on('click', (e) => {
                     e.stopPropagation();
                     playAlbumFromTrack(track.id);
+                });
+            }
+            if (errorTrack) {
+                row.find('.album-track-delete').on('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    confirmDeleteAudio(track);
                 });
             }
             list.append(row);
@@ -3627,6 +3822,7 @@ $(document).ready(function() {
     });
     $('#albumBackBtn').on('click', showAlbumsLibrary);
     $('#albumPlayAllBtn').on('click', () => playAlbumAll());
+    $('#albumRemoveErrorsBtn').on('click', () => confirmRemoveAlbumErrors());
     $('#albumRefreshArtistsBtn').on('click', async () => {
         if (!currentAlbum || !currentAlbum.id) return;
         const result = await refreshAlbumArtists(currentAlbum.id);

@@ -21,6 +21,8 @@ services:
       # (status "queued"). Serial processing keeps the in-memory audio-decode
       # peak bounded. Raise only after measuring per-job peak vs the memory cap.
       TRANSCRIPTION_CONCURRENCY: "1"
+      # Caps playlist size per request (default 500).
+      MAX_PLAYLIST_ENTRIES: "500"
     volumes:
       # Persist the SQLite DB outside the container.
       - ./data:/app/data

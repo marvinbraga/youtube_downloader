@@ -3,6 +3,8 @@
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from app.services.configs import MAX_PLAYLIST_ENTRIES
+
 
 SAMPLE_PLAYLIST_INFO = {
     "title": "Test Playlist",
@@ -22,6 +24,17 @@ SAMPLE_PLAYLIST_INFO = {
 }
 
 PLAYLIST_URL = "https://www.youtube.com/playlist?list=PLtest123"
+
+
+def _entries(n: int):
+    return [
+        {
+            "id": f"vid{i:011d}",
+            "title": f"Video {i}",
+            "url": f"https://www.youtube.com/watch?v=vid{i:011d}",
+        }
+        for i in range(n)
+    ]
 
 
 def _make_db_mock(folder_id="folder-uuid-123"):
@@ -473,14 +486,6 @@ def test_video_playlist_non_playlist_url_raises_400(client):
 
 
 def test_audio_playlist_max_entries_limit_returns_400(client):
-    many_entries = [
-        {
-            "id": f"vid{i:011d}",
-            "title": f"Video {i}",
-            "url": f"https://www.youtube.com/watch?v=vid{i:011d}",
-        }
-        for i in range(201)
-    ]
     mock_db, folder_repo, audio_repo, _ = _make_db_mock()
     with (
         patch(
@@ -489,7 +494,7 @@ def test_audio_playlist_max_entries_limit_returns_400(client):
                 return_value={
                     "title": "Huge Playlist",
                     "webpage_url": PLAYLIST_URL,
-                    "entries": many_entries,
+                    "entries": _entries(MAX_PLAYLIST_ENTRIES + 1),
                 }
             ),
         ),
@@ -500,18 +505,12 @@ def test_audio_playlist_max_entries_limit_returns_400(client):
         resp = client.post("/audio/playlist", json={"url": PLAYLIST_URL})
 
     assert resp.status_code == 400
-    assert "máximo" in resp.json()["detail"]
+    detail = resp.json()["detail"]
+    assert "máximo" in detail
+    assert str(MAX_PLAYLIST_ENTRIES) in detail
 
 
 def test_video_playlist_max_entries_limit_returns_400(client):
-    many_entries = [
-        {
-            "id": f"vid{i:011d}",
-            "title": f"Video {i}",
-            "url": f"https://www.youtube.com/watch?v=vid{i:011d}",
-        }
-        for i in range(201)
-    ]
     mock_db, folder_repo, _, video_repo = _make_db_mock()
     with (
         patch(
@@ -520,7 +519,7 @@ def test_video_playlist_max_entries_limit_returns_400(client):
                 return_value={
                     "title": "Huge Playlist",
                     "webpage_url": PLAYLIST_URL,
-                    "entries": many_entries,
+                    "entries": _entries(MAX_PLAYLIST_ENTRIES + 1),
                 }
             ),
         ),
@@ -531,4 +530,201 @@ def test_video_playlist_max_entries_limit_returns_400(client):
         resp = client.post("/video/playlist", json={"url": PLAYLIST_URL})
 
     assert resp.status_code == 400
-    assert "máximo" in resp.json()["detail"]
+    detail = resp.json()["detail"]
+    assert "máximo" in detail
+    assert str(MAX_PLAYLIST_ENTRIES) in detail
+
+
+def test_audio_playlist_schedules_waiter_after_enqueue(client):
+    mock_db, folder_repo, audio_repo, _ = _make_db_mock()
+    with (
+        patch(
+            "app.uwtv.main.audio_manager.extract_playlist_info",
+            new=AsyncMock(return_value=SAMPLE_PLAYLIST_INFO),
+        ),
+        patch(
+            "app.uwtv.main.audio_manager.get_audio_by_youtube_id",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "app.uwtv.main.audio_manager.register_audio_for_download",
+            new=AsyncMock(side_effect=["audio-id-1", "audio-id-2"]),
+        ),
+        patch(
+            "app.uwtv.main.download_queue.add_download",
+            new=AsyncMock(side_effect=["task-id-1", "task-id-2"]),
+        ),
+        patch("app.uwtv.main.get_db_context", mock_db),
+        patch("app.uwtv.main.FolderRepository", return_value=folder_repo),
+        patch("app.uwtv.main.AudioRepository", return_value=audio_repo),
+        patch(
+            "app.uwtv.main.wait_and_cleanup_album_errors", new_callable=AsyncMock
+        ) as waiter,
+    ):
+        resp = client.post("/audio/playlist", json={"url": PLAYLIST_URL})
+
+    assert resp.status_code == 200
+    waiter.assert_called_once_with("folder-uuid-123")
+
+
+def test_audio_playlist_schedules_waiter_when_queued_items_zero(client):
+    existing_audio = {"id": "existing-db-id", "download_status": "ready"}
+    mock_db, folder_repo, audio_repo, _ = _make_db_mock()
+    with (
+        patch(
+            "app.uwtv.main.audio_manager.extract_playlist_info",
+            new=AsyncMock(
+                return_value={
+                    "title": "Test Playlist",
+                    "webpage_url": PLAYLIST_URL,
+                    "entries": [SAMPLE_PLAYLIST_INFO["entries"][0]],
+                }
+            ),
+        ),
+        patch(
+            "app.uwtv.main.audio_manager.get_audio_by_youtube_id",
+            new=AsyncMock(return_value=existing_audio),
+        ),
+        patch("app.uwtv.main.get_db_context", mock_db),
+        patch("app.uwtv.main.FolderRepository", return_value=folder_repo),
+        patch("app.uwtv.main.AudioRepository", return_value=audio_repo),
+        patch(
+            "app.uwtv.main.wait_and_cleanup_album_errors", new_callable=AsyncMock
+        ) as waiter,
+    ):
+        resp = client.post(
+            "/audio/playlist", json={"url": PLAYLIST_URL, "skip_existing": True}
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["queued_items"] == 0
+    waiter.assert_called_once_with("folder-uuid-123")
+
+
+def test_audio_playlist_does_not_schedule_waiter_when_over_max(client):
+    mock_db, folder_repo, audio_repo, _ = _make_db_mock()
+    with (
+        patch(
+            "app.uwtv.main.audio_manager.extract_playlist_info",
+            new=AsyncMock(
+                return_value={
+                    "title": "Huge Playlist",
+                    "webpage_url": PLAYLIST_URL,
+                    "entries": _entries(MAX_PLAYLIST_ENTRIES + 1),
+                }
+            ),
+        ),
+        patch("app.uwtv.main.get_db_context", mock_db),
+        patch("app.uwtv.main.FolderRepository", return_value=folder_repo),
+        patch("app.uwtv.main.AudioRepository", return_value=audio_repo),
+        patch(
+            "app.uwtv.main.wait_and_cleanup_album_errors", new_callable=AsyncMock
+        ) as waiter,
+    ):
+        resp = client.post("/audio/playlist", json={"url": PLAYLIST_URL})
+
+    assert resp.status_code == 400
+    waiter.assert_not_called()
+    folder_repo.create.assert_not_called()
+
+
+def test_video_playlist_does_not_schedule_album_waiter(client):
+    mock_db, folder_repo, _, video_repo = _make_db_mock()
+    with (
+        patch(
+            "app.uwtv.main.video_manager.extract_playlist_info",
+            new=AsyncMock(return_value=SAMPLE_PLAYLIST_INFO),
+        ),
+        patch(
+            "app.uwtv.main.video_manager.get_video_by_youtube_id",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "app.uwtv.main.video_manager.register_video_for_download",
+            new=AsyncMock(side_effect=["vid-id-1", "vid-id-2"]),
+        ),
+        patch("app.uwtv.main.get_db_context", mock_db),
+        patch("app.uwtv.main.FolderRepository", return_value=folder_repo),
+        patch("app.uwtv.main.VideoRepository", return_value=video_repo),
+        patch(
+            "app.uwtv.main.wait_and_cleanup_album_errors", new_callable=AsyncMock
+        ) as waiter,
+    ):
+        resp = client.post("/video/playlist", json={"url": PLAYLIST_URL})
+
+    assert resp.status_code == 200
+    waiter.assert_not_called()
+
+
+def test_audio_playlist_at_max_entries_is_accepted(client):
+    mock_db, folder_repo, audio_repo, _ = _make_db_mock()
+    with (
+        patch(
+            "app.uwtv.main.audio_manager.extract_playlist_info",
+            new=AsyncMock(
+                return_value={
+                    "title": "Full Playlist",
+                    "webpage_url": PLAYLIST_URL,
+                    "entries": _entries(MAX_PLAYLIST_ENTRIES),
+                }
+            ),
+        ),
+        patch(
+            "app.uwtv.main.audio_manager.get_audio_by_youtube_id",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "app.uwtv.main.audio_manager.register_audio_for_download",
+            new=AsyncMock(return_value="audio-id"),
+        ),
+        patch(
+            "app.uwtv.main.download_queue.add_download",
+            new=AsyncMock(return_value="task-id"),
+        ),
+        patch("app.uwtv.main.get_db_context", mock_db),
+        patch("app.uwtv.main.FolderRepository", return_value=folder_repo),
+        patch("app.uwtv.main.AudioRepository", return_value=audio_repo),
+    ):
+        resp = client.post("/audio/playlist", json={"url": PLAYLIST_URL})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["queued_items"] == MAX_PLAYLIST_ENTRIES
+    assert body["failed_items"] == 0
+
+
+def test_video_playlist_at_max_entries_is_accepted(client):
+    mock_db, folder_repo, _, video_repo = _make_db_mock()
+    with (
+        patch(
+            "app.uwtv.main.video_manager.extract_playlist_info",
+            new=AsyncMock(
+                return_value={
+                    "title": "Full Playlist",
+                    "webpage_url": PLAYLIST_URL,
+                    "entries": _entries(MAX_PLAYLIST_ENTRIES),
+                }
+            ),
+        ),
+        patch(
+            "app.uwtv.main.video_manager.get_video_by_youtube_id",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "app.uwtv.main.video_manager.register_video_for_download",
+            new=AsyncMock(return_value="vid-id"),
+        ),
+        patch(
+            "app.uwtv.main.video_manager.download_video_with_status_async",
+            new=AsyncMock(),
+        ),
+        patch("app.uwtv.main.get_db_context", mock_db),
+        patch("app.uwtv.main.FolderRepository", return_value=folder_repo),
+        patch("app.uwtv.main.VideoRepository", return_value=video_repo),
+    ):
+        resp = client.post("/video/playlist", json={"url": PLAYLIST_URL})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["queued_items"] == MAX_PLAYLIST_ENTRIES
+    assert body["failed_items"] == 0

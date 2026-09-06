@@ -128,6 +128,11 @@ def get_yt_dlp_cookies_opts(source: str = "youtube") -> Dict[str, Any]:
 # executor's internal queue (status "queued") instead of grabbing extra threads.
 TRANSCRIPTION_CONCURRENCY = int(os.getenv("TRANSCRIPTION_CONCURRENCY", "2"))
 
+# Cap on playlist entries per request. Oversized playlists are rejected with
+# HTTP 400 (not truncated). Default 500 covers typical music playlists; YouTube
+# allows up to 5000.
+MAX_PLAYLIST_ENTRIES = int(os.getenv("MAX_PLAYLIST_ENTRIES", "500"))
+
 # Provider/idioma usados quando a transcrição é (re)enfileirada sem um pedido
 # HTTP explícito — notadamente a RECUPERAÇÃO DE FILA NO STARTUP. O provider e o
 # idioma NÃO são persistidos no banco junto do item, então itens recuperados

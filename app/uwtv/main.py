@@ -52,6 +52,7 @@ from app.services.configs import (
     TRANSCRIPTION_CONCURRENCY,
     DEFAULT_TRANSCRIPTION_PROVIDER,
     DEFAULT_TRANSCRIPTION_LANGUAGE,
+    MAX_PLAYLIST_ENTRIES,
 )
 from app.services.storage import (
     get_storage,
@@ -75,7 +76,10 @@ from app.services.securities import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
 )
 from app.services.transcription.service import TranscriptionService
+from app.services.album_cleanup import wait_and_cleanup_album_errors
 from app.services.downloaders import is_playlist_url
+
+_album_cleanup_tasks: set[asyncio.Task] = set()
 from app.services.sse_manager import sse_manager
 from app.services.download_queue import download_queue, DownloadTask
 from app.db.database import (
@@ -179,8 +183,6 @@ _transcription_executor = ThreadPoolExecutor(
     max_workers=TRANSCRIPTION_CONCURRENCY,
     thread_name_prefix="transcribe",
 )
-
-MAX_PLAYLIST_ENTRIES = 200
 
 
 # ---------------------------------------------------------------------------
@@ -1196,6 +1198,12 @@ async def download_audio_playlist(
             f"Playlist '{playlist_title}': {queued_count} queued, "
             f"{skipped_count} skipped, folder={folder_id}"
         )
+
+        # Idle-folder cleanup is async; do not block the playlist HTTP response.
+        # Keep a strong reference so Python 3.12 does not GC the long-running task.
+        cleanup_task = asyncio.create_task(wait_and_cleanup_album_errors(folder_id))
+        _album_cleanup_tasks.add(cleanup_task)
+        cleanup_task.add_done_callback(_album_cleanup_tasks.discard)
 
         return PlaylistDownloadResponse(
             playlist_title=playlist_title,

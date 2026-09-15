@@ -2051,3 +2051,198 @@ audio::-webkit-media-controls-panel {
         gap: 0.75rem;
     }
 }
+
+/* ------------------------------------------------------------------
+   Video collections (kind=playlist). Do not reuse yd-album-* here.
+   Metrics match Álbuns (radius, hover lift, backdrop blur) with 16:9 covers.
+   ------------------------------------------------------------------ */
+
+.yd-collection-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 1rem;
+}
+
+.yd-collection-card {
+    background: var(--yd-bg-surface);
+    border: 1px solid var(--yd-border);
+    border-radius: 0.75rem;
+    padding: 0.85rem;
+    cursor: pointer;
+    transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    text-align: left;
+    color: inherit;
+    width: 100%;
+    min-height: 44px;
+}
+
+.yd-collection-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--yd-border-strong);
+    box-shadow: var(--yd-shadow-md);
+}
+
+.yd-collection-card:focus-visible {
+    outline: 2px solid var(--yd-accent-primary);
+    outline-offset: 2px;
+}
+
+.yd-collection-cover {
+    background: var(--yd-bg-overlay);
+    border-radius: 0.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    color: var(--yd-text-tertiary);
+    background-size: cover;
+    background-position: center;
+    flex-shrink: 0;
+}
+
+.yd-collection-cover--card {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    margin-bottom: 0.75rem;
+    font-size: 2rem;
+}
+
+.yd-collection-cover--lg {
+    width: 280px;
+    max-width: 100%;
+    aspect-ratio: 16 / 9;
+    height: auto;
+    font-size: 3rem;
+    box-shadow: var(--yd-shadow-lg);
+}
+
+.yd-collection-card__eyebrow {
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--yd-text-secondary);
+    margin: 0 0 0.15rem;
+}
+
+.yd-collection-card__title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--yd-text-primary);
+    margin-bottom: 0.15rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.yd-collection-card__meta {
+    font-size: 0.8rem;
+    color: var(--yd-text-secondary);
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.yd-collection-hero {
+    position: relative;
+    border: 1px solid var(--yd-border);
+    background: var(--yd-bg-surface);
+}
+
+.yd-collection-hero__backdrop {
+    position: absolute;
+    inset: 0;
+    background-size: cover;
+    background-position: center;
+    filter: blur(28px) saturate(1.2);
+    opacity: 0.28;
+    transform: scale(1.1);
+    pointer-events: none;
+}
+
+.yd-collection-hero__body {
+    position: relative;
+    z-index: 1;
+}
+
+.yd-collection-title {
+    color: var(--yd-text-primary);
+    font-weight: 700;
+}
+
+.yd-collection-hero .btn-danger {
+    min-height: 44px;
+    min-width: 44px;
+}
+
+.yd-collection-episode {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.7rem 1rem;
+    border-bottom: 1px solid var(--yd-divider);
+    cursor: default;
+}
+
+.yd-collection-episode:last-child {
+    border-bottom: none;
+}
+
+.yd-collection-episode.is-playing {
+    background: var(--yd-accent-primary-muted);
+}
+
+.yd-collection-episode.is-ready {
+    cursor: pointer;
+}
+
+.yd-collection-episode.is-ready:hover {
+    background: var(--yd-bg-hover);
+}
+
+.yd-collection-episode__num {
+    width: 2rem;
+    text-align: center;
+    color: var(--yd-text-tertiary);
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+}
+
+.yd-collection-episode__meta {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.yd-collection-episode__title {
+    color: var(--yd-text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.3;
+}
+
+.yd-collection-episode__duration {
+    color: var(--yd-text-tertiary);
+    font-size: 0.82rem;
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+}
+
+.yd-collection-episode.is-playing .yd-collection-episode__title {
+    color: var(--yd-accent-primary);
+    font-weight: 600;
+}
+
+@media (max-width: 575.98px) {
+    .yd-collection-grid {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 0.75rem;
+    }
+
+    .yd-collection-cover--lg {
+        width: 100%;
+    }
+}

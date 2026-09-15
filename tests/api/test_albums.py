@@ -104,6 +104,7 @@ def test_video_playlist_creates_folder_as_playlist_not_album(client):
     mock_db, folder_repo, _ = _make_db_mock(folder_id="video-pl-1")
     video_repo = MagicMock()
     video_repo.update_folder = AsyncMock()
+    video_repo.update = AsyncMock()
     with (
         patch(
             "app.uwtv.main.video_manager.extract_playlist_info",

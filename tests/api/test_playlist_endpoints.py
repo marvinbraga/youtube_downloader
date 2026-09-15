@@ -3,6 +3,8 @@
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from app.services.configs import MAX_PLAYLIST_ENTRIES
 
 
@@ -52,6 +54,7 @@ def _make_db_mock(folder_id="folder-uuid-123"):
     audio_repo.update = AsyncMock()
     video_repo = MagicMock()
     video_repo.update_folder = AsyncMock()
+    video_repo.update = AsyncMock()
 
     return mock_db, folder_repo, audio_repo, video_repo
 
@@ -923,3 +926,93 @@ def test_video_playlist_at_max_entries_is_accepted(client):
     body = resp.json()
     assert body["queued_items"] == MAX_PLAYLIST_ENTRIES
     assert body["failed_items"] == 0
+
+
+# ---------------------------------------------------------------------------
+# POST /video/download — playlist guard
+# ---------------------------------------------------------------------------
+
+# Mirrors the audio single-download guard in download_audio (~main.py:1011):
+# "URL de playlist detectada. Use o endpoint POST /audio/playlist para baixar playlists."
+VIDEO_DOWNLOAD_PLAYLIST_DETAIL = (
+    "URL de playlist detectada. Use o endpoint POST /video/playlist "
+    "para baixar playlists."
+)
+
+# Confirmed production bug: playlist-only URL accepted by POST /video/download.
+PRODUCTION_VIDEO_PLAYLIST_URL = (
+    "https://www.youtube.com/playlist?list=PLae_TRAJztAYURYktDd-O03VaSqQd6xr8"
+)
+
+
+@pytest.mark.parametrize(
+    "playlist_url",
+    [
+        PLAYLIST_URL,
+        PRODUCTION_VIDEO_PLAYLIST_URL,
+        "https://youtube.com/playlist?list=PL123",
+    ],
+)
+def test_video_download_playlist_url_returns_400(client, playlist_url):
+    """A playlist URL sent to /video/download is rejected with 400, not registered.
+
+    The guard must run before the handler's broad ``except Exception`` block, so
+    HTTPException(400) survives and is not re-wrapped as a 500. yt-dlp must not
+    start (register + background download stay uncalled).
+    """
+    with (
+        patch(
+            "app.uwtv.main.video_manager.register_video_for_download",
+            new=AsyncMock(return_value="should-not-register"),
+        ) as register_mock,
+        patch(
+            "app.uwtv.main.video_manager.download_video_with_status_async",
+            new=AsyncMock(),
+        ) as download_mock,
+    ):
+        resp = client.post("/video/download", json={"url": playlist_url})
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == VIDEO_DOWNLOAD_PLAYLIST_DETAIL
+    register_mock.assert_not_called()
+    download_mock.assert_not_called()
+
+
+def test_video_download_single_video_with_list_param_is_allowed(client):
+    """watch?v=X&list=Y is a single video and must NOT be blocked by the guard."""
+    single_with_list = "https://www.youtube.com/watch?v=abc1234567a&list=PL123"
+    with (
+        patch(
+            "app.uwtv.main.video_manager.register_video_for_download",
+            new=AsyncMock(return_value="vid-id-1"),
+        ) as register_mock,
+        patch(
+            "app.uwtv.main.video_manager.download_video_with_status_async",
+            new=AsyncMock(),
+        ),
+    ):
+        resp = client.post("/video/download", json={"url": single_with_list})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["video_id"] == "vid-id-1"
+    register_mock.assert_awaited()
+
+
+def test_video_download_plain_single_video_is_allowed(client):
+    """A watch URL without list= is a single video and must still be accepted."""
+    single_url = "https://www.youtube.com/watch?v=abc1234567a"
+    with (
+        patch(
+            "app.uwtv.main.video_manager.register_video_for_download",
+            new=AsyncMock(return_value="vid-id-1"),
+        ),
+        patch(
+            "app.uwtv.main.video_manager.download_video_with_status_async",
+            new=AsyncMock(),
+        ),
+    ):
+        resp = client.post("/video/download", json={"url": single_url})
+
+    assert resp.status_code == 200
+    assert resp.json()["video_id"] == "vid-id-1"

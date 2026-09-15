@@ -4,6 +4,7 @@ from typing import Optional, List
 
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from app.db.models import Audio, Video, Folder
 
@@ -186,11 +187,11 @@ class VideoRepository:
 
     async def get_all(self, order_by_date: bool = True) -> List[Video]:
         """Lista todos os vídeos"""
-        query = select(Video)
+        query = select(Video).options(joinedload(Video.folder))
         if order_by_date:
             query = query.order_by(Video.modified_date.desc())
         result = await self.session.execute(query)
-        return list(result.scalars().all())
+        return list(result.unique().scalars().all())
 
     async def get_by_status(self, status: str) -> List[Video]:
         """Lista vídeos por status de download"""
@@ -288,16 +289,18 @@ class VideoRepository:
         return await self.update(video_id, folder_id=folder_id)
 
     async def get_by_folder(self, folder_id: Optional[str]) -> List[Video]:
-        """Lista vídeos por pasta"""
+        """Lista vídeos por pasta (track_number ASC nulls last, then created_date)."""
+        order = (
+            Video.track_number.asc().nulls_last(),
+            Video.created_date.asc(),
+        )
+        query = select(Video).options(joinedload(Video.folder)).order_by(*order)
         if folder_id is None:
-            result = await self.session.execute(
-                select(Video).where(Video.folder_id.is_(None))
-            )
+            query = query.where(Video.folder_id.is_(None))
         else:
-            result = await self.session.execute(
-                select(Video).where(Video.folder_id == folder_id)
-            )
-        return list(result.scalars().all())
+            query = query.where(Video.folder_id == folder_id)
+        result = await self.session.execute(query)
+        return list(result.unique().scalars().all())
 
 
 class FolderRepository:

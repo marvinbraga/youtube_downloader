@@ -46,6 +46,11 @@ $(document).ready(function() {
     let albumVolume = 1;
     let albumVolumeBeforeMute = 1;
 
+    // Video collection (kind=playlist) state — not Álbuns
+    let currentCollection = null;
+    let collectionOpenOnVideos = false;
+    let pendingCollectionPlay = null;
+
     // ========================================
     // Theme Toggle
     // ========================================
@@ -477,7 +482,11 @@ $(document).ready(function() {
             });
 
             currentVideos = response.videos || [];
-            renderVideoList(currentVideos);
+            const searchTerm = $('#searchVideoInput').val() || '';
+            renderVideoList(currentVideos, searchTerm);
+            if (collectionOpenOnVideos && currentCollection && currentCollection.folder) {
+                refreshOpenCollectionEpisodes();
+            }
 
         } catch (error) {
             console.error('Error loading videos:', error);
@@ -489,16 +498,106 @@ $(document).ready(function() {
         }
     }
 
+    function videoMatchesSearch(video, term) {
+        if (!term) return true;
+        const needle = term.toLowerCase();
+        for (const field of SEARCH_FIELDS) {
+            const value = video[field];
+            if (typeof value === 'string' && value.toLowerCase().includes(needle)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function partitionVideos(videos) {
+        const collections = new Map();
+        const avulsos = [];
+        (videos || []).forEach((video) => {
+            if (video.folder_kind === 'playlist' && video.folder_id) {
+                if (!collections.has(video.folder_id)) {
+                    collections.set(video.folder_id, {
+                        id: video.folder_id,
+                        name: video.folder_name || 'Coleção',
+                        cover_url: video.folder_cover_url || null,
+                        videos: [],
+                    });
+                }
+                const group = collections.get(video.folder_id);
+                if (!group.cover_url && video.folder_cover_url) {
+                    group.cover_url = video.folder_cover_url;
+                }
+                group.videos.push(video);
+            } else {
+                avulsos.push(video);
+            }
+        });
+        return { collections: Array.from(collections.values()), avulsos };
+    }
+
+    function collectionCoverUrl(folder, videos) {
+        if (folder && folder.cover_url) return folder.cover_url;
+        const list = videos || [];
+        const first = list.find((v) => v.youtube_id) || list[0];
+        if (first && first.youtube_id) {
+            return `https://i.ytimg.com/vi/${first.youtube_id}/hqdefault.jpg`;
+        }
+        return null;
+    }
+
+    function setCollectionCover($el, url, title) {
+        const label = `Capa da coleção ${title || ''}`.trim();
+        if (url) {
+            $el.css('background-image', `url("${url}")`)
+                .empty()
+                .attr({ role: 'img', 'aria-label': label });
+        } else {
+            $el.css('background-image', 'none')
+                .html('<i class="bi bi-collection-play" aria-hidden="true"></i>')
+                .removeAttr('role')
+                .attr('aria-label', label);
+        }
+    }
+
+    function videoCountLabel(n) {
+        return n === 1 ? '1 vídeo' : `${n} vídeos`;
+    }
+
     function renderVideoList(videos, searchTerm = '') {
+        const term = (searchTerm || '').trim();
+        const { collections, avulsos } = partitionVideos(videos);
+        let shownCollections = collections;
+        let shownAvulsos = avulsos;
+
+        if (term) {
+            const needle = term.toLowerCase();
+            shownCollections = collections.filter((c) =>
+                (c.name || '').toLowerCase().includes(needle) ||
+                c.videos.some((v) => videoMatchesSearch(v, term))
+            );
+            shownAvulsos = avulsos.filter((v) => videoMatchesSearch(v, term));
+        }
+
+        const $collectionsSection = $('#videoCollectionsSection');
+        const $grid = $('#videoCollectionGrid');
+        const $avulsosSection = $('#videoAvulsosSection');
+        const $avulsosHeading = $('#videoAvulsosHeading');
         const container = $('#videoList');
+        $grid.empty();
         container.empty();
 
-        if (videos.length === 0) {
-            if (searchTerm) {
+        const hasCollections = shownCollections.length > 0;
+        const hasAvulsos = shownAvulsos.length > 0;
+
+        if (!hasCollections && !hasAvulsos) {
+            $collectionsSection.addClass('d-none');
+            $avulsosHeading.addClass('d-none');
+            $avulsosSection.removeClass('d-none');
+            if (term) {
                 container.html(`
                     <div class="yd-empty-state">
                         <i class="bi bi-search yd-empty-state__icon"></i>
-                        <p class="yd-empty-state__title">Nenhum resultado para "${escapeHtml(searchTerm)}"</p>
+                        <p class="yd-empty-state__title">Nenhum resultado para "${escapeHtml(term)}"</p>
                         <p class="yd-empty-state__desc">Tente outra palavra ou limpe a busca.</p>
                         <button type="button" class="btn btn-sm btn-outline-secondary mt-2" data-clear-target="#searchVideoInput">
                             <i class="bi bi-x-lg me-1"></i>Limpar busca
@@ -508,86 +607,124 @@ $(document).ready(function() {
                 container.find('[data-clear-target]').on('click', () => {
                     $('#searchVideoInput').val('').trigger('input');
                 });
-                return;
+            } else {
+                container.html(`
+                    <div class="yd-empty-state">
+                        <i class="bi bi-camera-video yd-empty-state__icon"></i>
+                        <p class="yd-empty-state__title">Nenhum vídeo encontrado</p>
+                        <p class="yd-empty-state__desc">Faça o download de um vídeo na aba Download</p>
+                    </div>
+                `);
             }
-            container.html(`
-                <div class="yd-empty-state">
-                    <i class="bi bi-camera-video yd-empty-state__icon"></i>
-                    <p class="yd-empty-state__title">Nenhum vídeo encontrado</p>
-                    <p class="yd-empty-state__desc">Faça o download de um vídeo na aba Download</p>
-                </div>
-            `);
             return;
         }
 
-        videos.forEach(video => {
-            const isActive = video.id === currentVideoId;
-            const statusBadge = getStatusBadge(video.download_status, video.id);
+        if (hasCollections) {
+            $collectionsSection.removeClass('d-none');
+            shownCollections.forEach((col) => {
+                const n = col.videos.length;
+                const titleHtml = term
+                    ? highlightText(col.name || '', term)
+                    : escapeHtml(col.name || '');
+                const cover = collectionCoverUrl(
+                    { cover_url: col.cover_url },
+                    col.videos
+                );
+                const card = $(`
+                    <button type="button" class="yd-collection-card"
+                            data-id="${escapeHtml(col.id)}"
+                            aria-label="Coleção ${escapeHtml(col.name || '')}, ${videoCountLabel(n)}">
+                        <div class="yd-collection-cover yd-collection-cover--card"></div>
+                        <p class="yd-collection-card__eyebrow">Coleção</p>
+                        <div class="yd-collection-card__title" title="${escapeHtml(col.name || '')}">${titleHtml}</div>
+                        <p class="yd-collection-card__meta">${videoCountLabel(n)}</p>
+                    </button>
+                `);
+                setCollectionCover(card.find('.yd-collection-cover'), cover, col.name);
+                card.on('click', () => openCollectionById(col.id, { mount: 'videos' }));
+                $grid.append(card);
+            });
+        } else {
+            $collectionsSection.addClass('d-none');
+        }
 
-            const item = $(`
-                <a href="#" class="yd-media-item ${isActive ? 'active' : ''}"
-                   data-id="${video.id}">
-                    <div class="d-flex w-100 align-items-center">
-                        <div class="me-3">
-                            <div class="yd-media-thumb yd-media-thumb--video">
-                                <i class="bi bi-camera-video"></i>
-                            </div>
-                        </div>
-                        <div class="flex-grow-1 min-width-0">
-                            <h6 class="yd-media-title text-truncate">${highlightText(video.title || video.name, searchTerm)}</h6>
-                            <div class="yd-media-meta">
-                                <span class="me-3"><i class="bi bi-hdd me-1"></i>${formatFileSize(video.filesize)}</span>
-                                <span class="me-3"><i class="bi bi-aspect-ratio me-1"></i>${video.resolution || '-'}</span>
-                                <span><i class="bi bi-clock me-1"></i>${formatDuration(video.duration)}</span>
-                            </div>
-                            <div class="yd-media-path text-truncate font-monospace mt-1" title="${escapeHtml(video.path || '')}">
-                                <i class="bi bi-folder2-open me-1"></i><span class="yd-media-path__text">${escapeHtml(video.path || '(sem caminho registrado)')}</span>
-                                ${video.path ? `<button type="button" class="btn btn-link p-0 ms-1 align-baseline copy-path-btn" data-path="${escapeHtml(video.path)}" title="Copiar caminho"><i class="bi bi-clipboard"></i></button>` : ''}
-                            </div>
-                        </div>
-                        <div class="ms-2 yd-action-group">
-                            ${statusBadge}
-                            <button class="btn btn-sm btn-danger yd-action-btn play-video-btn" data-id="${video.id}"
-                                    ${video.download_status !== 'ready' ? 'disabled' : ''} title="Reproduzir">
-                                <i class="bi bi-play-fill"></i>
-                            </button>
-                            <button class="btn btn-sm btn-outline-danger yd-action-btn delete-video-btn" data-id="${video.id}" title="Excluir">
-                                <i class="bi bi-trash"></i>
-                            </button>
+        if (hasAvulsos) {
+            $avulsosSection.removeClass('d-none');
+            $avulsosHeading.toggleClass('d-none', !hasCollections);
+            shownAvulsos.forEach((video) => appendVideoRow(container, video, term));
+        } else {
+            $avulsosHeading.addClass('d-none');
+            $avulsosSection.addClass('d-none');
+        }
+    }
+
+    function appendVideoRow(container, video, searchTerm) {
+        const isActive = video.id === currentVideoId;
+        const statusBadge = getStatusBadge(video.download_status, video.id);
+
+        const item = $(`
+            <a href="#" class="yd-media-item ${isActive ? 'active' : ''}"
+               data-id="${video.id}">
+                <div class="d-flex w-100 align-items-center">
+                    <div class="me-3">
+                        <div class="yd-media-thumb yd-media-thumb--video">
+                            <i class="bi bi-camera-video"></i>
                         </div>
                     </div>
-                </a>
-            `);
+                    <div class="flex-grow-1 min-width-0">
+                        <h6 class="yd-media-title text-truncate">${highlightText(video.title || video.name, searchTerm)}</h6>
+                        <div class="yd-media-meta">
+                            <span class="me-3"><i class="bi bi-hdd me-1"></i>${formatFileSize(video.filesize)}</span>
+                            <span class="me-3"><i class="bi bi-aspect-ratio me-1"></i>${video.resolution || '-'}</span>
+                            <span><i class="bi bi-clock me-1"></i>${formatDuration(video.duration)}</span>
+                        </div>
+                        <div class="yd-media-path text-truncate font-monospace mt-1" title="${escapeHtml(video.path || '')}">
+                            <i class="bi bi-folder2-open me-1"></i><span class="yd-media-path__text">${escapeHtml(video.path || '(sem caminho registrado)')}</span>
+                            ${video.path ? `<button type="button" class="btn btn-link p-0 ms-1 align-baseline copy-path-btn" data-path="${escapeHtml(video.path)}" title="Copiar caminho"><i class="bi bi-clipboard"></i></button>` : ''}
+                        </div>
+                    </div>
+                    <div class="ms-2 yd-action-group">
+                        ${statusBadge}
+                        <button class="btn btn-sm btn-danger yd-action-btn play-video-btn" data-id="${video.id}"
+                                ${video.download_status !== 'ready' ? 'disabled' : ''} title="Reproduzir">
+                            <i class="bi bi-play-fill"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger yd-action-btn delete-video-btn" data-id="${video.id}" title="Excluir">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            </a>
+        `);
 
-            item.find('.play-video-btn').on('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (video.download_status === 'ready') {
-                    playVideo(video);
-                }
-            });
-
-            item.find('.delete-video-btn').on('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                confirmDeleteVideo(video);
-            });
-
-            item.find('.copy-path-btn').on('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                copyPathToClipboard(video.path);
-            });
-
-            item.on('click', (e) => {
-                e.preventDefault();
-                if (video.download_status === 'ready') {
-                    playVideo(video);
-                }
-            });
-
-            container.append(item);
+        item.find('.play-video-btn').on('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (video.download_status === 'ready') {
+                playVideo(video);
+            }
         });
+
+        item.find('.delete-video-btn').on('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            confirmDeleteVideo(video);
+        });
+
+        item.find('.copy-path-btn').on('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            copyPathToClipboard(video.path);
+        });
+
+        item.on('click', (e) => {
+            e.preventDefault();
+            if (video.download_status === 'ready') {
+                playVideo(video);
+            }
+        });
+
+        container.append(item);
     }
 
     async function playVideo(video) {
@@ -603,6 +740,8 @@ $(document).ready(function() {
             // Update active state in list
             $('.yd-media-item').removeClass('active');
             $(`.yd-media-item[data-id="${video.id}"]`).addClass('active');
+            $('.yd-collection-episode').removeClass('is-playing');
+            $(`.yd-collection-episode[data-id="${video.id}"]`).addClass('is-playing');
 
             // Show loading overlay
             $('#videoLoadingOverlay').removeClass('d-none').addClass('d-flex');
@@ -641,6 +780,262 @@ $(document).ready(function() {
             $('#videoLoadingOverlay').removeClass('d-flex').addClass('d-none');
             showToast('Erro ao reproduzir vídeo', 'error');
         }
+    }
+
+    function switchToVideosTab() {
+        const tab = document.getElementById('video-tab');
+        if (tab) {
+            bootstrap.Tab.getOrCreateInstance(tab).show();
+        }
+    }
+
+    function showVideosLibraryView() {
+        collectionOpenOnVideos = false;
+        $('#videosCollectionView').addClass('d-none');
+        $('#videosLibraryView').removeClass('d-none');
+    }
+
+    function showVideosCollectionView() {
+        collectionOpenOnVideos = true;
+        $('#videosLibraryView').addClass('d-none');
+        $('#videosCollectionView').removeClass('d-none');
+    }
+
+    function showVideosCollectionLoading() {
+        showVideosCollectionView();
+        $('#videosCollectionChrome').html(`
+            <div class="yd-empty-state">
+                <div class="spinner-border text-danger mb-3" role="status">
+                    <span class="visually-hidden">Carregando...</span>
+                </div>
+                <p class="mb-0">Carregando coleção...</p>
+            </div>
+        `);
+    }
+
+    function firstReadyCollectionVideo(videos) {
+        return (videos || []).find((v) => v.download_status === 'ready') || null;
+    }
+
+    function playFirstReadyCollectionEpisode() {
+        const ready = firstReadyCollectionVideo(
+            currentCollection && currentCollection.videos
+        );
+        if (ready) {
+            playVideo(ready);
+        }
+    }
+
+    function playCollectionEpisode(video, fromFolders) {
+        if (!video || video.download_status !== 'ready') {
+            return;
+        }
+        const folderId = currentCollection && currentCollection.folder
+            ? currentCollection.folder.id
+            : null;
+        if (fromFolders && folderId) {
+            pendingCollectionPlay = { folderId, videoId: video.id };
+            showVideosCollectionLoading();
+            switchToVideosTab();
+            return;
+        }
+        playVideo(video);
+    }
+
+    async function openCollectionById(folderId, opts = {}) {
+        const { autoplay = false, playVideoId = null, mount = 'videos' } = opts;
+        if (!authToken) {
+            await authenticate();
+            return;
+        }
+        if (mount === 'videos') {
+            showVideosCollectionLoading();
+        }
+        try {
+            const folder = await $.ajax({
+                url: `${API_BASE_URL}/folders/${folderId}`,
+                method: 'GET',
+                headers: getAuthHeaders(),
+            });
+            if ((folder.kind || '') !== 'playlist') {
+                if (mount === 'videos') {
+                    showToast('Erro ao abrir coleção', 'error');
+                    showVideosLibraryView();
+                }
+                return;
+            }
+            currentCollection = {
+                folder,
+                videos: folder.videos || [],
+            };
+            if (mount === 'videos') {
+                renderCollectionChrome(
+                    $('#videosCollectionChrome'),
+                    currentCollection,
+                    { context: 'videos' }
+                );
+                showVideosCollectionView();
+            }
+            if (playVideoId) {
+                const episode = currentCollection.videos.find((v) => v.id === playVideoId);
+                if (episode) playVideo(episode);
+            } else if (autoplay) {
+                playFirstReadyCollectionEpisode();
+            }
+        } catch (error) {
+            console.error('Error opening collection:', error);
+            if (error.status === 401) {
+                authenticate();
+                return;
+            }
+            if (mount === 'videos') {
+                showToast('Erro ao abrir coleção', 'error');
+                showVideosLibraryView();
+            }
+        }
+    }
+
+    async function refreshOpenCollectionEpisodes() {
+        if (!currentCollection || !currentCollection.folder) return;
+        try {
+            const folder = await $.ajax({
+                url: `${API_BASE_URL}/folders/${currentCollection.folder.id}`,
+                method: 'GET',
+                headers: getAuthHeaders(),
+            });
+            currentCollection = {
+                folder,
+                videos: folder.videos || [],
+            };
+            if (collectionOpenOnVideos) {
+                renderCollectionChrome(
+                    $('#videosCollectionChrome'),
+                    currentCollection,
+                    { context: 'videos' }
+                );
+            }
+            const pathFolder = folderPath[folderPath.length - 1];
+            if (pathFolder && pathFolder.kind === 'playlist' && pathFolder.id === folder.id) {
+                renderCollectionChrome(
+                    $('#folderItemList'),
+                    currentCollection,
+                    { context: 'folders' }
+                );
+                $('#folderItemCount').text(videoCountLabel(currentCollection.videos.length));
+            }
+        } catch (error) {
+            console.error('Error refreshing collection:', error);
+        }
+    }
+
+    function renderCollectionChrome($container, collection, opts = {}) {
+        const { context = 'videos', error = false, onRetry = null } = opts;
+        const fromFolders = context === 'folders';
+        $container.empty();
+
+        if (error) {
+            $container.html(`
+                <div class="alert alert-danger d-flex align-items-center justify-content-between mb-0" role="alert">
+                    <span>Não foi possível abrir a coleção.</span>
+                    <button type="button" class="btn btn-sm btn-outline-danger js-collection-retry">Tentar novamente</button>
+                </div>
+            `);
+            $container.find('.js-collection-retry').on('click', () => {
+                if (typeof onRetry === 'function') onRetry();
+            });
+            return;
+        }
+
+        const folder = collection.folder || {};
+        const videos = collection.videos || [];
+        const title = folder.name || 'Coleção';
+        const cover = collectionCoverUrl(folder, videos);
+        const readyCount = videos.filter((v) => v.download_status === 'ready').length;
+        const n = videos.length;
+        let meta = videoCountLabel(n);
+        if (n > 0 && readyCount < n) {
+            meta += ` · ${readyCount} pronto${readyCount === 1 ? '' : 's'}`;
+        }
+        const hasReady = readyCount > 0;
+        const playDisabledAttrs = hasReady
+            ? ''
+            : 'disabled aria-disabled="true" title="Nenhum vídeo pronto ainda" aria-label="Nenhum vídeo pronto ainda"';
+
+        const hero = $(`
+            <div class="yd-collection-hero card mb-3 overflow-hidden">
+                <div class="yd-collection-hero__backdrop" aria-hidden="true"></div>
+                <div class="card-body yd-collection-hero__body">
+                    <div class="d-flex flex-column flex-md-row gap-4 align-items-center align-items-md-start">
+                        <div class="yd-collection-cover yd-collection-cover--lg"></div>
+                        <div class="flex-grow-1 text-center text-md-start min-width-0 w-100">
+                            <p class="text-uppercase small text-secondary mb-1">Coleção</p>
+                            <h3 class="yd-collection-title text-truncate mb-1" title="${escapeHtml(title)}">${escapeHtml(title)}</h3>
+                            <p class="text-secondary small mb-3">${escapeHtml(meta)}</p>
+                            <div class="d-flex flex-wrap gap-2 justify-content-center justify-content-md-start">
+                                <button type="button" class="btn btn-danger js-collection-play" ${playDisabledAttrs}>
+                                    <i class="bi bi-play-fill me-1"></i>Reproduzir
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `);
+        setCollectionCover(hero.find('.yd-collection-cover'), cover, title);
+        if (cover) {
+            hero.find('.yd-collection-hero__backdrop').css('background-image', `url("${cover}")`);
+        }
+        hero.find('.js-collection-play').on('click', () => {
+            playCollectionEpisode(firstReadyCollectionVideo(videos), fromFolders);
+        });
+        $container.append(hero);
+
+        const listCard = $('<div class="card"></div>');
+        const list = $('<div class="list-group list-group-flush yd-scroll-container"></div>');
+        if (!videos.length) {
+            list.html(`
+                <div class="yd-empty-state">
+                    <i class="bi bi-collection-play yd-empty-state__icon"></i>
+                    <p class="yd-empty-state__title">Nenhum vídeo nesta coleção</p>
+                </div>
+            `);
+        } else {
+            videos.forEach((video) => {
+                const ready = video.download_status === 'ready';
+                const playing = video.id === currentVideoId;
+                const num = video.track_number != null ? video.track_number : '·';
+                const episodeTitle = video.title || video.name || '';
+                const statusBadge = getStatusBadge(video.download_status, video.id);
+                const row = $(`
+                    <div class="yd-collection-episode ${ready ? 'is-ready' : ''} ${playing ? 'is-playing' : ''}"
+                         data-id="${escapeHtml(video.id)}">
+                        <span class="yd-collection-episode__num">${escapeHtml(String(num))}</span>
+                        <div class="yd-collection-episode__meta">
+                            <span class="yd-collection-episode__title" title="${escapeHtml(episodeTitle)}">${escapeHtml(episodeTitle)}</span>
+                        </div>
+                        <span class="yd-collection-episode__duration">${formatDuration(video.duration)}</span>
+                        ${statusBadge}
+                        <button type="button"
+                                class="btn btn-sm btn-outline-danger yd-action-btn js-collection-episode-play"
+                                aria-label="Reproduzir ${escapeHtml(episodeTitle)}"
+                                ${ready ? '' : 'disabled'}>
+                            <i class="bi bi-play-fill"></i>
+                        </button>
+                    </div>
+                `);
+                row.find('.js-collection-episode-play').on('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    playCollectionEpisode(video, fromFolders);
+                });
+                row.on('click', () => {
+                    if (ready) playCollectionEpisode(video, fromFolders);
+                });
+                list.append(row);
+            });
+        }
+        listCard.append(list);
+        $container.append(listCard);
     }
 
     // ========================================
@@ -840,6 +1235,11 @@ $(document).ready(function() {
             return;
         }
 
+        if (isPlaylistUrl(url)) {
+            await downloadVideoPlaylist(url, resolution);
+            return;
+        }
+
         try {
             showLoading('Iniciando download de vídeo...');
 
@@ -872,6 +1272,48 @@ $(document).ready(function() {
             hideLoading();
             console.error('Error downloading video:', error);
             const message = error.responseJSON?.detail || 'Erro ao fazer download';
+            showToast(message, 'error');
+        }
+    }
+
+    async function downloadVideoPlaylist(url, resolution) {
+        try {
+            showLoading('Enfileirando playlist de vídeo...');
+
+            // PlaylistDownloadRequest (app/models/audio.py): url, resolution.
+            // skip_existing tem default no backend (True) e não há controle na UI — omitido.
+            const response = await $.ajax({
+                url: `${API_BASE_URL}/video/playlist`,
+                method: 'POST',
+                headers: getAuthHeaders(),
+                data: JSON.stringify({
+                    url: url,
+                    resolution: resolution
+                })
+            });
+
+            hideLoading();
+
+            const tasks = response.tasks || [];
+            const queued = response.queued_items || 0;
+
+            tasks.forEach((task) => {
+                if (task.skipped || !task.item_id) {
+                    return;
+                }
+                addActiveDownload(task.item_id, 'video', task.title || 'Vídeo');
+                pollDownloadStatus(task.item_id, 'video');
+            });
+
+            showToast(`Playlist de vídeo enfileirada para download (${queued} itens)`, 'success');
+            $('#videoUrl').val('');
+            loadVideoList();
+            loadFolders(currentFolderId);
+
+        } catch (error) {
+            hideLoading();
+            console.error('Error downloading video playlist:', error);
+            const message = error.responseJSON?.detail || 'Erro ao enfileirar playlist';
             showToast(message, 'error');
         }
     }
@@ -999,8 +1441,13 @@ $(document).ready(function() {
                     activeDownloads.delete(id);
                     updateProgressUI();
 
-                    if (type === 'video') loadVideoList();
-                    else loadAudioList();
+                    if (type === 'video') {
+                        loadVideoList();
+                        const pathFolder = folderPath[folderPath.length - 1];
+                        if (pathFolder && pathFolder.kind === 'playlist') {
+                            loadFolderItems(pathFolder.id);
+                        }
+                    } else loadAudioList();
                     return { status: 'ready', id };
                 }
 
@@ -2903,6 +3350,42 @@ $(document).ready(function() {
     async function loadFolderItems(folderId) {
         if (!authToken) return;
 
+        const selected = folderPath[folderPath.length - 1];
+        const isCollection = selected && selected.id === folderId && selected.kind === 'playlist';
+
+        if (isCollection) {
+            const container = $('#folderItemList');
+            container.html(`
+                <div class="yd-empty-state">
+                    <div class="spinner-border text-danger mb-3" role="status">
+                        <span class="visually-hidden">Carregando...</span>
+                    </div>
+                    <p class="mb-0">Carregando coleção...</p>
+                </div>
+            `);
+            try {
+                const folder = await $.ajax({
+                    url: `${API_BASE_URL}/folders/${folderId}`,
+                    method: 'GET',
+                    headers: getAuthHeaders(),
+                });
+                currentCollection = {
+                    folder,
+                    videos: folder.videos || [],
+                };
+                renderCollectionChrome(container, currentCollection, { context: 'folders' });
+                $('#folderItemCount').text(videoCountLabel(currentCollection.videos.length));
+            } catch (error) {
+                console.error('Error loading folder collection:', error);
+                renderCollectionChrome($('#folderItemList'), { folder: selected, videos: [] }, {
+                    context: 'folders',
+                    error: true,
+                    onRetry: () => loadFolderItems(folderId),
+                });
+            }
+            return;
+        }
+
         try {
             const response = await $.ajax({
                 url: `${API_BASE_URL}/folders/${folderId}/items`,
@@ -3652,6 +4135,12 @@ $(document).ready(function() {
         showToast('Lista de vídeos atualizada', 'info');
     });
 
+    $('#collectionBackBtn').on('click', () => {
+        showVideosLibraryView();
+        const searchTerm = $('#searchVideoInput').val() || '';
+        renderVideoList(currentVideos, searchTerm);
+    });
+
     // Search inputs
     function syncClearButton(inputEl) {
         const $input = $(inputEl);
@@ -3675,7 +4164,10 @@ $(document).ready(function() {
         const searchTerm = $(this).val();
         syncClearButton(this);
         videoSearchTimeout = setTimeout(() => {
-            filterList(currentVideos, searchTerm, renderVideoList);
+            if (collectionOpenOnVideos) {
+                showVideosLibraryView();
+            }
+            renderVideoList(currentVideos, searchTerm);
         }, 300);
     });
 
@@ -3878,7 +4370,17 @@ $(document).ready(function() {
         if (target === '#audio-pane') {
             loadAudioList();
         } else if (target === '#video-pane') {
-            loadVideoList();
+            loadVideoList().then(() => {
+                if (pendingCollectionPlay) {
+                    const pending = pendingCollectionPlay;
+                    pendingCollectionPlay = null;
+                    openCollectionById(pending.folderId, {
+                        mount: 'videos',
+                        playVideoId: pending.videoId,
+                        autoplay: pending.autoplay,
+                    });
+                }
+            });
         } else if (target === '#transcription-pane') {
             loadTranscriptionMediaList();
         } else if (target === '#folders-pane') {

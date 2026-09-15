@@ -11,6 +11,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     CheckConstraint,
+    inspect as sa_inspect,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -281,6 +282,7 @@ class Video(Base):
         String(100), ForeignKey("folders.id"), nullable=True, index=True
     )
     folder: Mapped[Optional["Folder"]] = relationship("Folder", back_populates="videos")
+    track_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # Metadados
     source: Mapped[str] = mapped_column(
@@ -294,7 +296,15 @@ class Video(Base):
     )
 
     def to_dict(self) -> dict:
-        """Converte o modelo para dicionário"""
+        """Converte o modelo para dicionário. Never lazy-loads ``folder``."""
+        folder_name = None
+        folder_kind = None
+        folder_cover_url = None
+        folder = sa_inspect(self).dict.get("folder")
+        if folder is not None:
+            folder_name = folder.name
+            folder_kind = folder.kind or "folder"
+            folder_cover_url = folder.cover_url
         return {
             "id": self.id,
             "title": self.title,
@@ -316,6 +326,10 @@ class Video(Base):
             "transcription_status": self.transcription_status,
             "transcription_path": self.transcription_path,
             "folder_id": self.folder_id,
+            "track_number": self.track_number,
+            "folder_name": folder_name,
+            "folder_kind": folder_kind,
+            "folder_cover_url": folder_cover_url,
             "source": self.source,
             "created_date": self.created_date.isoformat()
             if self.created_date

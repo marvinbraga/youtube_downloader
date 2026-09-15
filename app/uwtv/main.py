@@ -1268,6 +1268,17 @@ async def download_video(
     token_data: dict = Depends(verify_token),
 ):
     """Faz o download de um vídeo do YouTube"""
+    # Guarda fora do try: HTTPException é subclasse de Exception e seria
+    # reembrulhada como 500 pelo handler abaixo se levantada dentro dele.
+    if is_playlist_url(str(request.url)):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "URL de playlist detectada. Use o endpoint POST /video/playlist "
+                "para baixar playlists."
+            ),
+        )
+
     try:
         logger.info(
             f"Solicitação de download de vídeo: {request.url} (resolução: {request.resolution})"
@@ -1369,7 +1380,7 @@ async def download_video_playlist(
         skipped_count = 0
         failed_count = 0
 
-        for entry in entries:
+        for track_number, entry in enumerate(entries, start=1):
             video_id = entry["id"]
             title = entry["title"]
             watch_url = entry["url"]
@@ -1380,10 +1391,12 @@ async def download_video_playlist(
             ) not in ("error", "")
 
             if already_exists and request.skip_existing:
-                if existing.get("folder_id") is None:
-                    async with get_db_context() as session:
-                        repo = VideoRepository(session)
-                        await repo.update_folder(existing["id"], folder_id)
+                async with get_db_context() as session:
+                    repo = VideoRepository(session)
+                    update_kwargs = {"track_number": track_number}
+                    if existing.get("folder_id") is None:
+                        update_kwargs["folder_id"] = folder_id
+                    await repo.update(existing["id"], **update_kwargs)
 
                 tasks.append(
                     PlaylistTaskItem(
@@ -1425,7 +1438,11 @@ async def download_video_playlist(
             try:
                 async with get_db_context() as session:
                     repo = VideoRepository(session)
-                    await repo.update_folder(registered_id, folder_id)
+                    await repo.update(
+                        registered_id,
+                        folder_id=folder_id,
+                        track_number=track_number,
+                    )
 
                 tasks.append(
                     PlaylistTaskItem(

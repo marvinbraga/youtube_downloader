@@ -219,6 +219,55 @@ async def _apply_schema_migrations(conn) -> None:
     await _add_column_if_missing(conn, "audios", "track_number", "INTEGER", audio_cols)
     await _add_column_if_missing(conn, "audios", "artist", "VARCHAR(500)", audio_cols)
 
+    # --- videos.track_number (playlist collection order, 1-based) ---
+    result = await conn.exec_driver_sql("PRAGMA table_info(videos)")
+    video_cols = {row[1] for row in result.fetchall()}
+    await _add_column_if_missing(conn, "videos", "track_number", "INTEGER", video_cols)
+    await _backfill_playlist_video_track_numbers(conn)
+
+
+async def _backfill_playlist_video_track_numbers(conn) -> None:
+    """Assign 1-based track_number to unnumbered videos in kind=playlist folders.
+
+    Order is created_date ASC, then id ASC (registration order). Existing
+    track_number values are left unchanged. Live folders such as
+    Documentários Importantes get sequential episode numbers on startup.
+    """
+    result = await conn.exec_driver_sql(
+        """
+        SELECT v.folder_id, v.id
+        FROM videos v
+        INNER JOIN folders f ON f.id = v.folder_id
+        WHERE f.kind = 'playlist'
+          AND v.track_number IS NULL
+        ORDER BY v.folder_id, v.created_date ASC, v.id ASC
+        """
+    )
+    rows = result.fetchall()
+    if not rows:
+        return
+
+    from sqlalchemy import text
+
+    current_folder = None
+    n = 0
+    updated = 0
+    for folder_id, video_id in rows:
+        if folder_id != current_folder:
+            current_folder = folder_id
+            n = 0
+        n += 1
+        await conn.execute(
+            text("UPDATE videos SET track_number = :n WHERE id = :id"),
+            {"n": n, "id": video_id},
+        )
+        updated += 1
+    if updated:
+        logger.info(
+            "Video playlist track_number backfill: numbered {} video(s)",
+            updated,
+        )
+
 
 async def recompute_album_artists_from_tracks() -> None:
     """Set each album folder.artist from majority track artists, else NULL.

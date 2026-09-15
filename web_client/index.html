@@ -281,31 +281,47 @@
                     </div>
                 </div>
 
-                <!-- Video Controls -->
-                <div class="d-flex gap-2 mb-3">
-                    <div class="input-group flex-grow-1 yd-search-group">
-                        <span class="input-group-text"><i class="bi bi-search"></i></span>
-                        <input type="text" class="form-control yd-search-input" id="searchVideoInput"
-                               placeholder="Buscar vídeos por título, palavras-chave ou URL... (tecle / para focar)">
-                        <button type="button" class="btn btn-outline-secondary yd-search-clear" data-target="#searchVideoInput" title="Limpar busca" hidden>
-                            <i class="bi bi-x-lg"></i>
+                <div id="videosLibraryView">
+                    <!-- Video Controls -->
+                    <div class="d-flex gap-2 mb-3">
+                        <div class="input-group flex-grow-1 yd-search-group">
+                            <span class="input-group-text"><i class="bi bi-search"></i></span>
+                            <input type="text" class="form-control yd-search-input" id="searchVideoInput"
+                                   placeholder="Buscar vídeos por título, palavras-chave ou URL... (tecle / para focar)">
+                            <button type="button" class="btn btn-outline-secondary yd-search-clear" data-target="#searchVideoInput" title="Limpar busca" hidden>
+                                <i class="bi bi-x-lg"></i>
+                            </button>
+                        </div>
+                        <button class="btn btn-outline-secondary" id="refreshVideoBtn" title="Atualizar lista">
+                            <i class="bi bi-arrow-clockwise"></i>
                         </button>
                     </div>
-                    <button class="btn btn-outline-secondary" id="refreshVideoBtn" title="Atualizar lista">
-                        <i class="bi bi-arrow-clockwise"></i>
-                    </button>
-                </div>
 
-                <!-- Video List -->
-                <div class="card">
-                    <div class="list-group list-group-flush yd-scroll-container" id="videoList">
-                        <div class="yd-empty-state">
-                            <div class="spinner-border text-danger mb-3" role="status">
-                                <span class="visually-hidden">Carregando...</span>
+                    <div id="videoCollectionsSection" class="d-none mb-4">
+                        <h5 class="mb-3">Coleções</h5>
+                        <div class="yd-collection-grid" id="videoCollectionGrid"></div>
+                    </div>
+
+                    <div id="videoAvulsosSection">
+                        <h5 class="mb-3 d-none" id="videoAvulsosHeading">Avulsos</h5>
+                        <div class="card">
+                            <div class="list-group list-group-flush yd-scroll-container" id="videoList">
+                                <div class="yd-empty-state">
+                                    <div class="spinner-border text-danger mb-3" role="status">
+                                        <span class="visually-hidden">Carregando...</span>
+                                    </div>
+                                    <p class="mb-0">Carregando vídeos...</p>
+                                </div>
                             </div>
-                            <p class="mb-0">Carregando vídeos...</p>
                         </div>
                     </div>
+                </div>
+
+                <div id="videosCollectionView" class="d-none">
+                    <button type="button" class="btn btn-outline-secondary btn-sm mb-3" id="collectionBackBtn">
+                        <i class="bi bi-arrow-left me-1"></i>Voltar aos vídeos
+                    </button>
+                    <div id="videosCollectionChrome"></div>
                 </div>
             </div>
 

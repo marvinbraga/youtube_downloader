@@ -484,7 +484,7 @@
                             </div>
                         </div>
                     </div>
-                    <div class="d-flex gap-2 mb-3">
+                    <div class="yd-album-toolbar mb-3">
                         <div class="input-group flex-grow-1 yd-search-group">
                             <span class="input-group-text"><i class="bi bi-search"></i></span>
                             <input type="text" class="form-control yd-search-input" id="searchAlbumTracksInput"
@@ -492,6 +492,20 @@
                             <button type="button" class="btn btn-outline-secondary yd-search-clear" data-target="#searchAlbumTracksInput" title="Limpar busca" hidden>
                                 <i class="bi bi-x-lg"></i>
                             </button>
+                        </div>
+                        <div class="input-group yd-album-sort">
+                            <span class="input-group-text" aria-hidden="true"><i class="bi bi-sort-down"></i></span>
+                            <select class="form-select" id="albumTrackSort" aria-label="Ordenar faixas">
+                                <option value="track">Ordem da playlist</option>
+                                <option value="title-asc">Título (A–Z)</option>
+                                <option value="title-desc">Título (Z–A)</option>
+                                <option value="date-desc">Data de adição (mais recentes)</option>
+                                <option value="date-asc">Data de adição (mais antigas)</option>
+                                <option value="artist-asc">Artista (A–Z)</option>
+                                <option value="artist-desc">Artista (Z–A)</option>
+                                <option value="size-desc">Tamanho (maior)</option>
+                                <option value="size-asc">Tamanho (menor)</option>
+                            </select>
                         </div>
                     </div>
                     <div class="card">

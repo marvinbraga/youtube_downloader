@@ -2687,8 +2687,116 @@ $(document).ready(function() {
         }
     }
 
+    const ALBUM_TRACK_SORT_KEY = 'yd-album-track-sort';
+    const ALBUM_TRACK_SORTS = new Set([
+        'track',
+        'title-asc',
+        'title-desc',
+        'date-desc',
+        'date-asc',
+        'artist-asc',
+        'artist-desc',
+        'size-desc',
+        'size-asc',
+    ]);
+
+    function albumTrackSortMode() {
+        const el = document.getElementById('albumTrackSort');
+        if (el && ALBUM_TRACK_SORTS.has(el.value)) return el.value;
+        return 'track';
+    }
+
+    function restoreAlbumTrackSort() {
+        const el = document.getElementById('albumTrackSort');
+        if (!el) return;
+        let stored = null;
+        try {
+            stored = localStorage.getItem(ALBUM_TRACK_SORT_KEY);
+        } catch (e) {
+            stored = null;
+        }
+        if (stored && ALBUM_TRACK_SORTS.has(stored)) {
+            el.value = stored;
+        }
+    }
+
+    function persistAlbumTrackSort(mode) {
+        if (!ALBUM_TRACK_SORTS.has(mode)) return;
+        try {
+            localStorage.setItem(ALBUM_TRACK_SORT_KEY, mode);
+        } catch (e) {
+            /* storage unavailable */
+        }
+    }
+
+    function compareAlbumText(a, b) {
+        return String(a || '').localeCompare(String(b || ''), 'pt', {
+            sensitivity: 'base',
+            numeric: true,
+        });
+    }
+
+    function albumTrackTitle(track) {
+        return (track && (track.title || track.name)) || '';
+    }
+
+    function compareAlbumTracks(a, b, mode) {
+        const titleTie = compareAlbumText(albumTrackTitle(a), albumTrackTitle(b))
+            || String((a && a.id) || '').localeCompare(String((b && b.id) || ''));
+
+        if (mode === 'title-asc') return titleTie;
+        if (mode === 'title-desc') {
+            const flipped = compareAlbumText(albumTrackTitle(b), albumTrackTitle(a));
+            return flipped || titleTie;
+        }
+
+        if (mode === 'date-asc' || mode === 'date-desc') {
+            const ad = Date.parse(a && a.created_date);
+            const bd = Date.parse(b && b.created_date);
+            const aOk = Number.isFinite(ad);
+            const bOk = Number.isFinite(bd);
+            if (aOk && bOk && ad !== bd) {
+                return mode === 'date-asc' ? ad - bd : bd - ad;
+            }
+            if (aOk !== bOk) return aOk ? -1 : 1;
+            return titleTie;
+        }
+
+        if (mode === 'artist-asc' || mode === 'artist-desc') {
+            const aa = (a && a.artist && String(a.artist).trim()) || '';
+            const bb = (b && b.artist && String(b.artist).trim()) || '';
+            if (!aa && !bb) return titleTie;
+            if (!aa) return 1;
+            if (!bb) return -1;
+            const cmp = compareAlbumText(aa, bb);
+            if (cmp !== 0) return mode === 'artist-desc' ? -cmp : cmp;
+            return titleTie;
+        }
+
+        if (mode === 'size-asc' || mode === 'size-desc') {
+            const asize = Number(a && a.filesize);
+            const bsize = Number(b && b.filesize);
+            const aOk = Number.isFinite(asize) ? asize : 0;
+            const bOk = Number.isFinite(bsize) ? bsize : 0;
+            if (aOk !== bOk) return mode === 'size-asc' ? aOk - bOk : bOk - aOk;
+            return titleTie;
+        }
+
+        const an = a && a.track_number != null ? Number(a.track_number) : NaN;
+        const bn = b && b.track_number != null ? Number(b.track_number) : NaN;
+        const aNum = Number.isFinite(an);
+        const bNum = Number.isFinite(bn);
+        if (aNum && bNum && an !== bn) return an - bn;
+        if (aNum !== bNum) return aNum ? -1 : 1;
+        return titleTie;
+    }
+
+    function orderedAlbumTracks(tracks) {
+        return (tracks || []).slice().sort((a, b) => compareAlbumTracks(a, b, albumTrackSortMode()));
+    }
+
     function applyAlbumTrackSearch(searchTerm) {
-        const tracks = (currentAlbum && currentAlbum.tracks) || [];
+        const tracks = orderedAlbumTracks((currentAlbum && currentAlbum.tracks) || []);
         const term = (searchTerm || '').trim().toLowerCase();
         if (!term) {
             renderAlbumTrackList(tracks);
@@ -2758,12 +2866,11 @@ $(document).ready(function() {
             return;
         }
 
-        tracks.forEach((track) => {
-            // Prefer original playlist order number when available
-            const originalIdx = allTracks.findIndex(t => t.id === track.id);
-            const num = track.track_number != null
+        const sortMode = albumTrackSortMode();
+        tracks.forEach((track, index) => {
+            const num = sortMode === 'track' && track.track_number != null
                 ? track.track_number
-                : (originalIdx >= 0 ? originalIdx + 1 : 1);
+                : index + 1;
             const readyTrack = track.download_status === 'ready';
             const errorTrack = track.download_status === 'error';
             const statusLabel = readyTrack
@@ -2837,7 +2944,7 @@ $(document).ready(function() {
      */
     function buildAlbumQueue(startTrackId, opts = {}) {
         const { keepCurrentPlaying = false } = opts;
-        const tracks = (currentAlbum && currentAlbum.tracks) || [];
+        const tracks = orderedAlbumTracks((currentAlbum && currentAlbum.tracks) || []);
         const ready = tracks.filter(t => t.download_status === 'ready');
         if (!ready.length) {
             albumQueue = [];
@@ -4189,6 +4296,20 @@ $(document).ready(function() {
         albumTrackSearchTimeout = setTimeout(() => {
             applyAlbumTrackSearch(searchTerm);
         }, 300);
+    });
+
+    restoreAlbumTrackSort();
+    $('#albumTrackSort').on('change', function() {
+        const mode = ALBUM_TRACK_SORTS.has(this.value) ? this.value : 'track';
+        this.value = mode;
+        persistAlbumTrackSort(mode);
+        const currentId = queueIndex >= 0 && albumQueue[queueIndex]
+            ? albumQueue[queueIndex].id
+            : null;
+        if (currentId) {
+            buildAlbumQueue(currentId, { keepCurrentPlaying: albumShuffle });
+        }
+        applyAlbumTrackSearch($('#searchAlbumTracksInput').val() || '');
     });
 
     // Click-to-play a partir do item de Transcrições.
